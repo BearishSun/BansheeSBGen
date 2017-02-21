@@ -72,10 +72,12 @@ struct CSTypeInfo
 	BuiltinType::Kind underlyingType; // For enums
 };
 
-struct ParamInfo
+struct VarInfo
 {
 	std::string name;
 	std::string type;
+	
+	std::string defaultValue;
 	int flags;
 };
 
@@ -91,7 +93,7 @@ struct MethodInfo
 	std::string scriptName;
 
 	ReturnInfo returnInfo;
-	std::vector<ParamInfo> paramInfos;
+	std::vector<VarInfo> paramInfos;
 	std::string documentation;
 };
 
@@ -110,10 +112,26 @@ struct PropertyInfo
 struct ClassInfo
 {
 	std::string name;
+	CSVisibility visibility;
 
 	std::vector<PropertyInfo> propertyInfos;
 	std::vector<MethodInfo> methodInfos;
 	std::string documentation;
+};
+
+struct SimpleConstructorInfo
+{
+	std::vector<VarInfo> params;
+	std::unordered_map<std::string, std::string> fieldAssignments;
+};
+
+struct SimpleTypeInfo
+{
+	std::string name;
+	CSVisibility visibility;
+
+	std::vector<SimpleConstructorInfo> ctors;
+	std::vector<VarInfo> fields;
 };
 
 struct PlainTypeInfos
@@ -124,6 +142,7 @@ struct PlainTypeInfos
 struct FileInfo
 {
 	std::vector<ClassInfo> classInfos;
+	std::vector<SimpleTypeInfo> simpleTypeInfos;
 	std::vector<PlainTypeInfos> plainTypeInfos;
 };
 
@@ -288,7 +307,7 @@ public:
 		return false;
 	}
 
-	bool parseType(QualType type, bool allowComplex, bool allowRefs, std::string& outType, int& typeFlags)
+	bool parseType(QualType type, std::string& outType, int& typeFlags)
 	{
 		typeFlags = 0;
 
@@ -327,12 +346,6 @@ public:
 
 				if (sourceTypeName == "vector" && nsName == "std")
 				{
-					if (!allowComplex)
-					{
-						errs() << "Complex types not allowed in this context.";
-						return false;
-					}
-
 					realType = specType->getArg(0).getAsType();;
 					typeFlags |= (int)TypeFlags::Array;
 				}
@@ -344,12 +357,6 @@ public:
 		}
 		else
 			realType = type;
-
-		if(((typeFlags & (int)TypeFlags::Output) != 0) && !allowRefs)
-		{
-			errs() << "Type used as output, but outputs are not allowed in this context.";
-			return false;
-		}
 
 		if(realType->isPointerType())
 		{
@@ -419,15 +426,7 @@ public:
 					}
 
 					if(isValid)
-					{
-						if (!allowComplex)
-						{
-							errs() << "Complex types not allowed in this context.";
-							return false;
-						}
-
 						return true;
-					}
 				}
 			}
 
@@ -809,18 +808,10 @@ public:
 
 		if ((exportFlags & (int)ExportFlags::Plain) != 0)
 		{
-			std::stringstream output;
-
-			if (visibility == CSVisibility::Internal)
-				output << "internal ";
-			else if (visibility == CSVisibility::Public)
-				output << "public ";
-
-			output << "struct " << className.str();
-
-			output << std::endl;
-			output << "{" << std::endl;
-
+			SimpleTypeInfo simpleTypeInfo;
+			simpleTypeInfo.name = sourceClassName;
+			simpleTypeInfo.visibility = visibility;
+			
 			std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
 
 			// Parse non-default constructors & determine default values for fields
@@ -829,32 +820,28 @@ public:
 				auto ctorIter = decl->ctor_begin();
 				while(ctorIter != decl->ctor_end())
 				{
+					SimpleConstructorInfo ctorInfo;
 					CXXConstructorDecl* ctorDecl = *ctorIter;
-
-					output << "\tpublic " << className.str() << "(";
 
 					bool skippedDefaultArgument = false;
 					for(auto I = ctorDecl->param_begin(); I != ctorDecl->param_end(); ++I)
 					{
 						ParmVarDecl* paramDecl = *I;
 
+						VarInfo paramInfo;
+						paramInfo.name = paramDecl->getName();						
+
 						std::string typeName;
-						if(!parseType(paramDecl->getType(), false, false, typeName))
+						if(!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
 						{
 							errs() << "Unable to detect type for constructor parameter \"" << paramDecl->getName().str() 
 								<< "\". Skipping.";
 							continue;
 						}
 
-						output << typeName << " " << paramDecl->getName().str();
 						if(paramDecl->hasDefaultArg() && !skippedDefaultArgument)
 						{
-							std::string exprValue;
-							if(evaluateExpression(paramDecl->getDefaultArg(), exprValue))
-							{
-								output << " = " << exprValue;
-							}
-							else
+							if(!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
 							{
 								errs() << "Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
 									<< "argument that cannot be constantly evaluated, ignoring it.";
@@ -862,12 +849,8 @@ public:
 							}
 						}
 
-						if ((I + 1) != ctorDecl->param_end())
-							output << ", ";
+						ctorInfo.params.push_back(paramInfo);
 					}
-
-					output << ")" << std::endl;
-					output << "\t{" << std::endl;
 
 					std::unordered_map<FieldDecl*, ParmVarDecl*> assignments;
 
@@ -957,12 +940,10 @@ public:
 						std::string fieldName = iterFind->first->getName().str();
 						std::string paramName = iterFind->second->getName().str();
 
-						output << "\t\t" << fieldName << " = " << paramName << ";" << std::endl;
+						ctorInfo.fieldAssignments[fieldName] = paramName;
 					}
 
-					output << "\t}" << std::endl;
-					output << std::endl;
-
+					simpleTypeInfo.ctors.push_back(ctorInfo);
 					++ctorIter;
 				}
 			}
@@ -970,12 +951,12 @@ public:
 			for(auto I = decl->field_begin(); I != decl->field_end(); ++I)
 			{
 				FieldDecl* fieldDecl = *I;
-				
-				std::string evalValue;
+				VarInfo fieldInfo;
+				fieldInfo.name = fieldDecl->getName();
 
 				auto iterFind = defaultFieldValues.find(fieldDecl);
 				if(iterFind != defaultFieldValues.end())
-					evalValue = iterFind->second;
+					fieldInfo.defaultValue = iterFind->second;
 
 				if(fieldDecl->hasInClassInitializer())
 				{
@@ -983,42 +964,28 @@ public:
 
 					std::string inClassInitValue;
 					if (evaluateExpression(initExpr, inClassInitValue))
-						evalValue = inClassInitValue;
+						fieldInfo.defaultValue = inClassInitValue;
 				}
 
 				std::string typeName;
-				if(!parseType(fieldDecl->getType(), false, false, typeName))
+				if(!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags))
 				{
 					errs() << "Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \"" 
 						   << sourceClassName << "\". Skipping field.";
 					continue;
 				}
-
-				output << "\tpublic ";
-				output << typeName << " ";
-				output << fieldDecl->getName().str();
-
-				if (!evalValue.empty())
-					output << " = " << evalValue;
-
-				output << ";" << std::endl;
 			}
-
-			output << "}" << std::endl;
 
 			cppToCsTypeMap[sourceClassName] = CSTypeInfo(className, ParsedType::Struct);
 
 			FileInfo& fileInfo = outputFileInfos[fileName.str()];
-
-			PlainTypeInfos simpleEntry;
-			simpleEntry.code = output.str();
-
-			fileInfo.plainTypeInfos.push_back(simpleEntry);
+			fileInfo.simpleTypeInfos.push_back(simpleTypeInfo);
 		}
 		else
 		{
 			ClassInfo classInfo;
 			classInfo.name = sourceClassName;
+			classInfo.visibility = visibility;
 			
 			ParsedType classType = getObjectType(decl);
 			cppToCsTypeMap[sourceClassName] = CSTypeInfo(className, classType);
@@ -1052,7 +1019,7 @@ public:
 					if (!returnType->isVoidType())
 					{
 						ReturnInfo returnInfo;
-						if (!parseType(returnType, true, false, returnInfo.type, returnInfo.flags))
+						if (!parseType(returnType, returnInfo.type, returnInfo.flags))
 						{
 							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.";
 							continue;
@@ -1067,10 +1034,10 @@ public:
 						ParmVarDecl* paramDecl = *J;
 						QualType paramType = paramDecl->getType();
 
-						ParamInfo paramInfo;
+						VarInfo paramInfo;
 						paramInfo.name = paramDecl->getName();
 
-						if (!parseType(paramType, true, true, paramInfo.type, paramInfo.flags))
+						if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 						{
 							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.";
 							invalidParam = true;
@@ -1111,7 +1078,7 @@ public:
 							continue;
 						}
 
-						if (!parseType(returnType, true, false, propertyInfo.type, propertyInfo.flags))
+						if (!parseType(returnType, propertyInfo.type, propertyInfo.flags))
 						{
 							errs() << "Unable to parse property type for property \"" << propertyInfo.name << "\". Skipping property.";
 							continue;
@@ -1137,7 +1104,7 @@ public:
 						}
 
 						ParmVarDecl* paramDecl = methodDecl->getParamDecl(0);
-						if (!parseType(paramDecl->getType(), true, false, propertyInfo.type, propertyInfo.flags))
+						if (!parseType(paramDecl->getType(), propertyInfo.type, propertyInfo.flags))
 						{
 							errs() << "Unable to parse property type for property \"" << propertyInfo.name << "\". Skipping property.";
 							continue;
@@ -1179,205 +1146,130 @@ public:
 					}
 				}
 			}
+
+			FileInfo& fileInfo = outputFileInfos[fileName.str()];
+			fileInfo.classInfos.push_back(classInfo);
 		}
 	
 		return true;
-
-
-
-		//StringRef className = decl->getName();
-
-		//std::string csFilename = className.str() + ".cs";
-		//std::ofstream csOutFile(csFilename.c_str(), std::ios::out);
-
-		//csOutFile << "class " << className.str() << " : ScriptObject " << std::endl;
-		//csOutFile << "{" << std::endl;
-
-		//auto iterMethod = decl->method_begin();
-		//while(iterMethod != decl->method_end())
-		//{
-		//	StringRef methodName = iterMethod->getName();
-
-		//	csOutFile << "\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-
-		//	std::string internalMethodName = "Internal_" + methodName.str();
-		//	std::string returnTypeName = iterMethod->getReturnType().getAsString();
-
-		//	csOutFile << "\tprivate static extern " << returnTypeName << " " << internalMethodName << "(";
-
-		//	auto iterParam = iterMethod->param_begin();
-		//	while(iterParam != iterMethod->param_end())
-		//	{
-		//		ParmVarDecl* param = *iterParam;
-
-		//		QualType type = param->getType();
-
-		//		if(type->isReferenceType())
-		//		{
-		//			const ReferenceType* refType = type->getAs<ReferenceType>();
-		//			QualType pointeeType = refType->getPointeeType();
-
-		//			if(pointeeType->isStructureOrClassType())
-		//			{
-		//				const TemplateSpecializationType* t1 = pointeeType->getAs<TemplateSpecializationType>();
-		//				//const DependentTemplateSpecializationType* t2 = pointeeType->getAs<DependentTemplateSpecializationType>();
-
-		//				if (t1 != nullptr)
-		//				{
-		//					int numArgs = t1->getNumArgs();
-		//					for(int i = 0; i < numArgs; i++)
-		//					{
-		//						QualType argType = t1->getArg(i).getAsType();
-		//						std::string typeName = argType.getAsString();
-
-		//						bool isBuiltin = argType->isBuiltinType();
-		//					}
-		//				}
-
-		//				const RecordType* recordType = pointeeType->getAs<RecordType>();
-		//				const RecordDecl* recordDecl = recordType->getDecl();
-
-		//				bool t = recordDecl->isTemplateDecl();
-		//				int tt = recordDecl->getNumTemplateParameterLists();
-
-		//				std::string identName = recordDecl->getIdentifier()->getName().str();
-		//				std::string fullName = recordDecl->getName();
-
-		//				int zzz = 0;
-		//			}
-
-		//			bool g1 = pointeeType->isDependentType();
-		//			bool g2 = pointeeType->isInstantiationDependentType();
-		//			bool a1 = pointeeType->isStructureType();
-		//		}
-		//		else if(type->isPointerType())
-		//		{
-		//			const PointerType* pointerType = type->getAs<PointerType>();
-		//		}
-		//		else
-		//		{
-		//			if(type->isBuiltinType())
-		//			{
-		//				const BuiltinType* builtinType = type->getAs<BuiltinType>();
-		//				BuiltinType::Kind kind = builtinType->getKind();
-
-		//				
-		//			}
-		//			else if(type->isClassType())
-		//			{
-		//				const RecordType* recordType = type->getAs<RecordType>();
-		//			}
-		//			else if(type->isStructureType())
-		//			{
-		//				const RecordType* recordType = type->getAs<RecordType>();
-		//			}
-		//			else if(type->isEnumeralType())
-		//			{
-		//				const EnumType* enumType = type->getAs<EnumType>();
-
-		//				// TODO
-		//			}
-		//			else if(type->isVoidType())
-		//			{
-		//				// TODO
-		//			}
-		//		}
-
-		//		bool a = type->isBuiltinType();
-		//		bool b = type->isAggregateType(); // Probably not needed
-		//		//bool c = type->isAnyComplexType();
-		//		bool d = type->isPointerType();
-		//		bool e = type->isClassType();
-		//		bool f = type->isCompoundType(); // Probably not needed
-		//		bool g = type->isDependentType(); // For templates
-		//		bool h = type->isObjectType(); // Anything not function, not void and not reference
-		//		bool i = type->isStructureType();
-		//		bool j = type->isEnumeralType();
-		//		bool k = type->isReferenceType();
-		//		bool l = type->isVoidType();
-		//		bool m = type->isVoidPointerType();
-		//		bool n = type->isNullPtrType();
-
-		//		const Type* typePtr = type.getTypePtr();
-
-		//		std::string paramTypeName = param->getType().getAsString();
-		//		std::string paramName = param->getName();
-
-		//		csOutFile << paramTypeName << " " << paramName;
-
-		//		++iterParam;
-
-		//		if (iterParam != iterMethod->param_end())
-		//			csOutFile << ", ";
-		//	}
-
-		//	csOutFile << ");" << std::endl;
-
-		//	comments::FullComment* comment = astContext->getCommentForDecl(iterMethod->getDefinition(), nullptr);
-		//	if (comment != nullptr)
-		//	{
-		//		auto commentIter = comment->child_begin();
-		//		while(commentIter != comment->child_end())
-		//		{
-		//			comments::Comment* comment = *commentIter;
-		//			int type = comment->getCommentKind();
-
-		//			// TODO - Parse comment kind and types. See CommentToXML.cpp in clang sources
-		//		}
-		//	}
-		//		outs() << "Found comment! ";
-
-		//	++iterMethod;
-
-		//	if(iterMethod != decl->method_end())
-		//		csOutFile << std::endl;
-		//}
-
-		//csOutFile << "}";
-
-		//return true;
 	}
 
-	//std::string mapComplexTypeToCSType(const Type* type)
-	//{
-	//	const TemplateSpecializationType* templateType = type->getAs<TemplateSpecializationType>();
-	//	
-	//	if (templateType != nullptr)
-	//	{
-	//		// TODO - Check for template types here? Need to check for game object handle, resource handle and
+	bool getMappedType(const std::string& sourceType, int flags, std::string& outType) const
+	{
+		if ((flags & (int)TypeFlags::Builtin) != 0)
+		{
+			outType = sourceType;
+			return true;
+		}
 
-	//		int numArgs = templateType->getNumArgs();
-	//		for (int i = 0; i < numArgs; i++)
-	//		{
-	//			QualType argType = templateType->getArg(i).getAsType();
-	//			std::string typeName = argType.getAsString();
+		auto iterFind = cppToCsTypeMap.find(sourceType);
+		if (iterFind == cppToCsTypeMap.end())
+			return false;
 
-	//			bool isBuiltin = argType->isBuiltinType();
-	//		}
-	//	}
+		outType = iterFind->second.name;
+		return true;
+	}
 
-	//	const RecordType* recordType = type->getAs<RecordType>();
-	//	const RecordDecl* recordDecl = recordType->getDecl();
+	bool isOutput(int flags) const
+	{
+		return (flags & (int)TypeFlags::Output) != 0;
+	}
 
-	//	std::string name = recordDecl->getName();
+	bool isArray(int flags) const
+	{
+		return (flags & (int)TypeFlags::Array) != 0;
+	}
 
-	//	auto iter = cppToCsTypeMap.find(name);
-	//	if (iter != cppToCsTypeMap.end())
-	//		return iter->second.name;
+	std::string generateOutput(SimpleTypeInfo& input)
+	{
+		std::stringstream output;
 
-	//	errs() << "Unrecognized complex type found.";
-	//	return "unknown";
-	//}
+		if (input.visibility == CSVisibility::Internal)
+			output << "internal ";
+		else if (input.visibility == CSVisibility::Public)
+			output << "public ";
 
-	//std::string mapValueTypeToCSType(QualType type)
-	//{
-	//	// TODO - Aside from basic stuff, check game object handles, resources handles, strings and potentially vectors
-	//}
+		std::string scriptName = cppToCsTypeMap[input.name].name;
 
-	//std::string getCSType(QualType type)
-	//{
-	//	
-	//}
+		output << "struct " << scriptName;
+
+		output << std::endl;
+		output << "{" << std::endl;
+
+		for(auto& entry : input.ctors)
+		{
+			output << "\tpublic " << scriptName << "(";
+
+			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
+			{
+				const VarInfo& paramInfo = *I;
+
+				// TODO - Check for output, array, and complex types (they're not allowed)
+
+				std::string typeName;
+				if(!getMappedType(paramInfo.type, paramInfo.flags, typeName))
+				{
+					typeName = "unknown";
+					errs() << "Unable to map constructor parameter type \"" << paramInfo.type << "\" for \"" << input.name <<" \".";
+				}
+				
+				output << typeName << " " << paramInfo.name;
+
+				if(!paramInfo.defaultValue.empty())
+					output << " = " << paramInfo.defaultValue;
+
+				if((I + 1) != entry.params.end())
+					output << ", ";
+			}
+
+			output << ")" << std::endl;
+			output << "\t{" << std::endl;
+
+			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
+			{
+				// TODO - Check for output, array, and complex types (they're not allowed)
+
+				auto iterFind = entry.fieldAssignments.find(I->name);
+				if (iterFind == entry.fieldAssignments.end())
+					continue;
+
+				std::string fieldName = iterFind->first;
+				std::string paramName = iterFind->second;
+
+				output << "\t\t" << fieldName << " = " << paramName << ";" << std::endl;
+			}
+
+			output << "\t}" << std::endl;
+			output << std::endl;
+		}
+
+		for (auto I = input.fields.begin(); I != input.fields.end(); ++I)
+		{
+			const VarInfo& fieldInfo = *I;
+
+			// TODO - Check for output, array, and complex types (they're not allowed)
+
+			std::string typeName;
+			if (!getMappedType(fieldInfo.type, fieldInfo.flags, typeName))
+			{
+				typeName = "unknown";
+				errs() << "Unable to map field type \"" << fieldInfo.type << "\" for \"" << input.name << " \".";
+			}
+
+			output << "\tpublic ";
+			output << typeName << " ";
+			output << fieldInfo.name;
+
+			if (!fieldInfo.defaultValue.empty())
+				output << " = " << fieldInfo.defaultValue;
+
+			output << ";" << std::endl;
+		}
+
+		output << "}" << std::endl;
+		return output.str();
+	}
+
 
 private:
 	ASTContext* astContext;
