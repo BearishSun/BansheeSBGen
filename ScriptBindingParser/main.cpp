@@ -1312,7 +1312,7 @@ public:
 		return true;
 	}
 
-	std::string getInteropParamCppType(const CSTypeInfo& type, int flags)
+	std::string getInteropCppVarType(const CSTypeInfo& type, int flags)
 	{
 		if(isArray(flags))
 		{
@@ -1543,7 +1543,7 @@ public:
 			}
 			else
 			{
-				output << getInteropParamCppType(returnTypeInfo, methodInfo.returnInfo.flags);
+				output << getInteropCppVarType(returnTypeInfo, methodInfo.returnInfo.flags);
 			}
 		}
 
@@ -1559,7 +1559,7 @@ public:
 			CSTypeInfo paramTypeInfo;
 			getMappedType(I->type, I->flags, paramTypeInfo);
 
-			output << getInteropParamCppType(paramTypeInfo, I->flags) << " " << I->name;
+			output << getInteropCppVarType(paramTypeInfo, I->flags) << " " << I->name;
 
 			if ((I + 1) != methodInfo.paramInfos.end() || returnAsParameter)
 				output << ", ";
@@ -1570,7 +1570,7 @@ public:
 			CSTypeInfo returnTypeInfo;
 			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
 
-			output << getInteropParamCppType(returnTypeInfo, methodInfo.returnInfo.flags) << " " << "__output";
+			output << getInteropCppVarType(returnTypeInfo, methodInfo.returnInfo.flags) << " " << "__output";
 		}
 
 		output << ")";
@@ -1609,11 +1609,11 @@ public:
 		return output.str();
 	}
 
-	void generateMethodBodyBlockForParam(const std::string& name, const std::string& type, int flags, const std::string& methodName, bool isLast,
-										 std::stringstream& preCallActions, std::stringstream& methodArgs, std::stringstream& postCallActions)
+	std::string generateMethodBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, 
+			bool isLast, bool returnValue, std::stringstream& preCallActions, std::stringstream& postCallActions)
 	{
 		CSTypeInfo paramTypeInfo;
-		getMappedType(type, flags, paramTypeInfo);
+		getMappedType(typeName, flags, paramTypeInfo);
 
 		if (!isArray(flags))
 		{
@@ -1624,14 +1624,28 @@ public:
 			case ParsedType::Builtin:
 			case ParsedType::Enum:
 			case ParsedType::Struct:
-				argName = name;
+				if(returnValue)
+				{
+					argName = "tmp" + name;
+					preCallActions << "\t" << typeName << " " << argName << ";" << std::endl;
+					postCallActions << name << " = " << argName << ";" << std::endl;
+				}
+				else
+					argName = name;
+
+				if (!isLast)
+				{
+					preCallActions << std::endl;
+					postCallActions << std::endl;
+				}
+
 				break;
 			case ParsedType::String:
 			{
 				argName = "tmp" + name;
 				preCallActions << "\tString " << argName << ";" << std::endl;
 
-				if (!isOutput(flags))
+				if (!isOutput(flags) && !returnValue)
 					preCallActions << "\t" << argName << "MonoUtil::monoToString(" << name << ");" << std::endl;
 				else
 					postCallActions << "\t" << name << " = " << "MonoUtil::stringToMono(" << argName << ");";
@@ -1648,7 +1662,7 @@ public:
 				argName = "tmp" + name;
 				preCallActions << "\tWString " << argName << ";" << std::endl;
 
-				if (!isOutput(flags))
+				if (!isOutput(flags) && !returnValue)
 					preCallActions << "\t" << argName << "MonoUtil::monoToWString(" << name << ");" << std::endl;
 				else
 					postCallActions << "\t" << name << " = " << "MonoUtil::wstringToMono(" << argName << ");";
@@ -1663,14 +1677,14 @@ public:
 			default: // Some object type
 			{
 				argName = "tmp" + name;
-				std::string tmpType = getCppVarType(type, paramTypeInfo.type);
+				std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
 
 				preCallActions << "\t" << tmpType << " " << argName << ";" << std::endl;
 
-				if (!isOutput(flags))
+				if (!isOutput(flags) && !returnValue)
 				{
 					std::string scriptName = "script" + name;
-					std::string scriptType = getScriptInteropType(type);
+					std::string scriptType = getScriptInteropType(typeName);
 
 					preCallActions << "\t" << scriptType << "* " << scriptName << ";" << std::endl;
 					preCallActions << "\t" << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
@@ -1686,7 +1700,7 @@ public:
 				else
 				{
 					std::string scriptName = "script" + name;
-					std::string scriptType = getScriptInteropType(type);
+					std::string scriptType = getScriptInteropType(typeName);
 
 					postCallActions << "\t" << scriptType << "* " << scriptName << ";" << std::endl;
 					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
@@ -1702,10 +1716,7 @@ public:
 			break;
 			}
 
-			methodArgs << getAsArgument(argName, paramTypeInfo.type, flags, methodName);
-
-			if (!isLast)
-				methodArgs << ", ";
+			return argName;
 		}
 		else
 		{
@@ -1716,20 +1727,18 @@ public:
 			case ParsedType::String:
 			case ParsedType::WString:
 			case ParsedType::Enum:
-				entryType = type;
+				entryType = typeName;
 				break;
 			default: // Some object or struct type
-				entryType = getScriptInteropType(type);
+				entryType = getScriptInteropType(typeName);
 				break;
 			}
 
-			std::string argType = "Vector<" + paramTypeInfo.name + ">";
+			std::string argType = "Vector<" + typeName + ">";
 			std::string argName = "vec" + name;
 			preCallActions << "\t" << argType << " " << argName << ";" << std::endl;
 
-			methodArgs << getAsArgument(argName, ParsedType::Builtin, flags, methodName);
-
-			if (!isOutput(flags))
+			if (!isOutput(flags) && !returnValue)
 			{
 				std::string arrayName = "array" + name;
 				preCallActions << "\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
@@ -1822,76 +1831,122 @@ public:
 					postCallActions << std::endl;
 				}
 			}
-
-			if (!isLast)
-				methodArgs << ", ";
 		}
 	}
 
 	std::string generateCppMethodBody(const MethodInfo& methodInfo, ParsedType classType)
 	{
-		std::string returnValue;
+		std::string returnAssignment;
+		std::string returnStmt;
+		std::stringstream preCallActions;
+		std::stringstream methodArgs;
+		std::stringstream postCallActions;
 
 		bool returnAsParameter = false;
-		if (methodInfo.returnInfo.type.empty())
-			returnValue = "void";
-		else
+		if (!methodInfo.returnInfo.type.empty())
 		{
 			CSTypeInfo returnTypeInfo;
 			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
 			if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
-			{
-				returnValue = "void";
 				returnAsParameter = true;
-			}
 			else
 			{
-				// TODO - Parse return value and assign returnValue
+				std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
+										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
+
+				returnAssignment = argName + " = ";
+				returnStmt = "return __output";
 			}
 		}
 
-		std::stringstream preCallActions;
-		std::stringstream methodArgs;
-		std::stringstream postCallActions;
 		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 		{
 			bool isLast = (I + 1) == methodInfo.paramInfos.end() && !returnAsParameter;
 
-			generateMethodBodyBlockForParam(I->name, I->type, I->flags, methodInfo.sourceName, isLast,
-				preCallActions, methodArgs, postCallActions);
+			std::string argName = generateMethodBodyBlockForParam(I->name, I->type, I->flags, isLast, false,
+				preCallActions, postCallActions);
+
+			if (!isArray(I->flags))
+			{
+				CSTypeInfo paramTypeInfo;
+				getMappedType(I->type, I->flags, paramTypeInfo);
+
+				methodArgs << getAsArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
+			}
+			else
+				methodArgs << getAsArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
+
+			if (!isLast)
+				methodArgs << ", ";
 		}
 
 		if(returnAsParameter)
 		{
-			// TODO - Won't work as different way of calling the method must be done
+			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type, 
+										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
 
-			generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type, methodInfo.returnInfo.flags, 
-											methodInfo.sourceName, true, preCallActions, methodArgs, postCallActions);
+			returnAssignment = argName + " = ";
 		}
 
 		std::stringstream output;
 		output << "{" << std::endl;
 		output << preCallActions.str();
 
-		// TODO - Return value & method call
 		if (classType == ParsedType::Class)
 		{
-
+			output << returnAssignment << "getInternal()->" << methodInfo.sourceName << "(" << methodArgs.str() << ");" << std::endl;
 		}
 		else // Must be one of the handle types
 		{
 			assert(isHandleType(classType));
+
+			output << returnAssignment << "getHandle()->" << methodInfo.sourceName << "(" << methodArgs.str() << ");" << std::endl;
 		}
 
-		output << postCallActions.str();
+		std::string postCallActionsStr = postCallActions.str();
+		if (!postCallActionsStr.empty())
+			output << std::endl;
+
+		output << postCallActionsStr;
+
+		if(!returnStmt.empty())
+		{
+			output << std::endl;
+			output << returnStmt << std::endl;
+		}
 
 		output << "}" << std::endl;
 		return output.str();
 	}
 
-	std::string generateHeaderOutput(const ClassInfo& classInfo)
+	std::string generateCppMethod(const ClassInfo& classInfo, const MethodInfo& methodInfo)
+	{
+		std::stringstream output;
+
+		std::string returnType = "void";
+		if (!methodInfo.returnInfo.type.empty())
+		{
+			CSTypeInfo returnTypeInfo;
+			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
+			if (canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
+				returnType = getInteropCppVarType(returnTypeInfo, methodInfo.returnInfo.flags);
+		}
+
+		CSTypeInfo typeInfo = cppToCsTypeMap[classInfo.name];
+		std::string interopClassName = getScriptInteropType(classInfo.name);
+
+		output << generateCppMethodSignature(methodInfo, interopClassName) << std::endl;
+		output << generateCppMethodBody(methodInfo, typeInfo.type);
+	}
+
+	std::string generateCppHeaderOutput(const ClassInfo& classInfo)
 	{
 		// TODO - Handle inheritance (need to generate an intermediate class)
+	}
+
+	std::string generateCppSourceOutput(const ClassInfo& classInfo)
+	{
+		// TODO
 	}
 
 private:
