@@ -27,33 +27,33 @@ class __attribute__((annotate("something"))) toParse : public Component
 
 ////////////////////////////////////////
 
-enum class __attribute__((annotate("sep,f:TestOutput"))) MyEnum
+enum class __attribute__((annotate("se,pl:true,f:TestOutput"))) MyEnum
 {
 	a = 5,
 	b = 8,
 	c
 };
 
-enum class __attribute__((annotate("sep,f:TestOutput"))) MyEnum2
+enum class __attribute__((annotate("se,pl:true,f:TestOutput"))) MyEnum2
 {
 	a, b, c
 };
 
-enum __attribute__((annotate("sep,f:TestOutput"))) MyEnum3
+enum __attribute__((annotate("se,pl:true,f:TestOutput"))) MyEnum3
 {
 	ME_A,
 	ME_B,
 	ME_C
 };
 
-struct __attribute__((annotate("sep,f:TestOutput"))) MyStruct
+struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct
 {
 	int a;
 	float b;
 	float c = 10.0f;
 };
 
-struct __attribute__((annotate("sep,f:TestOutput"))) MyStruct2
+struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 {
 	MyStruct2()
 		:a(5), b(15.0f), c(10.0f)
