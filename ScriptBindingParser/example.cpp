@@ -7,6 +7,15 @@ class vector
 
 typedef int INT32;
 
+template<class Elem> class basic_string
+{
+	protected:
+	Elem _elem;
+};
+
+typedef basic_string<char> string;
+typedef basic_string<wchar_t> wstring;
+
 class Component
 {
 public:

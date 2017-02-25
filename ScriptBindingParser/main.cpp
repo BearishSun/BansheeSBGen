@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace clang::driver;
@@ -80,15 +81,15 @@ enum class ExportFlags
 	Editor = 1 << 5
 };
 
-struct CSTypeInfo
+struct UserTypeInfo
 {
-	CSTypeInfo() {}
+	UserTypeInfo() {}
 
-	CSTypeInfo(const std::string& name, ParsedType type, const std::string& declFile = "")
-		:name(name), type(type), declFile(declFile)
+	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile)
+		:scriptName(scriptName), type(type), declFile(declFile)
 	{ }
 
-	std::string name;
+	std::string scriptName;
 	std::string declFile;
 	ParsedType type;
 	BuiltinType::Kind underlyingType; // For enums
@@ -131,6 +132,7 @@ struct PropertyInfo
 	std::string setter;
 
 	int typeFlags;
+	bool isStatic;
 	std::string documentation;
 };
 
@@ -157,16 +159,19 @@ struct SimpleConstructorInfo
 	std::unordered_map<std::string, std::string> fieldAssignments;
 };
 
-struct SimpleTypeInfo
+struct StructInfo
 {
 	std::string name;
 	CSVisibility visibility;
 
 	std::vector<SimpleConstructorInfo> ctors;
 	std::vector<VarInfo> fields;
+	bool inEditor;
+
+	std::string documentation;
 };
 
-struct PlainTypeInfos
+struct EnumInfo
 {
 	std::string code;
 };
@@ -174,13 +179,13 @@ struct PlainTypeInfos
 struct FileInfo
 {
 	std::vector<ClassInfo> classInfos;
-	std::vector<SimpleTypeInfo> simpleTypeInfos;
-	std::vector<PlainTypeInfos> plainTypeInfos;
+	std::vector<StructInfo> structInfos;
+	std::vector<EnumInfo> enumInfos;
 
 	bool inEditor;
 };
 
-std::unordered_map<std::string, CSTypeInfo> cppToCsTypeMap;
+std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
 std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
 
@@ -190,22 +195,22 @@ public:
 	explicit ScriptExportVisitor(CompilerInstance* CI)
 		:astContext(&(CI->getASTContext()))
 	{
-		cppToCsTypeMap["Vector2"] = CSTypeInfo("Vector2", ParsedType::Struct);
-		cppToCsTypeMap["Vector3"] = CSTypeInfo("Vector3", ParsedType::Struct);
-		cppToCsTypeMap["Vector4"] = CSTypeInfo("Vector4", ParsedType::Struct);
-		cppToCsTypeMap["Matrix3"] = CSTypeInfo("Matrix3", ParsedType::Struct);
-		cppToCsTypeMap["Matrix4"] = CSTypeInfo("Matrix4", ParsedType::Struct);
-		cppToCsTypeMap["Quaternion"] = CSTypeInfo("Quaternion", ParsedType::Struct);
-		cppToCsTypeMap["Radian"] = CSTypeInfo("Radian", ParsedType::Struct);
-		cppToCsTypeMap["Degree"] = CSTypeInfo("Degree", ParsedType::Struct);
-		cppToCsTypeMap["Color"] = CSTypeInfo("Color", ParsedType::Struct);
-		cppToCsTypeMap["AABox"] = CSTypeInfo("AABox", ParsedType::Struct);
-		cppToCsTypeMap["Sphere"] = CSTypeInfo("Sphere", ParsedType::Struct);
-		cppToCsTypeMap["Capsule"] = CSTypeInfo("Capsule", ParsedType::Struct);
-		cppToCsTypeMap["Ray"] = CSTypeInfo("Ray", ParsedType::Struct);
-		cppToCsTypeMap["Vector2I"] = CSTypeInfo("Vector2I", ParsedType::Struct);
-		cppToCsTypeMap["Rect2"] = CSTypeInfo("Rect2", ParsedType::Struct);
-		cppToCsTypeMap["Rect2I"] = CSTypeInfo("Rect2I", ParsedType::Struct);
+		cppToCsTypeMap["Vector2"] = UserTypeInfo("Vector2", ParsedType::Struct, "BsVector2.h");
+		cppToCsTypeMap["Vector3"] = UserTypeInfo("Vector3", ParsedType::Struct, "BsVector3.h");
+		cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "BsVector4.h");
+		cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "BsMatrix3.h");
+		cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "BsMatrix4.h");
+		cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h");
+		cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "BsRadian.h");
+		cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "BsDegree.h");
+		cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "BsColor.h");
+		cppToCsTypeMap["AABox"] = UserTypeInfo("AABox", ParsedType::Struct, "BsAABox.h");
+		cppToCsTypeMap["Sphere"] = UserTypeInfo("Sphere", ParsedType::Struct, "BsSphere.h");
+		cppToCsTypeMap["Capsule"] = UserTypeInfo("Capsule", ParsedType::Struct, "BsCapsule.h");
+		cppToCsTypeMap["Ray"] = UserTypeInfo("Ray", ParsedType::Struct, "BsRay.h");
+		cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "BsVector2I.h");
+		cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "BsRect2.h");
+		cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "BsRect2I.h");
 	}
 
 	ParsedType getObjectType(const CXXRecordDecl* decl) const
@@ -340,30 +345,104 @@ public:
 		return false;
 	}
 
-	std::string mapBuiltinTypeToCppType(const std::string& input) const
+	std::string mapCppTypeToCSType(const std::string& cppType) const
 	{
-		if (input == "byte")
-			return "UINT8";
+		if (cppType == "INT8")
+			return "sbyte";
 
-		if (input == "int")
-			return "INT32";
+		if (cppType == "UINT8")
+			return "byte";
 
-		if (input == "uint")
-			return "UINT32";
+		if (cppType == "INT16")
+			return "short";
 
-		if (input == "short")
-			return "INT16";
+		if (cppType == "UINT16")
+			return "ushort";
 
-		if (input == "ushort")
-			return "UINT16";
+		if (cppType == "INT32")
+			return "int";
 
-		if (input == "long")
-			return "INT64";
+		if (cppType == "UINT32")
+			return "uint";
 
-		if (input == "ulong")
-			return "UINT64";
+		if (cppType == "INT64")
+			return "long";
 
-		return input;
+		if (cppType == "UINT64")
+			return "ulong";
+
+		if (cppType == "wchar_t")
+			return "char";
+
+		return cppType;
+	}
+
+	bool mapBuiltinTypeToCppType(BuiltinType::Kind kind, std::string& output) const
+	{
+		switch (kind)
+		{
+		case BuiltinType::Void:
+			output = "void";
+			return true;
+		case BuiltinType::Bool:
+			output = "bool";
+			return true;
+		case BuiltinType::Char_S:
+		case BuiltinType::SChar:
+			output = "INT8";
+			return true;
+		case BuiltinType::Char_U:
+			output = "UINT8";
+			return true;
+		case BuiltinType::Short:
+			output = "INT16";
+			return true;
+		case BuiltinType::Int:
+			output = "INT32";
+			return true;
+		case BuiltinType::Long:
+			output = "INT32";
+			return true;
+		case BuiltinType::LongLong:
+			output = "INT64";
+			return true;
+		case BuiltinType::UChar:
+			output = "UINT8";
+			return true;
+		case BuiltinType::UShort:
+			output = "UINT16";
+			return true;
+		case BuiltinType::UInt:
+			output = "UINT32";
+			return true;
+		case BuiltinType::ULong:
+			output = "UINT32";
+			return true;
+		case BuiltinType::ULongLong:
+			output = "UINT64";
+			return true;
+		case BuiltinType::Float:
+			output = "float";
+			return true;
+		case BuiltinType::Double:
+			output = "double";
+			return true;
+		case BuiltinType::WChar_S:
+		case BuiltinType::WChar_U:
+			output = "wchar_t";
+			return true;
+		case BuiltinType::Char16:
+			output = "UINT16";
+			return true;
+		case BuiltinType::Char32:
+			output = "UINT32";
+			return true;
+		default:
+			break;
+		}
+
+		errs() << "Unrecognized builtin type found.";
+		return false;
 	}
 
 	bool parseType(QualType type, std::string& outType, int& typeFlags)
@@ -387,7 +466,7 @@ public:
 			if (!type.isConstQualified())
 				typeFlags |= (int)TypeFlags::Output;
 		}
-		else if(realType->isStructureOrClassType())
+		else if(type->isStructureOrClassType())
 		{
 			// Check for arrays
 			// Note: Not supporting nested arrays
@@ -428,7 +507,7 @@ public:
 		if(realType->isBuiltinType())
 		{
 			const BuiltinType* builtinType = realType->getAs<BuiltinType>();
-			if (!mapBuiltinTypeToCSType(builtinType->getKind(), outType))
+			if (!mapBuiltinTypeToCppType(builtinType->getKind(), outType))
 				return false;
 
 			typeFlags |= (int)TypeFlags::Builtin;
@@ -451,11 +530,25 @@ public:
 				{
 					QualType argType = specType->getArg(0).getAsType();
 					
+					// Check for string types
+					if (sourceTypeName == "basic_string" && nsName == "std")
+					{
+						const BuiltinType* builtinType = argType->getAs<BuiltinType>();
+						if(builtinType->getKind() == BuiltinType::Kind::WChar_U)
+							typeFlags |= (int)TypeFlags::WString;
+						else
+							typeFlags |= (int)TypeFlags::String;
+
+						outType = "string";
+
+						return true;
+					}
+
 					bool isValid = false;
 					if(argType->isBuiltinType())
 					{
 						const BuiltinType* builtinType = argType->getAs<BuiltinType>();
-						isValid = mapBuiltinTypeToCSType(builtinType->getKind(), outType);
+						isValid = mapBuiltinTypeToCppType(builtinType->getKind(), outType);
 
 						typeFlags |= (int)TypeFlags::Builtin;
 					}
@@ -503,6 +596,7 @@ public:
 				}
 			}
 
+			// Its a user-defined type
 			outType = sourceTypeName;
 			return true;
 		}
@@ -831,15 +925,16 @@ public:
 		
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-		cppToCsTypeMap[sourceClassName] = CSTypeInfo(className, ParsedType::Enum, declFile);
+		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Enum, declFile);
 		cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
 
 		std::stringstream output;
 
+		output << convertJavadocToXMLComments(decl);
 		if (visibility == CSVisibility::Internal)
-			output << "internal ";
+			output << "\tinternal ";
 		else if(visibility == CSVisibility::Public)
-			output << "public ";
+			output << "\tpublic ";
 		
 		output << "enum " << className.str();
 
@@ -847,7 +942,7 @@ public:
 			output << " : " << enumType;
 
 		output << std::endl;
-		output << "{" << std::endl;
+		output << "\t{" << std::endl;
 
 		auto iter = decl->enumerator_begin();
 		while(iter != decl->enumerator_end())
@@ -857,7 +952,8 @@ public:
 			SmallString<5> valueStr;
 			constDecl->getInitVal().toString(valueStr);
 
-			output << "\t" << constDecl->getName().str();
+			output << "\t\t" << convertJavadocToXMLComments(constDecl);
+			output << "\t\t" << constDecl->getName().str();
 			output << " = ";
 			output << valueStr.str().str();
 
@@ -869,14 +965,14 @@ public:
 			output << std::endl;
 		}
 
-		output << "}" << std::endl;
+		output << "\t}" << std::endl;
 
 		FileInfo& fileInfo = outputFileInfos[fileName.str()];
 
-		PlainTypeInfos simpleEntry;
+		EnumInfo simpleEntry;
 		simpleEntry.code = output.str();
 
-		fileInfo.plainTypeInfos.push_back(simpleEntry);
+		fileInfo.enumInfos.push_back(simpleEntry);
 
 		return true;
 	}
@@ -899,10 +995,12 @@ public:
 
 		if ((classExportFlags & (int)ExportFlags::Plain) != 0)
 		{
-			SimpleTypeInfo simpleTypeInfo;
-			simpleTypeInfo.name = sourceClassName;
-			simpleTypeInfo.visibility = visibility;
-			
+			StructInfo structInfo;
+			structInfo.name = sourceClassName;
+			structInfo.visibility = visibility;
+			structInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
+			structInfo.documentation = convertJavadocToXMLComments(decl);
+
 			std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
 
 			// Parse non-default constructors & determine default values for fields
@@ -1034,7 +1132,7 @@ public:
 						ctorInfo.fieldAssignments[fieldName] = paramName;
 					}
 
-					simpleTypeInfo.ctors.push_back(ctorInfo);
+					structInfo.ctors.push_back(ctorInfo);
 					++ctorIter;
 				}
 			}
@@ -1065,13 +1163,18 @@ public:
 						   << sourceClassName << "\". Skipping field.";
 					continue;
 				}
+
+				structInfo.fields.push_back(fieldInfo);
 			}
 
 			std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-			cppToCsTypeMap[sourceClassName] = CSTypeInfo(className, ParsedType::Struct, declFile);
+			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Struct, declFile);
 
 			FileInfo& fileInfo = outputFileInfos[fileName.str()];
-			fileInfo.simpleTypeInfos.push_back(simpleTypeInfo);
+			fileInfo.structInfos.push_back(structInfo);
+
+			if (structInfo.inEditor)
+				fileInfo.inEditor = true;
 		}
 		else
 		{
@@ -1079,12 +1182,13 @@ public:
 			classInfo.name = sourceClassName;
 			classInfo.visibility = visibility;
 			classInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
-			
+			classInfo.documentation = convertJavadocToXMLComments(decl);
+
 			ParsedType classType = getObjectType(decl);
 
 			std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-			cppToCsTypeMap[sourceClassName] = CSTypeInfo(className, classType, declFile);
+			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, classType, declFile);
 
 			for(auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
 			{
@@ -1294,50 +1398,47 @@ public:
 		return true;
 	}
 
-	bool getMappedType(const std::string& sourceType, int flags, std::string& outType) const
-	{
-		CSTypeInfo typeInfo;
-		bool retVal = getMappedType(sourceType, flags, typeInfo);
-
-		outType = typeInfo.name;
-		return retVal;
-	}
-
-	bool getMappedType(const std::string& sourceType, int flags, CSTypeInfo& outType) const
+	UserTypeInfo getTypeInfo(const std::string& sourceType, int flags) const
 	{
 		if ((flags & (int)TypeFlags::Builtin) != 0)
 		{
-			outType.name = mapBuiltinTypeToCppType(sourceType);
+			UserTypeInfo outType;
+			outType.scriptName = mapCppTypeToCSType(sourceType);
 			outType.type = ParsedType::Builtin;
-			return true;
+
+			return outType;
 		}
 
 		if ((flags & (int)TypeFlags::String) != 0)
 		{
-			outType.name = "String";
+			UserTypeInfo outType;
+			outType.scriptName = "string";
 			outType.type = ParsedType::String;
-			return true;
+
+			return outType;
 		}
 
 		if ((flags & (int)TypeFlags::WString) != 0)
 		{
-			outType.name = "WString";
+			UserTypeInfo outType;
+			outType.scriptName = "string";
 			outType.type = ParsedType::WString;
-			return true;
+
+			return outType;
 		}
 
 		auto iterFind = cppToCsTypeMap.find(sourceType);
 		if (iterFind == cppToCsTypeMap.end())
 		{
-			outType.name = mapBuiltinTypeToCppType(sourceType);
+			UserTypeInfo outType;
+			outType.scriptName = mapCppTypeToCSType(sourceType);
 			outType.type = ParsedType::Builtin;
 
 			errs() << "Unable to map type \"" << sourceType << "\". Assuming same name as source. ";
-			return false;
+			return outType;
 		}
 
-		outType = iterFind->second;
-		return true;
+		return iterFind->second;
 	}
 
 	bool isOutput(int flags) const
@@ -1402,7 +1503,7 @@ public:
 		return true;
 	}
 
-	std::string getInteropCppVarType(const CSTypeInfo& type, int flags)
+	std::string getInteropCppVarType(const std::string& typeName, ParsedType type, int flags)
 	{
 		if(isArray(flags))
 		{
@@ -1412,16 +1513,16 @@ public:
 				return "MonoArray*";
 		}
 
-		switch(type.type)
+		switch(type)
 		{
 		case ParsedType::Builtin:
 		case ParsedType::Enum:
 			if (isOutput(flags))
-				return type.name + "*";
+				return typeName + "*";
 			else
-				return type.name;
+				return typeName;
 		case ParsedType::Struct:
-			return type.name + "*";
+			return typeName + "*";
 		case ParsedType::String:
 		case ParsedType::WString:
 			if (isOutput(flags))
@@ -1448,7 +1549,27 @@ public:
 			return typeName;
 	}
 
-	std::string getAsArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
+	std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes, bool arraySuffixes)
+	{
+		std::stringstream output;
+
+		if(paramPrefixes && isOutput(flags))
+		{
+			if (type == ParsedType::Struct)
+				output << "ref ";
+			else
+				output << "out ";
+		}
+
+		output << typeName;
+
+		if (arraySuffixes && isArray(flags))
+			output << "[]";
+
+		return output.str();
+	}
+
+	std::string getAsCppArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
 	{
 		auto getArgumentPlain = [&](bool isPtr)
 		{
@@ -1533,7 +1654,7 @@ public:
 		return "Script" + name;
 	}
 
-	bool isValidStructType(CSTypeInfo& typeInfo, int flags)
+	bool isValidStructType(UserTypeInfo& typeInfo, int flags)
 	{
 		if (isOutput(flags) || isArray(flags))
 			return false;
@@ -1542,6 +1663,30 @@ public:
 			return true;
 
 		return false;
+	}
+
+	void findRequiredIncludes(const MethodInfo& methodInfo, std::unordered_set<std::string>& includes)
+	{
+		for (auto& paramInfo : methodInfo.paramInfos)
+		{
+			auto iterFind = cppToCsTypeMap.find(paramInfo.type);
+			if (iterFind != cppToCsTypeMap.end())
+			{
+				const UserTypeInfo& typeInfo = iterFind->second;
+				includes.insert(typeInfo.declFile);
+
+				// TODO - Need to include script interop types for certain parsed types, might need to include enum headers in interop header, etc.
+			}
+		}
+	}
+
+	void findRequiredIncludes(const ClassInfo& classInfo, std::unordered_set<std::string>& includes)
+	{
+		for(auto& entry : classInfo.ctorInfos)
+			findRequiredIncludes(entry, includes);
+
+		for (auto& entry : classInfo.methodInfos)
+			findRequiredIncludes(entry, includes);
 	}
 
 	MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo) const
@@ -1639,6 +1784,7 @@ public:
 					PropertyInfo propertyInfo;
 					propertyInfo.name = methodInfo.scriptName;
 					propertyInfo.documentation = methodInfo.documentation;
+					propertyInfo.isStatic = (methodInfo.flags & (int)MethodFlags::Static);
 
 					if(isGetter)
 					{
@@ -1664,7 +1810,7 @@ public:
 					else
 					{
 						PropertyInfo& existingInfo = *iterFind;
-						if (existingInfo.type != propertyInfo.type)
+						if (existingInfo.type != propertyInfo.type || existingInfo.isStatic != propertyInfo.isStatic)
 						{
 							errs() << "Getter and setter types for the property \"" << propertyInfo.name << "\" don't match. Skipping property.";
 							continue;
@@ -1691,105 +1837,6 @@ public:
 		}
 	}
 
-	std::string generateOutput(SimpleTypeInfo& input)
-	{
-		std::stringstream output;
-
-		if (input.visibility == CSVisibility::Internal)
-			output << "internal ";
-		else if (input.visibility == CSVisibility::Public)
-			output << "public ";
-
-		std::string scriptName = cppToCsTypeMap[input.name].name;
-
-		output << "partial struct " << scriptName;
-
-		output << std::endl;
-		output << "{" << std::endl;
-
-		for(auto& entry : input.ctors)
-		{
-			output << "\tpublic " << scriptName << "(";
-
-			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
-			{
-				const VarInfo& paramInfo = *I;
-
-				CSTypeInfo typeInfo;
-				getMappedType(paramInfo.type, paramInfo.flags, typeInfo);
-				
-				if (!isValidStructType(typeInfo, paramInfo.flags))
-				{
-					// We report the error during field generation, as it checks for the same condition
-					continue;
-				}
-
-				output << typeInfo.name << " " << paramInfo.name;
-
-				if(!paramInfo.defaultValue.empty())
-					output << " = " << paramInfo.defaultValue;
-
-				if((I + 1) != entry.params.end())
-					output << ", ";
-			}
-
-			output << ")" << std::endl;
-			output << "\t{" << std::endl;
-
-			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
-			{
-				const VarInfo& paramInfo = *I;
-
-				CSTypeInfo typeInfo;
-				getMappedType(paramInfo.type, paramInfo.flags, typeInfo);
-
-				if (!isValidStructType(typeInfo, paramInfo.flags))
-				{
-					// We report the error during field generation, as it checks for the same condition
-					continue;
-				}
-
-				auto iterFind = entry.fieldAssignments.find(I->name);
-				if (iterFind == entry.fieldAssignments.end())
-					continue;
-
-				std::string fieldName = iterFind->first;
-				std::string paramName = iterFind->second;
-
-				output << "\t\t" << fieldName << " = " << paramName << ";" << std::endl;
-			}
-
-			output << "\t}" << std::endl;
-			output << std::endl;
-		}
-
-		for (auto I = input.fields.begin(); I != input.fields.end(); ++I)
-		{
-			const VarInfo& fieldInfo = *I;
-
-			CSTypeInfo typeInfo;
-			getMappedType(fieldInfo.type, fieldInfo.flags, typeInfo);
-
-			if(!isValidStructType(typeInfo, fieldInfo.flags))
-			{
-				errs() << "Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.";
-				continue;
-			}
-
-			output << "\tpublic ";
-			output << typeInfo.name << " ";
-			output << fieldInfo.name;
-
-			if (!fieldInfo.defaultValue.empty())
-				output << " = " << fieldInfo.defaultValue;
-
-			output << ";" << std::endl;
-		}
-
-		output << "}" << std::endl;
-		return output.str();
-	}
-
 	std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& interopClassName, const std::string& nestedName)
 	{
 		bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
@@ -1802,8 +1849,7 @@ public:
 			output << "void";
 		else
 		{
-			CSTypeInfo returnTypeInfo;
-			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
+			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 			if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 			{
 				output << "void";
@@ -1811,7 +1857,7 @@ public:
 			}
 			else
 			{
-				output << getInteropCppVarType(returnTypeInfo, methodInfo.returnInfo.flags);
+				output << getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
 			}
 		}
 
@@ -1839,10 +1885,9 @@ public:
 
 		for(auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 		{
-			CSTypeInfo paramTypeInfo;
-			getMappedType(I->type, I->flags, paramTypeInfo);
+			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
-			output << getInteropCppVarType(paramTypeInfo, I->flags) << " " << I->name;
+			output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name;
 
 			if ((I + 1) != methodInfo.paramInfos.end() || returnAsParameter)
 				output << ", ";
@@ -1850,10 +1895,10 @@ public:
 
 		if(returnAsParameter)
 		{
-			CSTypeInfo returnTypeInfo;
-			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
+			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 
-			output << getInteropCppVarType(returnTypeInfo, methodInfo.returnInfo.flags) << " " << "__output";
+			output << getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags) <<
+				" " << "__output";
 		}
 
 		output << ")";
@@ -1895,8 +1940,7 @@ public:
 	std::string generateMethodBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, 
 			bool isLast, bool returnValue, std::stringstream& preCallActions, std::stringstream& postCallActions)
 	{
-		CSTypeInfo paramTypeInfo;
-		getMappedType(typeName, flags, paramTypeInfo);
+		UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
 
 		if (!isArray(flags))
 		{
@@ -2037,9 +2081,8 @@ public:
 					break;
 				case ParsedType::Enum:
 				{
-					std::string csType;
-					mapBuiltinTypeToCSType(paramTypeInfo.underlyingType, csType);
-					std::string enumType = mapBuiltinTypeToCppType(csType);
+					std::string enumType;
+					mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
 					preCallActions << "\t\t\t" << argName << "[i] = (" << entryType << ")" << arrayName << ".get<" << enumType << ">(i);" << std::endl;
 					break;
@@ -2084,9 +2127,8 @@ public:
 					break;
 				case ParsedType::Enum:
 				{
-					std::string csType;
-					mapBuiltinTypeToCSType(paramTypeInfo.underlyingType, csType);
-					std::string enumType = mapBuiltinTypeToCppType(csType);
+					std::string enumType;
+					mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
 					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << argName << "[i]);" << std::endl;
 					break;
@@ -2129,8 +2171,7 @@ public:
 		bool returnAsParameter = false;
 		if (!methodInfo.returnInfo.type.empty())
 		{
-			CSTypeInfo returnTypeInfo;
-			getMappedType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, returnTypeInfo);
+			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 			if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 				returnAsParameter = true;
 			else
@@ -2152,13 +2193,12 @@ public:
 
 			if (!isArray(I->flags))
 			{
-				CSTypeInfo paramTypeInfo;
-				getMappedType(I->type, I->flags, paramTypeInfo);
+				UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
-				methodArgs << getAsArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
+				methodArgs << getAsCppArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
 			}
 			else
-				methodArgs << getAsArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
+				methodArgs << getAsCppArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
 
 			if (!isLast)
 				methodArgs << ", ";
@@ -2279,7 +2319,7 @@ public:
 		return output.str();
 	}
 
-	std::string generateCppHeaderOutput(const ClassInfo& classInfo, const CSTypeInfo& typeInfo)
+	std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 	{
 		// TODO - Handle inheritance (need to generate an intermediate class)
 
@@ -2307,9 +2347,9 @@ public:
 		output << "\tpublic:" << std::endl;
 
 		if (!classInfo.inEditor)
-			output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.name << "\")" << std::endl;
+			output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.scriptName << "\")" << std::endl;
 		else
-			output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.name << "\")" << std::endl;
+			output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.scriptName << "\")" << std::endl;
 
 		output << std::endl;
 
@@ -2344,6 +2384,9 @@ public:
 		}
 
 		// CLR hooks
+		for (auto& methodInfo : classInfo.ctorInfos)
+			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassName, "") << ";" << std::endl;
+
 		for(auto& methodInfo : classInfo.methodInfos)
 			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassName, "") << ";" << std::endl;
 
@@ -2351,7 +2394,7 @@ public:
 		return output.str();
 	}
 
-	std::string generateCppSourceOutput(const ClassInfo& classInfo, const CSTypeInfo& typeInfo)
+	std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 	{
 		std::string interopClassName = getScriptInteropType(classInfo.name);
 		std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
@@ -2436,6 +2479,17 @@ public:
 		}
 
 		// CLR hook method implementations
+		for (auto I = classInfo.ctorInfos.begin(); I != classInfo.ctorInfos.end(); ++I)
+		{
+			const MethodInfo& methodInfo = *I;
+
+			output << "\t" << generateCppMethodSignature(methodInfo, interopClassName, interopClassName) << std::endl;
+			output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type);
+
+			if ((I + 1) != classInfo.methodInfos.end())
+				output << std::endl;
+		}
+
 		for(auto I = classInfo.methodInfos.begin(); I != classInfo.methodInfos.end(); ++I)
 		{
 			const MethodInfo& methodInfo = *I;
@@ -2447,6 +2501,387 @@ public:
 				output << std::endl;
 		}
 
+		return output.str();
+	}
+
+	std::string generateCppStructHeader(const StructInfo& structInfo)
+	{
+		UserTypeInfo typeInfo = getTypeInfo(structInfo.name, 0);
+
+		std::stringstream output;
+
+		output << "\tclass ";
+
+		if (!structInfo.inEditor)
+			output << "BS_SCR_BE_EXPORT ";
+		else
+			output << "BS_SCR_BED_EXPORT ";
+
+		std::string interopClassName = getScriptInteropType(structInfo.name);
+		output << interopClassName << " : public " << "ScriptObject<" << interopClassName << ">";
+
+		output << std::endl;
+		output << "\t{" << std::endl;
+		output << "\tpublic:" << std::endl;
+
+		if (!structInfo.inEditor)
+			output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		else
+			output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.scriptName << "\")" << std::endl;
+
+		output << std::endl;
+
+		output << "\t\t static MonoObject* box(const " << structInfo.name << "& value);" << std::endl;
+		output << "\t\t static " << structInfo.name << " unbox(MonoObject* value);" << std::endl;
+
+		output << std::endl;
+		output << "\tprivate:" << std::endl;
+
+		// Constructor
+		output << "\t\t" << interopClassName << "(MonoObject* managedInstance);" << std::endl;
+		output << std::endl;
+
+		output << "\t};" << std::endl;
+		return output.str();
+	}
+
+	std::string generateCppStructSource(const StructInfo& structInfo)
+	{
+		UserTypeInfo typeInfo = getTypeInfo(structInfo.name, 0);
+		std::string interopClassName = getScriptInteropType(structInfo.name);
+
+		std::stringstream output;
+
+		// Constructor
+		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance)" << std::endl;
+		output << "\t\t:ScriptObject(managedInstance)" << std::endl;
+		output << "\t{ }" << std::endl;
+		output << std::endl;
+
+		// Empty initRuntimeData
+		output << "\tvoid " << interopClassName << "::initRuntimeData()" << std::endl;
+		output << "\t{ }" << std::endl;
+		output << std::endl;
+
+		// Box
+		output << "\t MonoObject*" << interopClassName << "::box(const " << structInfo.name << "& value)" << std::endl;
+		output << "\t{" << std::endl;
+		output << "\t\treturn MonoUtil::box(metaData.scriptClass->_getInternalClass(), (void*)&value);";
+		output << "\t}" << std::endl;
+		output << std::endl;
+
+		// Unbox
+		output << "\t " << structInfo.name << " " << interopClassName << "::unbox(MonoObject* value)" << std::endl;
+		output << "\t{" << std::endl;
+		output << "\t\treturn *(" << structInfo.name << "*)MonoUtil::unbox(value);";
+		output << "\t}" << std::endl;
+		output << std::endl;
+
+		return output.str();
+	}
+
+	std::string generateCSMethodParams(const MethodInfo& methodInfo)
+	{
+		std::stringstream output;
+		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+		{
+			const VarInfo& paramInfo = *I;
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true);
+
+			output << qualifiedType << " " << paramInfo.name;
+
+			if ((I + 1) != methodInfo.paramInfos.end())
+				output << ", ";
+		}
+
+		return output.str();
+	}
+
+	std::string generateCSMethodArgs(const MethodInfo& methodInfo)
+	{
+		std::stringstream output;
+		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+		{
+			const VarInfo& paramInfo = *I;
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+
+			if (isOutput(paramInfo.flags))
+			{
+				if (paramTypeInfo.type == ParsedType::Struct)
+					output << "ref ";
+				else
+					output << "out ";
+			}
+
+			output << paramInfo.name;
+
+			if ((I + 1) != methodInfo.paramInfos.end())
+				output << ", ";
+		}
+
+		return output.str();
+	}
+
+	std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
+	{
+		std::stringstream ctors;
+		std::stringstream properties;
+		std::stringstream methods;
+		std::stringstream interops;
+
+		// Private constructor for runtime use
+		MethodInfo pvtCtor = findUnusedCtorSignature(input);
+
+		ctors << "\t\tprivate " << typeInfo.scriptName << "(" << generateCSMethodParams(pvtCtor) << ") { }" << std::endl;
+		ctors << std::endl;
+
+		// Constructors
+		for (auto& entry : input.methodInfos)
+		{
+			ctors << entry.documentation;
+			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+			ctors << "\t\t{" << std::endl;
+			ctors << "\t\t\tInternal_" << entry.sourceName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+			ctors << "\t\t}" << std::endl;
+			ctors << std::endl;
+
+			// Generate interop
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+			interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
+			interops << std::endl;
+		}
+
+		// External constructors, methods and interop stubs
+		for (auto& entry : input.methodInfos)
+		{
+			bool isConstructor = (entry.flags & (int)MethodFlags::Constructor) != 0;
+			bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
+
+			if(isConstructor)
+			{
+				ctors << entry.documentation;
+				ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+				ctors << "\t\t{" << std::endl;
+				ctors << "\t\t\tInternal_" << entry.sourceName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+				ctors << "\t\t}" << std::endl;
+				ctors << std::endl;
+			}
+			else
+			{
+				bool isProperty = entry.flags & ((int)MethodFlags::PropertyGetter | (int)MethodFlags::PropertySetter);
+				if(!isProperty)
+				{
+					std::string returnType;
+					if (entry.returnInfo.type.empty())
+						returnType = "void";
+					else
+					{
+						UserTypeInfo paramTypeInfo = getTypeInfo(entry.returnInfo.type, entry.returnInfo.flags);
+						returnType = getCSVarType(entry.returnInfo.type, paramTypeInfo.type, entry.returnInfo.flags, false, true);
+					}
+
+					methods << entry.documentation;
+					methods << "\t\tpublic " << returnType << " " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+					methods << "\t\t{" << std::endl;
+
+					if (!entry.returnInfo.type.empty())
+						methods << "\t\t\treturn ";
+					else
+						methods << "\t\t\t";
+
+					if (!isStatic)
+						methods << "Internal_" << entry.sourceName << "(mCachedPtr, " << generateCSMethodArgs(entry) << ");" << std::endl;
+					else
+						methods << "Internal_" << entry.sourceName << "(" << generateCSMethodArgs(entry) << ");" << std::endl;
+
+					methods << "\t\t}" << std::endl;
+					methods << std::endl;
+				}
+			}
+
+			// Generate interop
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+
+			if(!isStatic)
+				interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
+			else
+				interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(" << generateCSMethodParams(entry) << ");";
+
+			interops << std::endl;
+		}
+
+		// Properties
+		for (auto& entry : input.propertyInfos)
+		{
+			UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
+			std::string propTypeName = getCSVarType(entry.type, propTypeInfo.type, entry.typeFlags, false, true);
+
+			properties << "\t\tpublic " << propTypeName << " " << propTypeInfo.scriptName;
+			properties << "\t\t{" << std::endl;
+
+			if (!entry.getter.empty())
+			{
+				if (canBeReturned(propTypeInfo.type, entry.typeFlags))
+					properties << "\t\t\tget { return Internal_" << entry.getter << "(mCachedPtr);" << std::endl;
+				else
+				{
+					properties << "\t\t\tget" << std::endl;
+					properties << "\t\t\t{" << std::endl;
+					properties << "\t\t\t" << propTypeName << " temp;";
+
+					properties << "\t\t\tInternal_" << entry.getter << "(";
+
+					if (!entry.isStatic)
+						properties << "mCachedPtr, ";
+
+					properties << "ref temp);" << std::endl;
+
+					properties << "\t\t\treturn temp;";
+					properties << "\t\t\t}" << std::endl;
+				}
+			}
+
+			if (!entry.setter.empty())
+			{
+				properties << "\t\t\tset { Internal_" << entry.setter << "(";
+
+				if (!entry.isStatic)
+					properties << "mCachedPtr, ";
+
+				properties << "value);" << std::endl;
+			}
+
+			properties << "\t\t}" << std::endl;
+			properties << std::endl;
+		}
+
+		std::stringstream output;
+
+		if (input.visibility == CSVisibility::Internal)
+			output << "\tinternal ";
+		else if (input.visibility == CSVisibility::Public)
+			output << "\tpublic ";
+
+		output << input.documentation;
+
+		// TODO - Handle inheritance from other types
+		std::string baseType;
+		if(typeInfo.type == ParsedType::Resource)
+			baseType = "Resource";
+		else if(typeInfo.type == ParsedType::Component)
+			baseType = "Component";
+		else
+			baseType = "ScriptObject";
+
+		output << "\tpartial class " << typeInfo.scriptName << " : " << baseType;
+
+		output << std::endl;
+		output << "\t{" << std::endl;
+
+		output << ctors.str();
+		output << properties.str();
+		output << methods.str();
+		output << interops.str();
+
+		output << "\t}" << std::endl;
+		return output.str();
+	}
+
+	std::string generateCSStruct(StructInfo& input)
+	{
+		std::stringstream output;
+
+		if (input.visibility == CSVisibility::Internal)
+			output << "\tinternal ";
+		else if (input.visibility == CSVisibility::Public)
+			output << "\tpublic ";
+
+		std::string scriptName = cppToCsTypeMap[input.name].scriptName;
+
+		output << input.documentation;
+		output << "\tpartial struct " << scriptName;
+
+		output << std::endl;
+		output << "\t{" << std::endl;
+
+		for (auto& entry : input.ctors)
+		{
+			output << "\t\tpublic " << scriptName << "(";
+
+			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
+			{
+				const VarInfo& paramInfo = *I;
+
+				UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+
+				if (!isValidStructType(typeInfo, paramInfo.flags))
+				{
+					// We report the error during field generation, as it checks for the same condition
+					continue;
+				}
+
+				output << typeInfo.scriptName << " " << paramInfo.name;
+
+				if (!paramInfo.defaultValue.empty())
+					output << " = " << paramInfo.defaultValue;
+
+				if ((I + 1) != entry.params.end())
+					output << ", ";
+			}
+
+			output << ")" << std::endl;
+			output << "\t\t{" << std::endl;
+
+			for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
+			{
+				const VarInfo& paramInfo = *I;
+
+				UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+
+				if (!isValidStructType(typeInfo, paramInfo.flags))
+				{
+					// We report the error during field generation, as it checks for the same condition
+					continue;
+				}
+
+				auto iterFind = entry.fieldAssignments.find(I->name);
+				if (iterFind == entry.fieldAssignments.end())
+					continue;
+
+				std::string fieldName = iterFind->first;
+				std::string paramName = iterFind->second;
+
+				output << "\t\t\t" << fieldName << " = " << paramName << ";" << std::endl;
+			}
+
+			output << "\t\t}" << std::endl;
+			output << std::endl;
+		}
+
+		for (auto I = input.fields.begin(); I != input.fields.end(); ++I)
+		{
+			const VarInfo& fieldInfo = *I;
+
+			UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+
+			if (!isValidStructType(typeInfo, fieldInfo.flags))
+			{
+				errs() << "Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.";
+				continue;
+			}
+
+			output << "\t\tpublic ";
+			output << typeInfo.scriptName << " ";
+			output << fieldInfo.name;
+
+			if (!fieldInfo.defaultValue.empty())
+				output << " = " << fieldInfo.defaultValue;
+
+			output << ";" << std::endl;
+		}
+
+		output << "\t}" << std::endl;
 		return output.str();
 	}
 
@@ -2466,10 +2901,12 @@ public:
 				includes << "#include \"BsScriptEditorPrerequisites.h\"" << std::endl;
 
 			auto& classInfos = fileInfo.second.classInfos;
+			auto& structInfos = fileInfo.second.structInfos;
+
 			for(auto I = classInfos.begin(); I != classInfos.end(); ++I)
 			{
 				ClassInfo& classInfo = *I;
-				CSTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
 				if(typeInfo.type == ParsedType::Resource)
 					includes << "#include \"BsScriptResource.h\"" << std::endl;
@@ -2480,11 +2917,23 @@ public:
 
 				body << generateCppHeaderOutput(classInfo, typeInfo);
 
-				if ((I + 1) != classInfos.end())
+				if ((I + 1) != classInfos.end() || !structInfos.empty())
 					body << std::endl;
 			}
 
-			// TODO - Generate struct interop types
+			for (auto I = structInfos.begin(); I != structInfos.end(); ++I)
+			{
+				StructInfo& structInfo = *I;
+				UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
+
+				includes << "#include \"BsScriptObject.h\"" << std::endl;
+				includes << "#include \"" << typeInfo.declFile << "\"" << std::endl;
+
+				body << generateCppStructHeader(structInfo);
+
+				if ((I + 1) != structInfos.end())
+					body << std::endl;
+			}
 
 			std::string filename = "Generated/Script" + fileInfo.first + ".h";
 			std::ofstream output;
@@ -2513,10 +2962,12 @@ public:
 			includes << "#include \"Generated/Script" << fileInfo.first << ".h\"" << std::endl;
 
 			auto& classInfos = fileInfo.second.classInfos;
+			auto& structInfos = fileInfo.second.structInfos;
+
 			for (auto I = classInfos.begin(); I != classInfos.end(); ++I)
 			{
 				ClassInfo& classInfo = *I;
-				CSTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
 				includes << "#include \"" << typeInfo.declFile << "\"";
 
@@ -2524,11 +2975,17 @@ public:
 
 				body << generateCppSourceOutput(classInfo, typeInfo);
 
-				if ((I + 1) != classInfos.end())
+				if ((I + 1) != classInfos.end() || !structInfos.empty())
 					body << std::endl;
 			}
 
-			// TODO - Generate struct interop types
+			for (auto I = structInfos.begin(); I != structInfos.end(); ++I)
+			{
+				body << generateCppStructSource(*I);
+
+				if ((I + 1) != structInfos.end())
+					body << std::endl;
+			}
 
 			std::string filename = "Generated/Script" + fileInfo.first + ".cpp";
 			std::ofstream output;
@@ -2546,7 +3003,65 @@ public:
 		}
 
 		// Generate CS
-		// TODO - Generate enums, structs and classes
+		for (auto& fileInfo : outputFileInfos)
+		{
+			std::stringstream body;
+
+			auto& classInfos = fileInfo.second.classInfos;
+			auto& structInfos = fileInfo.second.structInfos;
+			auto& enumInfos = fileInfo.second.enumInfos;
+
+			for (auto I = classInfos.begin(); I != classInfos.end(); ++I)
+			{
+				ClassInfo& classInfo = *I;
+				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+
+				body << generateCSClass(classInfo, typeInfo);
+
+				if ((I + 1) != classInfos.end() || !structInfos.empty() || !enumInfos.empty())
+					body << std::endl;
+			}
+
+			for (auto I = structInfos.begin(); I != structInfos.end(); ++I)
+			{
+				body << generateCSStruct(*I);
+
+				if ((I + 1) != structInfos.end() || !enumInfos.empty())
+					body << std::endl;
+			}
+
+			for (auto I = enumInfos.begin(); I != enumInfos.end(); ++I)
+			{
+				body << I->code;
+
+				if ((I + 1) != enumInfos.end())
+					body << std::endl;
+			}
+
+			std::string filename = "Generated/" + fileInfo.first + ".cs";
+			std::ofstream output;
+			output.open(filename, std::ios::out);
+
+			output << "using System;" << std::endl;
+			output << "using System.Runtime.CompilerServices;" << std::endl;
+			output << "using System.Runtime.InteropServices;" << std::endl;
+
+			if (fileInfo.second.inEditor)
+				output << "using BansheeEngine;" << std::endl;
+
+			output << std::endl;
+
+			if(!fileInfo.second.inEditor)
+				output << "namespace BansheeEngine" << std::endl;
+			else
+				output << "namespace BansheeEditor" << std::endl;
+
+			output << "{" << std::endl;
+			output << body.str();
+			output << "}" << std::endl;
+
+			output.close();
+		}
 	}
 
 private:
