@@ -10,7 +10,7 @@ find_package(Clang)
 
 include_directories(${clang_INCLUDE_DIRS})
 
-add_executable(ScriptBindingParser ScriptBindingParser/main.cpp)
+add_executable(ScriptBindingParser Source/main.cpp)
 target_link_libraries(ScriptBindingParser ${clang_LIBRARIES})
 
 if(WIN32)
