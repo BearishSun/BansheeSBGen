@@ -1,6 +1,7 @@
 Debug
 Release
 x64
+Build
 ScriptBindingParser/x64
 ScriptBindingParser/Debug
 ScriptBindingParser/Release
