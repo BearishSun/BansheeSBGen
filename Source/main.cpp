@@ -23,7 +23,16 @@ using namespace clang::tooling;
 using namespace llvm;
 using namespace clang;
 
-static cl::OptionCategory MyToolCategory("Script binding options");
+static cl::OptionCategory OptCategory("Script binding options");
+static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
+static cl::extrahelp CustomHelp("\nAdd \"-- <compiler arguments>\" at the end to setup the compiler "
+								"invocation\n");
+
+static cl::opt<std::string> OutputOption(
+	"output",
+	cl::desc("Specify output directory. Generated CPP files will be placed relative to that folder in Cpp/Include"
+			 "and Cpp/Source folder. Generated CS files will be placed in CS/ folder.\n"),
+	cl::cat(OptCategory));
 
 const char* BUILTIN_COMPONENT_TYPE = "Component";
 const char* BUILTIN_SCENEOBJECT_TYPE = "SceneObject";
@@ -2361,12 +2370,12 @@ public:
 			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
 
 			// create() method
-			output << "\t\t static MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
+			output << "\t\tstatic MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
 		}
 		else if(typeInfo.type == ParsedType::Resource)
 		{
 			// createInstance() method required by script resource manager
-			output << "\t\t static MonoObject* createInstance();" << std::endl;
+			output << "\t\tstatic MonoObject* createInstance();" << std::endl;
 		}
 
 		output << std::endl;
@@ -2531,8 +2540,8 @@ public:
 
 		output << std::endl;
 
-		output << "\t\t static MonoObject* box(const " << structInfo.name << "& value);" << std::endl;
-		output << "\t\t static " << structInfo.name << " unbox(MonoObject* value);" << std::endl;
+		output << "\t\tstatic MonoObject* box(const " << structInfo.name << "& value);" << std::endl;
+		output << "\t\tstatic " << structInfo.name << " unbox(MonoObject* value);" << std::endl;
 
 		output << std::endl;
 		output << "\tprivate:" << std::endl;
@@ -2889,6 +2898,40 @@ public:
 	{
 		postProcessClassInfos();
 
+		StringRef outputFolder = OutputOption.getValue();
+		std::stringstream generatedCppFileList;
+		std::stringstream generatedCsFileList;
+
+		{
+			std::string folderName = "Cpp/Include";
+			StringRef filenameRef(folderName.data(), folderName.size());
+
+			SmallString<128> folderPath = outputFolder;
+			sys::path::append(folderPath, filenameRef);
+
+			sys::fs::create_directories(folderPath);
+		}
+
+		{
+			std::string folderName = "Cpp/Source";
+			StringRef filenameRef(folderName.data(), folderName.size());
+
+			SmallString<128> folderPath = outputFolder;
+			sys::path::append(folderPath, filenameRef);
+
+			sys::fs::create_directories(folderPath);
+		}
+
+		{
+			std::string folderName = "Cs";
+			StringRef filenameRef(folderName.data(), folderName.size());
+
+			SmallString<128> folderPath = outputFolder;
+			sys::path::append(folderPath, filenameRef);
+
+			sys::fs::create_directories(folderPath);
+		}
+
 		// Generate H
 		for(auto& fileInfo : outputFileInfos)
 		{
@@ -2935,9 +2978,14 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Generated/Script" + fileInfo.first + ".h";
+			std::string filename = "Cpp/Include/Script" + fileInfo.first + ".h";
+			StringRef filenameRef(filename.data(), filename.size());
+
+			SmallString<128> filepath = outputFolder;
+			sys::path::append(filepath, filenameRef);
+
 			std::ofstream output;
-			output.open(filename, std::ios::out);
+			output.open(filepath.str(), std::ios::out);
 
 			output << "#pragma once" << std::endl;
 			output << std::endl;
@@ -2951,6 +2999,8 @@ public:
 			output << "}" << std::endl;
 
 			output.close();
+
+			generatedCppFileList << filename << std::endl;
 		}
 
 		// Generate CPP
@@ -2959,7 +3009,7 @@ public:
 			std::stringstream includes;
 			std::stringstream body;
 
-			includes << "#include \"Generated/Script" << fileInfo.first << ".h\"" << std::endl;
+			includes << "#include \"Script" << fileInfo.first << ".h\"" << std::endl;
 
 			auto& classInfos = fileInfo.second.classInfos;
 			auto& structInfos = fileInfo.second.structInfos;
@@ -2987,9 +3037,14 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Generated/Script" + fileInfo.first + ".cpp";
+			std::string filename = "Cpp/Source/Script" + fileInfo.first + ".cpp";
+			StringRef filenameRef(filename.data(), filename.size());
+
+			SmallString<128> filepath = outputFolder;
+			sys::path::append(filepath, filenameRef);
+
 			std::ofstream output;
-			output.open(filename, std::ios::out);
+			output.open(filepath.str(), std::ios::out);
 
 			output << includes.str();
 			output << std::endl;
@@ -3000,6 +3055,8 @@ public:
 			output << "}" << std::endl;
 
 			output.close();
+
+			generatedCppFileList << filename << std::endl;
 		}
 
 		// Generate CS
@@ -3038,9 +3095,14 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Generated/" + fileInfo.first + ".cs";
+			std::string filename = "Cs/" + fileInfo.first + ".cs";
+			StringRef filenameRef(filename.data(), filename.size());
+
+			SmallString<128> filepath = outputFolder;
+			sys::path::append(filepath, filenameRef);
+
 			std::ofstream output;
-			output.open(filename, std::ios::out);
+			output.open(filepath.str(), std::ios::out);
 
 			output << "using System;" << std::endl;
 			output << "using System.Runtime.CompilerServices;" << std::endl;
@@ -3061,6 +3123,34 @@ public:
 			output << "}" << std::endl;
 
 			output.close();
+
+			generatedCsFileList << filename;
+		}
+
+		{
+			std::string filename = "generatedCppFiles.txt";
+			StringRef filenameRef(filename.data(), filename.size());
+
+			SmallString<128> filepath = outputFolder;
+			sys::path::append(filepath, filenameRef);
+
+			std::ofstream output;
+			output.open(filepath.str(), std::ios::out);
+			output << generatedCppFileList.str();
+			output.close();
+		}
+
+		{
+			std::string filename = "generatedCsFiles.txt";
+			StringRef filenameRef(filename.data(), filename.size());
+
+			SmallString<128> filepath = outputFolder;
+			sys::path::append(filepath, filenameRef);
+
+			std::ofstream output;
+			output.open(filepath.str(), std::ios::out);
+			output << generatedCsFileList.str();
+			output.close();
 		}
 	}
 
@@ -3077,6 +3167,7 @@ public:
 
 	~ScriptExportConsumer()
 	{
+		visitor->generateAll();
 		delete visitor;
 	}
 
@@ -3105,7 +3196,7 @@ public:
 
 int main(int argc, const char** argv)
 {
-	CommonOptionsParser op(argc, argv, MyToolCategory);
+	CommonOptionsParser op(argc, argv, OptCategory);
 	ClangTool Tool(op.getCompilations(), op.getSourcePathList());
 
 	std::unique_ptr<FrontendActionFactory> factory = newFrontendActionFactory<ScriptExportFrontendAction>();
