@@ -94,12 +94,13 @@ struct UserTypeInfo
 {
 	UserTypeInfo() {}
 
-	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile)
-		:scriptName(scriptName), type(type), declFile(declFile)
+	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile)
+		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile)
 	{ }
 
 	std::string scriptName;
 	std::string declFile;
+	std::string destFile;
 	ParsedType type;
 	BuiltinType::Kind underlyingType; // For enums
 };
@@ -191,7 +192,20 @@ struct FileInfo
 	std::vector<StructInfo> structInfos;
 	std::vector<EnumInfo> enumInfos;
 
+	std::vector<std::string> referencedHeaderIncludes;
+	std::vector<std::string> referencedSourceIncludes;
 	bool inEditor;
+};
+
+struct IncludeInfo
+{
+	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude)
+		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude)
+	{ }
+
+	std::string typeName;
+	UserTypeInfo typeInfo;
+	bool sourceInclude;
 };
 
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
@@ -204,22 +218,23 @@ public:
 	explicit ScriptExportVisitor(CompilerInstance* CI)
 		:astContext(&(CI->getASTContext()))
 	{
-		cppToCsTypeMap["Vector2"] = UserTypeInfo("Vector2", ParsedType::Struct, "BsVector2.h");
-		cppToCsTypeMap["Vector3"] = UserTypeInfo("Vector3", ParsedType::Struct, "BsVector3.h");
-		cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "BsVector4.h");
-		cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "BsMatrix3.h");
-		cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "BsMatrix4.h");
-		cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h");
-		cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "BsRadian.h");
-		cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "BsDegree.h");
-		cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "BsColor.h");
-		cppToCsTypeMap["AABox"] = UserTypeInfo("AABox", ParsedType::Struct, "BsAABox.h");
-		cppToCsTypeMap["Sphere"] = UserTypeInfo("Sphere", ParsedType::Struct, "BsSphere.h");
-		cppToCsTypeMap["Capsule"] = UserTypeInfo("Capsule", ParsedType::Struct, "BsCapsule.h");
-		cppToCsTypeMap["Ray"] = UserTypeInfo("Ray", ParsedType::Struct, "BsRay.h");
-		cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "BsVector2I.h");
-		cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "BsRect2.h");
-		cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "BsRect2I.h");
+		// Note: I could auto-generate C++ wrappers for these types
+		cppToCsTypeMap["Vector2"] = UserTypeInfo("Vector2", ParsedType::Struct, "BsVector2.h", "BsScriptVector.h");
+		cppToCsTypeMap["Vector3"] = UserTypeInfo("Vector3", ParsedType::Struct, "BsVector3.h", "BsScriptVector.h");
+		cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "BsVector4.h", "BsScriptVector.h");
+		cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "BsMatrix3.h", "");
+		cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "BsMatrix4.h", "");
+		cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h", "");
+		cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "BsRadian.h", "");
+		cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "BsDegree.h", "");
+		cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "BsColor.h", "BsScriptColor.h");
+		cppToCsTypeMap["AABox"] = UserTypeInfo("AABox", ParsedType::Struct, "BsAABox.h", "");
+		cppToCsTypeMap["Sphere"] = UserTypeInfo("Sphere", ParsedType::Struct, "BsSphere.h", "");
+		cppToCsTypeMap["Capsule"] = UserTypeInfo("Capsule", ParsedType::Struct, "BsCapsule.h", "");
+		cppToCsTypeMap["Ray"] = UserTypeInfo("Ray", ParsedType::Struct, "BsRay.h", "");
+		cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "BsVector2I.h", "BsScriptVector2I.h");
+		cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "BsRect2.h", "");
+		cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "BsRect2I.h", "");
 	}
 
 	ParsedType getObjectType(const CXXRecordDecl* decl) const
@@ -934,7 +949,7 @@ public:
 		
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Enum, declFile);
+		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Enum, declFile, fileName);
 		cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
 
 		std::stringstream output;
@@ -1177,7 +1192,7 @@ public:
 			}
 
 			std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Struct, declFile);
+			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Struct, declFile, fileName);
 
 			FileInfo& fileInfo = outputFileInfos[fileName.str()];
 			fileInfo.structInfos.push_back(structInfo);
@@ -1197,7 +1212,7 @@ public:
 
 			std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, classType, declFile);
+			cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, classType, declFile, fileName);
 
 			for(auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
 			{
@@ -1674,30 +1689,6 @@ public:
 		return false;
 	}
 
-	void findRequiredIncludes(const MethodInfo& methodInfo, std::unordered_set<std::string>& includes)
-	{
-		for (auto& paramInfo : methodInfo.paramInfos)
-		{
-			auto iterFind = cppToCsTypeMap.find(paramInfo.type);
-			if (iterFind != cppToCsTypeMap.end())
-			{
-				const UserTypeInfo& typeInfo = iterFind->second;
-				includes.insert(typeInfo.declFile);
-
-				// TODO - Need to include script interop types for certain parsed types, might need to include enum headers in interop header, etc.
-			}
-		}
-	}
-
-	void findRequiredIncludes(const ClassInfo& classInfo, std::unordered_set<std::string>& includes)
-	{
-		for(auto& entry : classInfo.ctorInfos)
-			findRequiredIncludes(entry, includes);
-
-		for (auto& entry : classInfo.methodInfos)
-			findRequiredIncludes(entry, includes);
-	}
-
 	MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo) const
 	{
 		int numBools = 1;
@@ -1750,7 +1741,7 @@ public:
 		return output;
 	}
 
-	void postProcessClassInfos()
+	void postProcessFileInfos()
 	{
 		// Inject external methods into their appropriate class infos
 		auto findClassInfo = [](const std::string& name) -> ClassInfo*
@@ -1839,6 +1830,67 @@ public:
 
 							if (!propertyInfo.documentation.empty())
 								existingInfo.documentation = propertyInfo.documentation;
+						}
+					}
+				}
+			}
+		}
+
+		// Generate referenced includes
+		{
+			for (auto& fileInfo : outputFileInfos)
+			{
+				std::unordered_map<std::string, IncludeInfo> includes;
+				for (auto& classInfo : fileInfo.second.classInfos)
+					gatherIncludes(classInfo, includes);
+
+				// Needed for all .h files
+				if (!fileInfo.second.inEditor)
+					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptEnginePrerequisites.h");
+				else
+					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptEditorPrerequisites.h");
+
+				// Needed for all .cpp files
+				fileInfo.second.referencedSourceIncludes.push_back("BsScript" + fileInfo.first + ".h");
+				fileInfo.second.referencedSourceIncludes.push_back("BsMonoClass.h");
+				fileInfo.second.referencedSourceIncludes.push_back("BsMonoUtil.h");
+
+				for (auto& classInfo : fileInfo.second.classInfos)
+				{
+					UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+
+					if (typeInfo.type == ParsedType::Resource)
+						fileInfo.second.referencedHeaderIncludes.push_back("BsScriptResource.h");
+					else if (typeInfo.type == ParsedType::Component)
+						fileInfo.second.referencedHeaderIncludes.push_back("BsScriptComponent.h");
+					else // Class
+						fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
+
+					fileInfo.second.referencedSourceIncludes.push_back(typeInfo.declFile);
+				}
+
+				for (auto& structInfo : fileInfo.second.structInfos)
+				{
+					UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
+
+					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
+					fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
+				}
+
+				for(auto& entry : includes)
+				{
+					if(entry.second.sourceInclude)
+					{
+						std::string include = entry.second.typeInfo.declFile;
+						fileInfo.second.referencedHeaderIncludes.push_back(include);
+					}
+					
+					if(entry.second.typeInfo.type != ParsedType::Enum)
+					{
+						if (!entry.second.typeInfo.destFile.empty())
+						{
+							std::string include = "BsScript" + entry.second.typeInfo.destFile + ".h";
+							fileInfo.second.referencedSourceIncludes.push_back(include);
 						}
 					}
 				}
@@ -2166,6 +2218,43 @@ public:
 				}
 			}
 		}
+	}
+
+	void gatherIncludes(const std::string& typeName, int flags, std::unordered_map<std::string, IncludeInfo>& output)
+	{
+		UserTypeInfo typeInfo = getTypeInfo(typeName, flags);
+		if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Component || 
+			typeInfo.type == ParsedType::SceneObject || typeInfo.type == ParsedType::Resource ||
+			typeInfo.type == ParsedType::Enum)
+		{
+			auto iterFind = output.find(typeName);
+			if (iterFind == output.end())
+			{
+				// If enum or passed by value we need to include the header for the source type
+				bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags);
+
+				output[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude);
+			}
+		}
+	}
+
+	void gatherIncludes(const MethodInfo& methodInfo, std::unordered_map<std::string, IncludeInfo>& output)
+	{
+		bool returnAsParameter = false;
+		if (!methodInfo.returnInfo.type.empty())
+			gatherIncludes(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, output);
+
+		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+			gatherIncludes(I->type, I->flags, output);
+	}
+
+	void gatherIncludes(const ClassInfo& classInfo, std::unordered_map<std::string, IncludeInfo>& output)
+	{
+		for (auto& methodInfo : classInfo.ctorInfos)
+			gatherIncludes(methodInfo, output);
+
+		for (auto& methodInfo : classInfo.methodInfos)
+			gatherIncludes(methodInfo, output);
 	}
 
 	std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::string& sourceClassName, 
@@ -2896,7 +2985,7 @@ public:
 
 	void generateAll()
 	{
-		postProcessClassInfos();
+		postProcessFileInfos();
 
 		StringRef outputFolder = OutputOption.getValue();
 		std::stringstream generatedCppFileList;
@@ -2931,17 +3020,11 @@ public:
 
 			sys::fs::create_directories(folderPath);
 		}
-
+		
 		// Generate H
 		for(auto& fileInfo : outputFileInfos)
 		{
-			std::stringstream includes;
 			std::stringstream body;
-
-			if(!fileInfo.second.inEditor)
-				includes << "#include \"BsScriptEnginePrerequisites.h\"" << std::endl;
-			else
-				includes << "#include \"BsScriptEditorPrerequisites.h\"" << std::endl;
 
 			auto& classInfos = fileInfo.second.classInfos;
 			auto& structInfos = fileInfo.second.structInfos;
@@ -2950,13 +3033,6 @@ public:
 			{
 				ClassInfo& classInfo = *I;
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
-
-				if(typeInfo.type == ParsedType::Resource)
-					includes << "#include \"BsScriptResource.h\"" << std::endl;
-				else if (typeInfo.type == ParsedType::Component)
-					includes << "#include \"BsScriptComponent.h\"" << std::endl;
-				else // Class
-					includes << "#include \"BsScriptObject.h\"" << std::endl;
 
 				body << generateCppHeaderOutput(classInfo, typeInfo);
 
@@ -2967,18 +3043,13 @@ public:
 			for (auto I = structInfos.begin(); I != structInfos.end(); ++I)
 			{
 				StructInfo& structInfo = *I;
-				UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
-
-				includes << "#include \"BsScriptObject.h\"" << std::endl;
-				includes << "#include \"" << typeInfo.declFile << "\"" << std::endl;
-
 				body << generateCppStructHeader(structInfo);
 
 				if ((I + 1) != structInfos.end())
 					body << std::endl;
 			}
 
-			std::string filename = "Cpp/Include/Script" + fileInfo.first + ".h";
+			std::string filename = "Cpp/Include/BsScript" + fileInfo.first + ".h";
 			StringRef filenameRef(filename.data(), filename.size());
 
 			SmallString<128> filepath = outputFolder;
@@ -2990,7 +3061,10 @@ public:
 			output << "#pragma once" << std::endl;
 			output << std::endl;
 
-			output << includes.str();
+			// Output includes
+			for (auto& include : fileInfo.second.referencedHeaderIncludes)
+				output << "#include \"" << include << "\"";
+
 			output << std::endl;
 
 			output << "namespace bs" << std::endl;
@@ -3006,10 +3080,7 @@ public:
 		// Generate CPP
 		for (auto& fileInfo : outputFileInfos)
 		{
-			std::stringstream includes;
 			std::stringstream body;
-
-			includes << "#include \"Script" << fileInfo.first << ".h\"" << std::endl;
 
 			auto& classInfos = fileInfo.second.classInfos;
 			auto& structInfos = fileInfo.second.structInfos;
@@ -3018,10 +3089,6 @@ public:
 			{
 				ClassInfo& classInfo = *I;
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
-
-				includes << "#include \"" << typeInfo.declFile << "\"";
-
-				// TODO - Include any referenced types
 
 				body << generateCppSourceOutput(classInfo, typeInfo);
 
@@ -3037,7 +3104,7 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Cpp/Source/Script" + fileInfo.first + ".cpp";
+			std::string filename = "Cpp/Source/BsScript" + fileInfo.first + ".cpp";
 			StringRef filenameRef(filename.data(), filename.size());
 
 			SmallString<128> filepath = outputFolder;
@@ -3046,7 +3113,10 @@ public:
 			std::ofstream output;
 			output.open(filepath.str(), std::ios::out);
 
-			output << includes.str();
+			// Output includes
+			for (auto& include : fileInfo.second.referencedSourceIncludes)
+				output << "#include \"" << include << "\"";
+
 			output << std::endl;
 
 			output << "namespace bs" << std::endl;
