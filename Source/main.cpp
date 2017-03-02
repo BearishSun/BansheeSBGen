@@ -123,6 +123,7 @@ struct ReturnInfo
 struct MethodInfo
 {
 	std::string sourceName;
+	std::string interopName;
 	std::string scriptName;
 
 	ReturnInfo returnInfo;
@@ -1768,6 +1769,40 @@ public:
 				classInfo->methodInfos.push_back(method);
 		}
 
+		// Generate unique interop method names
+		std::unordered_set<std::string> usedNames;
+		for (auto& fileInfo : outputFileInfos)
+		{
+			for (auto& classInfo : fileInfo.second.classInfos)
+			{
+				usedNames.clear();
+
+				auto generateInteropName = [&usedNames](MethodInfo& methodInfo)
+				{
+					std::string interopName = methodInfo.sourceName;
+					int counter = 0;
+					while (true)
+					{
+						auto iterFind = usedNames.find(interopName);
+						if (iterFind == usedNames.end())
+							break;
+
+						interopName = methodInfo.sourceName + std::to_string(counter);
+						counter++;
+					}
+
+					usedNames.insert(interopName);
+					methodInfo.interopName = interopName;
+				};
+
+				for (auto& methodInfo : classInfo.methodInfos)
+					generateInteropName(methodInfo);
+
+				for (auto& methodInfo : classInfo.ctorInfos)
+					generateInteropName(methodInfo);
+			}
+		}
+
 		// Generate property infos
 		for (auto& fileInfo : outputFileInfos)
 		{
@@ -1788,13 +1823,13 @@ public:
 
 					if(isGetter)
 					{
-						propertyInfo.getter = methodInfo.sourceName;
+						propertyInfo.getter = methodInfo.interopName;
 						propertyInfo.type = methodInfo.returnInfo.type;
 						propertyInfo.typeFlags = methodInfo.returnInfo.flags;
 					}
 					else // Setter
 					{
-						propertyInfo.setter = methodInfo.sourceName;
+						propertyInfo.setter = methodInfo.interopName;
 						propertyInfo.type = methodInfo.paramInfos[0].type;
 						propertyInfo.typeFlags = methodInfo.paramInfos[0].flags;
 					}
@@ -1927,7 +1962,7 @@ public:
 		if (!nestedName.empty())
 			output << nestedName << "::";
 
-		output << "Internal_" << methodInfo.sourceName << "(";
+		output << "Internal_" << methodInfo.interopName << "(";
 
 		if (isCtor)
 		{
@@ -2520,8 +2555,8 @@ public:
 
 		for (auto& methodInfo : classInfo.methodInfos)
 		{
-			output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.sourceName << "\", &" <<
-				interopClassName << "::Internal_" << methodInfo.sourceName << ");" << std::endl;
+			output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
+				interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
 		}
 
 		output << "\t}" << std::endl;
@@ -2740,13 +2775,13 @@ public:
 			ctors << entry.documentation;
 			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
-			ctors << "\t\t\tInternal_" << entry.sourceName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+			ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
 			ctors << "\t\t}" << std::endl;
 			ctors << std::endl;
 
 			// Generate interop
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-			interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
+			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
 			interops << std::endl;
 		}
 
@@ -2761,7 +2796,7 @@ public:
 				ctors << entry.documentation;
 				ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
 				ctors << "\t\t{" << std::endl;
-				ctors << "\t\t\tInternal_" << entry.sourceName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+				ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
 				ctors << "\t\t}" << std::endl;
 				ctors << std::endl;
 			}
@@ -2789,9 +2824,9 @@ public:
 						methods << "\t\t\t";
 
 					if (!isStatic)
-						methods << "Internal_" << entry.sourceName << "(mCachedPtr, " << generateCSMethodArgs(entry) << ");" << std::endl;
+						methods << "Internal_" << entry.interopName << "(mCachedPtr, " << generateCSMethodArgs(entry) << ");" << std::endl;
 					else
-						methods << "Internal_" << entry.sourceName << "(" << generateCSMethodArgs(entry) << ");" << std::endl;
+						methods << "Internal_" << entry.interopName << "(" << generateCSMethodArgs(entry) << ");" << std::endl;
 
 					methods << "\t\t}" << std::endl;
 					methods << std::endl;
@@ -2802,9 +2837,9 @@ public:
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
 
 			if(!isStatic)
-				interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
+				interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
 			else
-				interops << "\t\tprivate static extern void Internal_" << entry.sourceName << "(" << generateCSMethodParams(entry) << ");";
+				interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry) << ");";
 
 			interops << std::endl;
 		}
