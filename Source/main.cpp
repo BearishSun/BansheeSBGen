@@ -200,6 +200,7 @@ struct FileInfo
 
 struct IncludeInfo
 {
+	IncludeInfo() { }
 	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude)
 		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude)
 	{ }
@@ -366,7 +367,7 @@ public:
 			break;
 		}
 
-		errs() << "Unrecognized builtin type found.";
+		errs() << "Unrecognized builtin type found.\n";
 		return false;
 	}
 
@@ -466,7 +467,7 @@ public:
 			break;
 		}
 
-		errs() << "Unrecognized builtin type found.";
+		errs() << "Unrecognized builtin type found.\n";
 		return false;
 	}
 
@@ -495,7 +496,7 @@ public:
 		{
 			// Check for arrays
 			// Note: Not supporting nested arrays
-			const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
+			const TemplateSpecializationType* specType = type->getAs<TemplateSpecializationType>();
 			int numArgs = 0;
 
 			if (specType != nullptr)
@@ -503,7 +504,7 @@ public:
 
 			if(numArgs > 0)
 			{
-				const RecordType* recordType = realType->getAs<RecordType>();
+				const RecordType* recordType = type->getAs<RecordType>();
 				const RecordDecl* recordDecl = recordType->getDecl();
 
 				std::string sourceTypeName = recordDecl->getName();
@@ -525,7 +526,7 @@ public:
 
 		if(realType->isPointerType())
 		{
-			errs() << "Only normal pointers are supported for parameter types.";
+			errs() << "Only normal pointers are supported for parameter types.\n";
 			return false;
 		}
 
@@ -599,7 +600,7 @@ public:
 							else
 							{
 								errs() << "Game object and resource types are only allowed to be referenced through handles"
-									<< " for scripting purposes";
+									<< " for scripting purposes\n";
 							}
 						}
 						else if (sourceTypeName == "TResourceHandle")
@@ -625,9 +626,18 @@ public:
 			outType = sourceTypeName;
 			return true;
 		}
+		else if(realType->isEnumeralType())
+		{
+			const EnumType* enumType = realType->getAs<EnumType>();
+			const EnumDecl* enumDecl = enumType->getDecl();
+
+			std::string sourceTypeName = enumDecl->getName();
+			outType = sourceTypeName;
+			return true;
+		}
 		else
 		{
-			errs() << "Unrecognized type";
+			errs() << "Unrecognized type\n";
 			return false;
 		}
 	}
@@ -653,6 +663,9 @@ public:
 
 		for (size_t i = 1; i < annotEntries.size(); i++)
 		{
+			if (annotEntries[i].empty())
+				continue;
+
 			auto annotParam = annotEntries[i].split(':');
 			if (annotParam.first == "n")
 				exportName = annotParam.second;
@@ -664,7 +677,7 @@ public:
 					visibility = CSVisibility::Internal;
 				else
 					errs() << "Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
-						sourceName << "\".";
+						sourceName << "\".\n";
 			}
 			else if(annotParam.first == "f")
 			{
@@ -677,7 +690,7 @@ public:
 				else if(annotParam.second != "false")
 				{
 					errs() << "Unrecognized value for \"pl\" option: \"" + annotParam.second + "\" for type \"" <<
-						sourceName << "\".";
+						sourceName << "\".\n";
 				}
 			}
 			else if(annotParam.first == "pr")
@@ -689,7 +702,7 @@ public:
 				else
 				{
 					errs() << "Unrecognized value for \"pr\" option: \"" + annotParam.second + "\" for type \"" <<
-						sourceName << "\".";
+						sourceName << "\".\n";
 				}
 			}
 			else if(annotParam.first == "e")
@@ -711,12 +724,12 @@ public:
 				else if (annotParam.second != "false")
 				{
 					errs() << "Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
-						sourceName << "\".";
+						sourceName << "\".\n";
 				}
 			}
 			else
 				errs() << "Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
-				sourceName << "\".";
+				sourceName << "\".\n";
 		}
 
 		return true;
@@ -843,7 +856,7 @@ public:
 				break;
 			}
 			default:
-				errs() << "Unrecognized comment command.";
+				errs() << "Unrecognized comment command.\n";
 			}
 
 			++commentIter;
@@ -934,7 +947,7 @@ public:
 		QualType underlyingType = decl->getIntegerType();
 		if(!underlyingType->isBuiltinType())
 		{
-			errs() << "Found an enum with non-builtin underlying type, skipping.";
+			errs() << "Found an enum with non-builtin underlying type, skipping.\n";
 			return true;
 		}
 
@@ -1037,6 +1050,12 @@ public:
 					SimpleConstructorInfo ctorInfo;
 					CXXConstructorDecl* ctorDecl = *ctorIter;
 
+					if(ctorDecl->isImplicit())
+					{
+						++ctorIter;
+						continue;
+					}
+
 					bool skippedDefaultArgument = false;
 					for(auto I = ctorDecl->param_begin(); I != ctorDecl->param_end(); ++I)
 					{
@@ -1049,7 +1068,7 @@ public:
 						if(!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
 						{
 							errs() << "Unable to detect type for constructor parameter \"" << paramDecl->getName().str() 
-								<< "\". Skipping.";
+								<< "\". Skipping.\n";
 							continue;
 						}
 
@@ -1058,7 +1077,7 @@ public:
 							if(!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
 							{
 								errs() << "Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
-									<< "argument that cannot be constantly evaluated, ignoring it.";
+									<< "argument that cannot be constantly evaluated, ignoring it.\n";
 								skippedDefaultArgument = true;
 							}
 						}
@@ -1095,54 +1114,57 @@ public:
 
 					// Parse any assignments in the function body
 					// Note: Searching for trivially simple assignments only, ignoring anything else
-					CompoundStmt* functionBody = dyn_cast<CompoundStmt>(ctorDecl->getBody()); // Note: Not handling inner blocks
-					assert(functionBody != nullptr);
-
-					for(auto I = functionBody->child_begin(); I != functionBody->child_end(); ++I)
+					if (ctorDecl->hasBody())
 					{
-						Stmt* stmt = *I;
-						
-						BinaryOperator* binaryOp = dyn_cast<BinaryOperator>(stmt);
-						if (binaryOp == nullptr)
-							continue;
+						CompoundStmt* functionBody = dyn_cast<CompoundStmt>(ctorDecl->getBody()); // Note: Not handling inner blocks
+						assert(functionBody != nullptr);
 
-						if (binaryOp->getOpcode() != BO_Assign)
-							continue;
-
-						Expr* lhsExpr = binaryOp->getLHS()->IgnoreParenCasts(); // Note: Ignoring even explicit casts
-						Decl* lhsDecl;
-
-						if (DeclRefExpr* varExpr = dyn_cast<DeclRefExpr>(lhsExpr))
-							lhsDecl = varExpr->getDecl();
-						else if (MemberExpr* memberExpr = dyn_cast<MemberExpr>(lhsExpr))
-							lhsDecl = memberExpr->getMemberDecl();
-						else
-							continue;
-
-						FieldDecl* fieldDecl = dyn_cast<FieldDecl>(lhsDecl);
-						if (fieldDecl == nullptr)
-							continue;
-
-						Expr* rhsExpr = binaryOp->getRHS()->IgnoreParenCasts();
-						Decl* rhsDecl = nullptr;
-
-						if (DeclRefExpr* varExpr = dyn_cast<DeclRefExpr>(rhsExpr))
-							rhsDecl = varExpr->getDecl();
-						else if (MemberExpr* memberExpr = dyn_cast<MemberExpr>(rhsExpr))
-							rhsDecl = memberExpr->getMemberDecl();
-
-						ParmVarDecl* parmVarDecl = nullptr;
-						if(rhsDecl != nullptr)
-							parmVarDecl = dyn_cast<ParmVarDecl>(rhsDecl);
-
-						if (parmVarDecl == nullptr)
+						for (auto I = functionBody->child_begin(); I != functionBody->child_end(); ++I)
 						{
-							errs() << "Found a non-trivial field assignment for field \"" << fieldDecl->getName() << "\" in"
-								<< " constructor of \"" << sourceClassName << "\". Ignoring assignment.";
-							continue;
-						}
+							Stmt* stmt = *I;
 
-						assignments[fieldDecl] = parmVarDecl;
+							BinaryOperator* binaryOp = dyn_cast<BinaryOperator>(stmt);
+							if (binaryOp == nullptr)
+								continue;
+
+							if (binaryOp->getOpcode() != BO_Assign)
+								continue;
+
+							Expr* lhsExpr = binaryOp->getLHS()->IgnoreParenCasts(); // Note: Ignoring even explicit casts
+							Decl* lhsDecl;
+
+							if (DeclRefExpr* varExpr = dyn_cast<DeclRefExpr>(lhsExpr))
+								lhsDecl = varExpr->getDecl();
+							else if (MemberExpr* memberExpr = dyn_cast<MemberExpr>(lhsExpr))
+								lhsDecl = memberExpr->getMemberDecl();
+							else
+								continue;
+
+							FieldDecl* fieldDecl = dyn_cast<FieldDecl>(lhsDecl);
+							if (fieldDecl == nullptr)
+								continue;
+
+							Expr* rhsExpr = binaryOp->getRHS()->IgnoreParenCasts();
+							Decl* rhsDecl = nullptr;
+
+							if (DeclRefExpr* varExpr = dyn_cast<DeclRefExpr>(rhsExpr))
+								rhsDecl = varExpr->getDecl();
+							else if (MemberExpr* memberExpr = dyn_cast<MemberExpr>(rhsExpr))
+								rhsDecl = memberExpr->getMemberDecl();
+
+							ParmVarDecl* parmVarDecl = nullptr;
+							if (rhsDecl != nullptr)
+								parmVarDecl = dyn_cast<ParmVarDecl>(rhsDecl);
+
+							if (parmVarDecl == nullptr)
+							{
+								errs() << "Found a non-trivial field assignment for field \"" << fieldDecl->getName() << "\" in"
+									<< " constructor of \"" << sourceClassName << "\". Ignoring assignment.\n";
+								continue;
+							}
+
+							assignments[fieldDecl] = parmVarDecl;
+						}
 					}
 
 					for (auto I = decl->field_begin(); I != decl->field_end(); ++I)
@@ -1185,7 +1207,7 @@ public:
 				if(!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags))
 				{
 					errs() << "Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \"" 
-						   << sourceClassName << "\". Skipping field.";
+						   << sourceClassName << "\". Skipping field.\n";
 					continue;
 				}
 
@@ -1219,13 +1241,17 @@ public:
 			{
 				CXXConstructorDecl* ctorDecl = *I;
 
+				AnnotateAttr* methodAttr = ctorDecl->getAttr<AnnotateAttr>();
+				if (methodAttr == nullptr)
+					continue;
+
 				StringRef dummy0;
 				StringRef dummy1;
 				StringRef dummy2;
 				CSVisibility dummy3;
 				int methodExportFlags;
 
-				if (!parseExportAttribute(attr, dummy0, dummy1, dummy2, dummy3, methodExportFlags, externalClass))
+				if (!parseExportAttribute(methodAttr, dummy0, dummy1, dummy2, dummy3, methodExportFlags, externalClass))
 					continue;
 
 				MethodInfo methodInfo;
@@ -1245,7 +1271,7 @@ public:
 
 					if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 					{
-						errs() << "Unable to parse return type for \"" << sourceClassName << "\"'s constructor.";
+						errs() << "Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
 						invalidParam = true;
 						continue;
 					}
@@ -1263,13 +1289,24 @@ public:
 			{
 				CXXMethodDecl* methodDecl = *I;
 
+				CXXConstructorDecl* ctorDecl = dyn_cast<CXXConstructorDecl>(methodDecl);
+				if (ctorDecl != nullptr)
+					continue;
+
+				if (!methodDecl->isUserProvided() || methodDecl->isImplicit())
+					continue;
+
+				AnnotateAttr* methodAttr = methodDecl->getAttr<AnnotateAttr>();
+				if (methodAttr == nullptr)
+					continue;
+
 				StringRef sourceMethodName = methodDecl->getName();
 				StringRef methodName = sourceMethodName;
 				StringRef dummy0;
 				CSVisibility dummy1;
 				int methodExportFlags;
 
-				if (!parseExportAttribute(attr, sourceMethodName, methodName, dummy0, dummy1, methodExportFlags, externalClass))
+				if (!parseExportAttribute(methodAttr, sourceMethodName, methodName, dummy0, dummy1, methodExportFlags, externalClass))
 					continue;
 
 				int methodFlags = 0;
@@ -1313,7 +1350,7 @@ public:
 						ReturnInfo returnInfo;
 						if (!parseType(returnType, returnInfo.type, returnInfo.flags))
 						{
-							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.";
+							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 							continue;
 						}
 
@@ -1331,7 +1368,7 @@ public:
 
 						if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 						{
-							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.";
+							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 							invalidParam = true;
 							continue;
 						}
@@ -1344,13 +1381,13 @@ public:
 				}
 				else
 				{
-					if(methodExportFlags & ((int)ExportFlags::PropertyGetter) != 0)
+					if((methodExportFlags & (int)ExportFlags::PropertyGetter) != 0)
 					{
 						QualType returnType = methodDecl->getReturnType();
 						if (returnType->isVoidType())
 						{
 							errs() << "Unable to create a getter for property because method \"" << sourceMethodName 
-								<< "\" has no return value.";
+								<< "\" has no return value.\n";
 							continue;
 						}
 
@@ -1358,13 +1395,13 @@ public:
 						if(methodDecl->param_size() > 0)
 						{
 							errs() << "Unable to create a getter for property because method \"" << sourceMethodName
-								<< "\" has parameters.";
+								<< "\" has parameters.\n";
 							continue;
 						}
 
 						if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags))
 						{
-							errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.";
+							errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 							continue;
 						}
 					}
@@ -1374,14 +1411,14 @@ public:
 						if (!returnType->isVoidType())
 						{
 							errs() << "Unable to create a setter for property because method \"" << sourceMethodName
-								<< "\" has a return value.";
+								<< "\" has a return value.\n";
 							continue;
 						}
 
 						if (methodDecl->param_size() != 1)
 						{
 							errs() << "Unable to create a setter for property because method \"" << sourceMethodName
-								<< "\" has more or less than one parameter.";
+								<< "\" has more or less than one parameter.\n";
 							continue;
 						}
 
@@ -1392,7 +1429,7 @@ public:
 
 						if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
 						{
-							errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.";
+							errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 							continue;
 						}
 
@@ -1459,7 +1496,7 @@ public:
 			outType.scriptName = mapCppTypeToCSType(sourceType);
 			outType.type = ParsedType::Builtin;
 
-			errs() << "Unable to map type \"" << sourceType << "\". Assuming same name as source. ";
+			errs() << "Unable to map type \"" << sourceType << "\". Assuming same name as source.\n";
 			return outType;
 		}
 
@@ -1606,7 +1643,7 @@ public:
 				return (isPtr ? "*" : "") + name;
 			else
 			{
-				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".";
+				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 				return name;
 			}
 		};
@@ -1635,7 +1672,7 @@ public:
 				return name;
 			else
 			{
-				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".";
+				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 				return name;
 			}
 		}
@@ -1651,7 +1688,7 @@ public:
 				return name;
 			else
 			{
-				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".";
+				errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 				return name;
 			}
 
@@ -1666,7 +1703,7 @@ public:
 	{
 		auto iterFind = cppToCsTypeMap.find(name);
 		if (iterFind == cppToCsTypeMap.end())
-			errs() << "Type \"" << name << "\" referenced as a script interop type, but no script interop mapping found. Assuming default type name.";
+			errs() << "Type \"" << name << "\" referenced as a script interop type, but no script interop mapping found. Assuming default type name.\n";
 
 		bool isValidInteropType = iterFind->second.type != ParsedType::Builtin &&
 			iterFind->second.type != ParsedType::Enum &&
@@ -1674,7 +1711,7 @@ public:
 			iterFind->second.type != ParsedType::WString;
 
 		if(!isValidInteropType)
-			errs() << "Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.";
+			errs() << "Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
 
 		return "Script" + name;
 	}
@@ -1847,7 +1884,7 @@ public:
 						PropertyInfo& existingInfo = *iterFind;
 						if (existingInfo.type != propertyInfo.type || existingInfo.isStatic != propertyInfo.isStatic)
 						{
-							errs() << "Getter and setter types for the property \"" << propertyInfo.name << "\" don't match. Skipping property.";
+							errs() << "Getter and setter types for the property \"" << propertyInfo.name << "\" don't match. Skipping property.\n";
 							continue;
 						}
 
@@ -1973,7 +2010,7 @@ public:
 		}
 		else if(!isStatic)
 		{
-			output << interopClassName << " thisPtr";
+			output << interopClassName << "* thisPtr";
 
 			if (methodInfo.paramInfos.size() > 0 || returnAsParameter)
 				output << ", ";
@@ -2051,16 +2088,10 @@ public:
 				{
 					argName = "tmp" + name;
 					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
-					postCallActions << name << " = " << argName << ";" << std::endl;
+					postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 				}
 				else
 					argName = name;
-
-				if (!isLast)
-				{
-					preCallActions << std::endl;
-					postCallActions << std::endl;
-				}
 
 				break;
 			case ParsedType::String:
@@ -2071,13 +2102,7 @@ public:
 				if (!isOutput(flags) && !returnValue)
 					preCallActions << "\t\t" << argName << "MonoUtil::monoToString(" << name << ");" << std::endl;
 				else
-					postCallActions << "\t\t" << name << " = " << "MonoUtil::stringToMono(" << argName << ");";
-
-				if (!isLast)
-				{
-					preCallActions << std::endl;
-					postCallActions << std::endl;
-				}
+					postCallActions << "\t\t" << name << " = " << "MonoUtil::stringToMono(" << argName << ");" << std::endl;
 			}
 			break;
 			case ParsedType::WString:
@@ -2088,13 +2113,7 @@ public:
 				if (!isOutput(flags) && !returnValue)
 					preCallActions << "\t\t" << argName << "MonoUtil::monoToWString(" << name << ");" << std::endl;
 				else
-					postCallActions << "\t\t" << name << " = " << "MonoUtil::wstringToMono(" << argName << ");";
-
-				if (!isLast)
-				{
-					preCallActions << std::endl;
-					postCallActions << std::endl;
-				}
+					postCallActions << "\t\t" << name << " = " << "MonoUtil::wstringToMono(" << argName << ");" << std::endl;
 			}
 			break;
 			default: // Some object type
@@ -2113,27 +2132,17 @@ public:
 					preCallActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
 
 					if (isHandleType(paramTypeInfo.type))
-						preCallActions << "\t\t" << argName << " = " << scriptName << "->getHandle();";
+						preCallActions << "\t\t" << argName << " = " << scriptName << "->getHandle();" << std::endl;
 					else
-						preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();";
-
-					if (!isLast)
-						preCallActions << std::endl;
+						preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
 				}
 				else
 				{
 					std::string scriptName = "script" + name;
 					std::string scriptType = getScriptInteropType(typeName);
 
-					postCallActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
 					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
 					postCallActions << "\t\t*" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
-
-					if (!isLast)
-					{
-						preCallActions << std::endl;
-						postCallActions << std::endl;
-					}
 				}
 			}
 			break;
@@ -2194,9 +2203,9 @@ public:
 					preCallActions << "\t\t\tif(scriptName != nullptr)" << std::endl;
 
 					if (isHandleType(paramTypeInfo.type))
-						preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();";
+						preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();" << std::endl;
 					else
-						preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();";
+						preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();" << std::endl;
 				}
 				break;
 				}
@@ -2210,7 +2219,7 @@ public:
 			{
 				std::string arrayName = "array" + name;
 				postCallActions << "\t\tScriptArray " << arrayName << ";" << std::endl;
-				postCallActions << "\t\t" << arrayName << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size())";
+				postCallActions << "\t\t" << arrayName << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size());" << std::endl;
 				postCallActions << "\t\tfor(int i = 0; i < (int)" << argName << ".size(); i++)" << std::endl;
 				postCallActions << "\t\t{" << std::endl;
 
@@ -2236,7 +2245,6 @@ public:
 				{
 					std::string scriptName = "script" + name;
 
-					postCallActions << "\t\t\t" << entryType << "* " << scriptName << ";" << std::endl;
 					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, argName + "[i]", "\t\t\t");
 					postCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getMangedInstance());" << std::endl;
 				}
@@ -2244,14 +2252,10 @@ public:
 				}
 
 				postCallActions << "\t\t}" << std::endl;
-				postCallActions << "\t\t*" << name << " = " << arrayName << ".getInternal()";
-
-				if (!isLast)
-				{
-					preCallActions << std::endl;
-					postCallActions << std::endl;
-				}
+				postCallActions << "\t\tMonoArray* " << name << " = " << arrayName << ".getInternal()" << std::endl;
 			}
+
+			return argName;
 		}
 	}
 
@@ -2313,13 +2317,13 @@ public:
 										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
 
 				returnAssignment = argName + " = ";
-				returnStmt = "\t\treturn __output";
+				returnStmt = "\t\treturn __output;";
 			}
 		}
 
 		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 		{
-			bool isLast = (I + 1) == methodInfo.paramInfos.end() && !returnAsParameter;
+			bool isLast = (I + 1) == methodInfo.paramInfos.end();
 
 			std::string argName = generateMethodBodyBlockForParam(I->name, I->type, I->flags, isLast, false,
 				preCallActions, postCallActions);
@@ -2383,7 +2387,7 @@ public:
 			if(isValid)
 				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 			else
-				errs() << "Cannot generate a constructor for \"" << sourceClassName << "\". Unsupported class type. ";
+				errs() << "Cannot generate a constructor for \"" << sourceClassName << "\". Unsupported class type. \n";
 		}
 		else
 		{
@@ -2553,6 +2557,12 @@ public:
 		output << "\tvoid " << interopClassName << "::initRuntimeData()" << std::endl;
 		output << "\t{" << std::endl;
 
+		for (auto& methodInfo : classInfo.ctorInfos)
+		{
+			output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
+				interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
+		}
+
 		for (auto& methodInfo : classInfo.methodInfos)
 		{
 			output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
@@ -2560,6 +2570,7 @@ public:
 		}
 
 		output << "\t}" << std::endl;
+		output << std::endl;
 
 		// create() or createInstance() methods
 		if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Resource)
@@ -2589,13 +2600,13 @@ public:
 
 			if (typeInfo.type == ParsedType::Class)
 			{
-				output << "\t MonoObject*" << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
+				output << "\tMonoObject*" << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
 				output << "\t{" << std::endl;
 
 				output << ctorParamsInit.str();
 				output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(" << ctorSignature.str() << ", ctorParams);" << std::endl;
 				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, value);" << std::endl;
-				output << "\t\treturn managedInstance;";
+				output << "\t\treturn managedInstance;" << std::endl;
 
 				output << "\t}" << std::endl;
 			}
@@ -2697,16 +2708,16 @@ public:
 		output << std::endl;
 
 		// Box
-		output << "\t MonoObject*" << interopClassName << "::box(const " << structInfo.name << "& value)" << std::endl;
+		output << "\tMonoObject*" << interopClassName << "::box(const " << structInfo.name << "& value)" << std::endl;
 		output << "\t{" << std::endl;
-		output << "\t\treturn MonoUtil::box(metaData.scriptClass->_getInternalClass(), (void*)&value);";
+		output << "\t\treturn MonoUtil::box(metaData.scriptClass->_getInternalClass(), (void*)&value);" << std::endl;
 		output << "\t}" << std::endl;
 		output << std::endl;
 
 		// Unbox
-		output << "\t " << structInfo.name << " " << interopClassName << "::unbox(MonoObject* value)" << std::endl;
+		output << "\t" << structInfo.name << " " << interopClassName << "::unbox(MonoObject* value)" << std::endl;
 		output << "\t{" << std::endl;
-		output << "\t\treturn *(" << structInfo.name << "*)MonoUtil::unbox(value);";
+		output << "\t\treturn *(" << structInfo.name << "*)MonoUtil::unbox(value);" << std::endl;
 		output << "\t}" << std::endl;
 		output << std::endl;
 
@@ -3000,7 +3011,7 @@ public:
 
 			if (!isValidStructType(typeInfo, fieldInfo.flags))
 			{
-				errs() << "Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.";
+				errs() << "Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.\n";
 				continue;
 			}
 
@@ -3098,7 +3109,7 @@ public:
 
 			// Output includes
 			for (auto& include : fileInfo.second.referencedHeaderIncludes)
-				output << "#include \"" << include << "\"";
+				output << "#include \"" << include << "\"" << std::endl;
 
 			output << std::endl;
 
@@ -3109,7 +3120,7 @@ public:
 
 			output.close();
 
-			generatedCppFileList << filename << std::endl;
+			generatedCppFileList << filename << ";";
 		}
 
 		// Generate CPP
@@ -3150,7 +3161,7 @@ public:
 
 			// Output includes
 			for (auto& include : fileInfo.second.referencedSourceIncludes)
-				output << "#include \"" << include << "\"";
+				output << "#include \"" << include << "\"" << std::endl;
 
 			output << std::endl;
 
@@ -3161,7 +3172,7 @@ public:
 
 			output.close();
 
-			generatedCppFileList << filename << std::endl;
+			generatedCppFileList << filename << ";";
 		}
 
 		// Generate CS
@@ -3229,7 +3240,7 @@ public:
 
 			output.close();
 
-			generatedCsFileList << filename;
+			generatedCsFileList << filename << ";";
 		}
 
 		{
@@ -3279,11 +3290,6 @@ public:
 	void HandleTranslationUnit(ASTContext& Context) override
 	{
 		visitor->TraverseDecl(Context.getTranslationUnitDecl());
-
-		auto comments = Context.getRawCommentList().getComments();
-		size_t numComments = comments.size();
-
-		outs() << "Num comments: " << numComments;
 	}
 
 private:

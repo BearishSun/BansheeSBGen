@@ -80,7 +80,9 @@ struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 	float c;
 };
 
-class __attribute__((annotate("se,f:TestOutput"))) MyClass
+#define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
+
+class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
 	/**
 	 * Creates a new mesh from an existing mesh data. Created mesh will match the vertex and index buffers described
