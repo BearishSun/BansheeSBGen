@@ -512,7 +512,7 @@ public:
 			realType = type->getPointeeType();
 			typeFlags |= (int)TypeFlags::SrcPtr;
 
-			if (!type.isConstQualified())
+			if (!realType.isConstQualified())
 				typeFlags |= (int)TypeFlags::Output;
 		}
 		else if (type->isReferenceType())
@@ -520,7 +520,7 @@ public:
 			realType = type->getPointeeType();
 			typeFlags |= (int)TypeFlags::SrcRef;
 
-			if (!type.isConstQualified())
+			if (!realType.isConstQualified())
 				typeFlags |= (int)TypeFlags::Output;
 		}
 		else if(type->isStructureOrClassType())
@@ -909,7 +909,10 @@ public:
 
 					// TODO - Need to prettify this text. Remove all whitespace and break into lines based on char count
 					StringRef trimmedText = textCommand->getText().trim();
-					output << indent << "// " << trimmedText.str() << std::endl;
+					output << indent << "// " << trimmedText.str();
+
+					if ((childIter + 1) != paragraph->child_end())
+						output << std::endl;
 				}
 
 				++childIter;
@@ -1642,7 +1645,8 @@ public:
 			return typeName;
 	}
 
-	std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes, bool arraySuffixes)
+	std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes, 
+		bool arraySuffixes, bool forceStructAsRef)
 	{
 		std::stringstream output;
 
@@ -1653,6 +1657,8 @@ public:
 			else
 				output << "out ";
 		}
+		else if(forceStructAsRef && type == ParsedType::Struct)
+			output << "ref ";
 
 		output << typeName;
 
@@ -2112,12 +2118,12 @@ public:
 				output << ", ";
 		}
 
-		generateCSMethodParams(methodInfo);
+		generateCSMethodParams(methodInfo, true);
 
 		if (returnAsParameter)
 		{
 			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
-			std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, true, true);
+			std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, true, true, true);
 
 			output << qualifiedType << " __output";
 		}
@@ -2814,14 +2820,14 @@ public:
 		return output.str();
 	}
 
-	std::string generateCSMethodParams(const MethodInfo& methodInfo)
+	std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop)
 	{
 		std::stringstream output;
 		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 		{
 			const VarInfo& paramInfo = *I;
 			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-			std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true);
+			std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, forInterop);
 
 			output << qualifiedType << " " << paramInfo.name;
 
@@ -2832,7 +2838,7 @@ public:
 		return output.str();
 	}
 
-	std::string generateCSMethodArgs(const MethodInfo& methodInfo)
+	std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 	{
 		std::stringstream output;
 		for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
@@ -2847,6 +2853,8 @@ public:
 				else
 					output << "out ";
 			}
+			else if (forInterop && paramTypeInfo.type == ParsedType::Struct)
+				output << "ref ";
 
 			output << paramInfo.name;
 
@@ -2867,22 +2875,23 @@ public:
 		// Private constructor for runtime use
 		MethodInfo pvtCtor = findUnusedCtorSignature(input);
 
-		ctors << "\t\tprivate " << typeInfo.scriptName << "(" << generateCSMethodParams(pvtCtor) << ") { }" << std::endl;
+		ctors << "\t\tprivate " << typeInfo.scriptName << "(" << generateCSMethodParams(pvtCtor, false) << ") { }" << std::endl;
 		ctors << std::endl;
 
 		// Constructors
 		for (auto& entry : input.ctorInfos)
 		{
 			ctors << entry.documentation;
-			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
-			ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+			ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
 			ctors << "\t\t}" << std::endl;
 			ctors << std::endl;
 
 			// Generate interop
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
+			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName 
+				<< " managedInstance, " << generateCSMethodParams(entry, true) << ");";
 			interops << std::endl;
 		}
 
@@ -2895,9 +2904,9 @@ public:
 			if(isConstructor)
 			{
 				ctors << entry.documentation;
-				ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+				ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				ctors << "\t\t{" << std::endl;
-				ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry) << ");" << std::endl;
+				ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
 				ctors << "\t\t}" << std::endl;
 				ctors << std::endl;
 			}
@@ -2906,28 +2915,42 @@ public:
 				bool isProperty = entry.flags & ((int)MethodFlags::PropertyGetter | (int)MethodFlags::PropertySetter);
 				if(!isProperty)
 				{
+					UserTypeInfo returnTypeInfo;
 					std::string returnType;
 					if (entry.returnInfo.type.empty())
 						returnType = "void";
 					else
 					{
-						UserTypeInfo paramTypeInfo = getTypeInfo(entry.returnInfo.type, entry.returnInfo.flags);
-						returnType = getCSVarType(entry.returnInfo.type, paramTypeInfo.type, entry.returnInfo.flags, false, true);
+						returnTypeInfo = getTypeInfo(entry.returnInfo.type, entry.returnInfo.flags);
+						returnType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, entry.returnInfo.flags, false, true, false);
 					}
 
 					methods << entry.documentation;
-					methods << "\t\tpublic " << returnType << " " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
+					methods << "\t\tpublic " << returnType << " " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 					methods << "\t\t{" << std::endl;
 
+					bool returnTemp = false;
 					if (!entry.returnInfo.type.empty())
-						methods << "\t\t\treturn ";
+					{
+						if (!canBeReturned(returnTypeInfo.type, entry.returnInfo.flags))
+						{
+							methods << "\t\t\t" << returnType << " temp;" << std::endl;
+							methods << "\t\t\ttemp = Internal_" << entry.interopName << "(";
+							returnTemp = true;
+						}
+						else
+							methods << "\t\t\treturn Internal_" << entry.interopName << "(";
+					}
 					else
-						methods << "\t\t\t";
+						methods << "\t\t\tInternal_" << entry.interopName << "(";
 
 					if (!isStatic)
-						methods << "Internal_" << entry.interopName << "(mCachedPtr, " << generateCSMethodArgs(entry) << ");" << std::endl;
+						methods << "mCachedPtr, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
 					else
-						methods << "Internal_" << entry.interopName << "(" << generateCSMethodArgs(entry) << ");" << std::endl;
+						methods << generateCSMethodArgs(entry, true) << ");" << std::endl;
+
+					if (returnTemp)
+						methods << "\t\t\treturn temp;" << std::endl;
 
 					methods << "\t\t}" << std::endl;
 					methods << std::endl;
@@ -2944,7 +2967,7 @@ public:
 		for (auto& entry : input.propertyInfos)
 		{
 			UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
-			std::string propTypeName = getCSVarType(entry.type, propTypeInfo.type, entry.typeFlags, false, true);
+			std::string propTypeName = getCSVarType(propTypeInfo.scriptName, propTypeInfo.type, entry.typeFlags, false, true, false);
 
 			properties << "\t\tpublic " << propTypeName << " " << entry.name << std::endl;
 			properties << "\t\t{" << std::endl;
@@ -2952,21 +2975,21 @@ public:
 			if (!entry.getter.empty())
 			{
 				if (canBeReturned(propTypeInfo.type, entry.typeFlags))
-					properties << "\t\t\tget { return Internal_" << entry.getter << "(mCachedPtr);" << std::endl;
+					properties << "\t\t\tget { return Internal_" << entry.getter << "(mCachedPtr); }" << std::endl;
 				else
 				{
 					properties << "\t\t\tget" << std::endl;
 					properties << "\t\t\t{" << std::endl;
-					properties << "\t\t\t" << propTypeName << " temp;" << std::endl;
+					properties << "\t\t\t\t" << propTypeName << " temp;" << std::endl;
 
-					properties << "\t\t\tInternal_" << entry.getter << "(";
+					properties << "\t\t\t\tInternal_" << entry.getter << "(";
 
 					if (!entry.isStatic)
 						properties << "mCachedPtr, ";
 
 					properties << "ref temp);" << std::endl;
 
-					properties << "\t\t\treturn temp;" << std::endl;
+					properties << "\t\t\t\treturn temp;" << std::endl;
 					properties << "\t\t\t}" << std::endl;
 				}
 			}
@@ -2978,7 +3001,7 @@ public:
 				if (!entry.isStatic)
 					properties << "mCachedPtr, ";
 
-				properties << "value);" << std::endl;
+				properties << "value); }" << std::endl;
 			}
 
 			properties << "\t\t}" << std::endl;
@@ -3004,7 +3027,7 @@ public:
 		else
 			baseType = "ScriptObject";
 
-		output << "\tpartial class " << typeInfo.scriptName << " : " << baseType;
+		output << "partial class " << typeInfo.scriptName << " : " << baseType;
 
 		output << std::endl;
 		output << "\t{" << std::endl;
