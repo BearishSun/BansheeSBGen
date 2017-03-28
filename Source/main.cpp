@@ -28,10 +28,20 @@ static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 static cl::extrahelp CustomHelp("\nAdd \"-- <compiler arguments>\" at the end to setup the compiler "
 								"invocation\n");
 
-static cl::opt<std::string> OutputOption(
-	"output",
-	cl::desc("Specify output directory. Generated CPP files will be placed relative to that folder in Cpp/Include"
-			 "and Cpp/Source folder. Generated CS files will be placed in CS/ folder.\n"),
+static cl::opt<std::string> OutputCppOption(
+	"output-cpp",
+	cl::desc("Specify output directory. Generated CPP files will be placed relative to that folder in /Include"
+			 "and /Source folders.\n"),
+	cl::cat(OptCategory));
+
+static cl::opt<std::string> OutputCSEngineOption(
+	"output-cs-engine",
+	cl::desc("Specify output directory. Generated engine CS files will be placed relative to that folder.\n"),
+	cl::cat(OptCategory));
+
+static cl::opt<std::string> OutputCSEditorOption(
+	"output-cs-editor",
+	cl::desc("Specify output directory. Generated editor CS files will be placed relative to that folder.\n"),
 	cl::cat(OptCategory));
 
 const char* BUILTIN_COMPONENT_TYPE = "Component";
@@ -208,6 +218,27 @@ struct IncludeInfo
 	std::string typeName;
 	UserTypeInfo typeInfo;
 	bool sourceInclude;
+};
+
+enum FileType
+{
+	FT_ENGINE_H,
+	FT_ENGINE_CPP,
+	FT_EDITOR_H,
+	FT_EDITOR_CPP,
+	FT_ENGINE_CS,
+	FT_EDITOR_CS,
+	FT_COUNT // Keep at end
+};
+
+std::array<std::string, FT_COUNT> fileTypeFolders =
+{
+	"Engine/Include",
+	"Engine/Source",
+	"Editor/Include",
+	"Editor/Source",
+	"",
+	""
 };
 
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
@@ -799,7 +830,7 @@ public:
 		}
 	}
 
-	std::string convertJavadocToXMLComments(Decl* decl)
+	std::string convertJavadocToXMLComments(Decl* decl, const std::string& indent)
 	{
 		comments::FullComment* comment = astContext->getCommentForDecl(decl, nullptr);
 		if (comment == nullptr)
@@ -864,7 +895,7 @@ public:
 
 		std::stringstream output;
 
-		auto parseParagraphComment = [&output](comments::ParagraphComment* paragraph)
+		auto parseParagraphComment = [&output, &indent](comments::ParagraphComment* paragraph)
 		{
 			auto childIter = paragraph->child_begin();
 			while (childIter != paragraph->child_end())
@@ -878,7 +909,7 @@ public:
 
 					// TODO - Need to prettify this text. Remove all whitespace and break into lines based on char count
 					StringRef trimmedText = textCommand->getText().trim();
-					output << trimmedText.str();
+					output << indent << "// " << trimmedText.str() << std::endl;
 				}
 
 				++childIter;
@@ -887,21 +918,21 @@ public:
 
 		if(brief != nullptr)
 		{
-			output << "<summary>" << std::endl;
+			output << indent << "// <summary>" << std::endl;
 			parseParagraphComment(brief->getParagraph());
 			output << std::endl;
-			output << "<summary/>" << std::endl;
+			output << indent << "// <summary/>" << std::endl;
 		}
 		else if(firstParagraph != nullptr)
 		{
-			output << "<summary>" << std::endl;
+			output << indent << "// <summary>" << std::endl;
 			parseParagraphComment(firstParagraph);
 			output << std::endl;
-			output << "<summary/>" << std::endl;
+			output << indent << "// <summary/>" << std::endl;
 		}
 		else
 		{
-			output << "<summary><summary/>" << std::endl;
+			output << indent << "// <summary><summary/>" << std::endl;
 		}
 
 		for(auto& entry : params)
@@ -913,16 +944,16 @@ public:
 			else
 				paramName = entry->getParamNameAsWritten().str();
 
-			output << "<param name=\"" << paramName << "\">";
+			output << indent << "// <param name=\"" << paramName << "\">";
 			parseParagraphComment(entry->getParagraph());
-			output << "<returns/>" << std::endl;
+			output << indent << "// <returns/>" << std::endl;
 		}
 
 		if(returns != nullptr)
 		{
-			output << "<returns>";
+			output << indent << "// <returns>";
 			parseParagraphComment(returns->getParagraph());
-			output << "<returns/>" << std::endl;
+			output << indent << "// <returns/>" << std::endl;
 		}
 
 		return output.str();
@@ -968,7 +999,7 @@ public:
 
 		std::stringstream output;
 
-		output << convertJavadocToXMLComments(decl);
+		output << convertJavadocToXMLComments(decl, "\t");
 		if (visibility == CSVisibility::Internal)
 			output << "\tinternal ";
 		else if(visibility == CSVisibility::Public)
@@ -990,7 +1021,7 @@ public:
 			SmallString<5> valueStr;
 			constDecl->getInitVal().toString(valueStr);
 
-			output << "\t\t" << convertJavadocToXMLComments(constDecl);
+			output << convertJavadocToXMLComments(constDecl, "\t\t");
 			output << "\t\t" << constDecl->getName().str();
 			output << " = ";
 			output << valueStr.str().str();
@@ -1037,7 +1068,7 @@ public:
 			structInfo.name = sourceClassName;
 			structInfo.visibility = visibility;
 			structInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
-			structInfo.documentation = convertJavadocToXMLComments(decl);
+			structInfo.documentation = convertJavadocToXMLComments(decl, "\t");
 
 			std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
 
@@ -1229,7 +1260,7 @@ public:
 			classInfo.name = sourceClassName;
 			classInfo.visibility = visibility;
 			classInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
-			classInfo.documentation = convertJavadocToXMLComments(decl);
+			classInfo.documentation = convertJavadocToXMLComments(decl, "\t");
 
 			ParsedType classType = getObjectType(decl);
 
@@ -1257,7 +1288,7 @@ public:
 				MethodInfo methodInfo;
 				methodInfo.sourceName = sourceClassName;
 				methodInfo.scriptName = className;
-				methodInfo.documentation = convertJavadocToXMLComments(ctorDecl);
+				methodInfo.documentation = convertJavadocToXMLComments(ctorDecl, "\t\t");
 				methodInfo.flags = (int)MethodFlags::Constructor;
 
 				bool invalidParam = false;
@@ -1336,7 +1367,7 @@ public:
 				MethodInfo methodInfo;
 				methodInfo.sourceName = sourceMethodName;
 				methodInfo.scriptName = methodName;
-				methodInfo.documentation = convertJavadocToXMLComments(methodDecl);
+				methodInfo.documentation = convertJavadocToXMLComments(methodDecl, "\t\t");
 				methodInfo.flags = methodFlags;
 				methodInfo.externalClass = sourceClassName;
 
@@ -1923,7 +1954,7 @@ public:
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptEditorPrerequisites.h");
 
 				// Needed for all .cpp files
-				fileInfo.second.referencedSourceIncludes.push_back("BsScript" + fileInfo.first + ".h");
+				fileInfo.second.referencedSourceIncludes.push_back("BsScript" + fileInfo.first + ".generated.h");
 				fileInfo.second.referencedSourceIncludes.push_back("BsMonoClass.h");
 				fileInfo.second.referencedSourceIncludes.push_back("BsMonoUtil.h");
 
@@ -1961,7 +1992,7 @@ public:
 					{
 						if (!entry.second.typeInfo.destFile.empty())
 						{
-							std::string include = "BsScript" + entry.second.typeInfo.destFile + ".h";
+							std::string include = "BsScript" + entry.second.typeInfo.destFile + ".generated.h";
 							fileInfo.second.referencedSourceIncludes.push_back(include);
 						}
 					}
@@ -2032,6 +2063,63 @@ public:
 
 			output << getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags) <<
 				" " << "__output";
+		}
+
+		output << ")";
+		return output.str();
+	}
+
+	std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const std::string& csClassName)
+	{
+		bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
+		bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
+
+		std::stringstream output;
+
+		bool returnAsParameter = false;
+		if (methodInfo.returnInfo.type.empty() || isCtor)
+			output << "void";
+		else
+		{
+			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+			if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
+			{
+				output << "void";
+				returnAsParameter = true;
+			}
+			else
+			{
+				output << returnTypeInfo.scriptName;
+			}
+		}
+
+		output << " ";
+
+		output << "Internal_" << methodInfo.interopName << "(";
+
+		if (isCtor)
+		{
+			output << csClassName << " managedInstance";
+
+			if (methodInfo.paramInfos.size() > 0)
+				output << ", ";
+		}
+		else if (!isStatic)
+		{
+			output <<  "IntPtr thisPtr";
+
+			if (methodInfo.paramInfos.size() > 0 || returnAsParameter)
+				output << ", ";
+		}
+
+		generateCSMethodParams(methodInfo);
+
+		if (returnAsParameter)
+		{
+			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+			std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, true, true);
+
+			output << qualifiedType << " __output";
 		}
 
 		output << ")";
@@ -2313,6 +2401,8 @@ public:
 				returnAsParameter = true;
 			else
 			{
+				postCallActions << "\t\t" << methodInfo.returnInfo.type << " __output;" << std::endl;
+
 				std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
 										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
 
@@ -2600,12 +2690,12 @@ public:
 
 			if (typeInfo.type == ParsedType::Class)
 			{
-				output << "\tMonoObject*" << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
+				output << "\tMonoObject* " << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
 				output << "\t{" << std::endl;
 
 				output << ctorParamsInit.str();
 				output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(" << ctorSignature.str() << ", ctorParams);" << std::endl;
-				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, value);" << std::endl;
+				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">()) " << interopClassName << "(managedInstance, value);" << std::endl;
 				output << "\t\treturn managedInstance;" << std::endl;
 
 				output << "\t}" << std::endl;
@@ -2781,7 +2871,7 @@ public:
 		ctors << std::endl;
 
 		// Constructors
-		for (auto& entry : input.methodInfos)
+		for (auto& entry : input.ctorInfos)
 		{
 			ctors << entry.documentation;
 			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry) << ")" << std::endl;
@@ -2846,12 +2936,7 @@ public:
 
 			// Generate interop
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-
-			if(!isStatic)
-				interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(IntPtr thisPtr, " << generateCSMethodParams(entry) << ");";
-			else
-				interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry) << ");";
-
+			interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName) << ";";
 			interops << std::endl;
 		}
 
@@ -2861,7 +2946,7 @@ public:
 			UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
 			std::string propTypeName = getCSVarType(entry.type, propTypeInfo.type, entry.typeFlags, false, true);
 
-			properties << "\t\tpublic " << propTypeName << " " << propTypeInfo.scriptName;
+			properties << "\t\tpublic " << propTypeName << " " << entry.name << std::endl;
 			properties << "\t\t{" << std::endl;
 
 			if (!entry.getter.empty())
@@ -2872,7 +2957,7 @@ public:
 				{
 					properties << "\t\t\tget" << std::endl;
 					properties << "\t\t\t{" << std::endl;
-					properties << "\t\t\t" << propTypeName << " temp;";
+					properties << "\t\t\t" << propTypeName << " temp;" << std::endl;
 
 					properties << "\t\t\tInternal_" << entry.getter << "(";
 
@@ -2881,7 +2966,7 @@ public:
 
 					properties << "ref temp);" << std::endl;
 
-					properties << "\t\t\treturn temp;";
+					properties << "\t\t\treturn temp;" << std::endl;
 					properties << "\t\t\t}" << std::endl;
 				}
 			}
@@ -2901,13 +2986,14 @@ public:
 		}
 
 		std::stringstream output;
+		output << input.documentation;
 
 		if (input.visibility == CSVisibility::Internal)
 			output << "\tinternal ";
 		else if (input.visibility == CSVisibility::Public)
 			output << "\tpublic ";
-
-		output << input.documentation;
+		else
+			output << "\t";
 
 		// TODO - Handle inheritance from other types
 		std::string baseType;
@@ -2936,15 +3022,17 @@ public:
 	{
 		std::stringstream output;
 
+		output << input.documentation;
+
 		if (input.visibility == CSVisibility::Internal)
 			output << "\tinternal ";
 		else if (input.visibility == CSVisibility::Public)
 			output << "\tpublic ";
+		else
+			output << "\t";
 
 		std::string scriptName = cppToCsTypeMap[input.name].scriptName;
-
-		output << input.documentation;
-		output << "\tpartial struct " << scriptName;
+		output << "partial struct " << scriptName;
 
 		output << std::endl;
 		output << "\t{" << std::endl;
@@ -2996,7 +3084,7 @@ public:
 				std::string fieldName = iterFind->first;
 				std::string paramName = iterFind->second;
 
-				output << "\t\t\t" << fieldName << " = " << paramName << ";" << std::endl;
+				output << "\t\t\tthis." << fieldName << " = " << paramName << ";" << std::endl;
 			}
 
 			output << "\t\t}" << std::endl;
@@ -3029,44 +3117,55 @@ public:
 		return output.str();
 	}
 
+	void cleanAndPrepareFolder(const StringRef& folder)
+	{
+		if (sys::fs::exists(folder))
+		{
+			std::error_code ec;
+			for (sys::fs::directory_iterator file(folder, ec), fileEnd; file != fileEnd && !ec; file.increment(ec))
+				sys::fs::remove(file->path());
+		}
+
+		sys::fs::create_directories(folder);
+	}
+
+	std::ofstream createFile( const std::string& filename, FileType type, StringRef outputFolder)
+	{
+		const std::string& folder = fileTypeFolders[(int)type];
+
+		std::string relativePath = folder + "/" + filename;
+		StringRef filenameRef(relativePath.data(), relativePath.size());
+
+		SmallString<128> filepath = outputFolder;
+		sys::path::append(filepath, filenameRef);
+
+		std::ofstream output;
+		output.open(filepath.str(), std::ios::out);
+
+		return output;
+	}
+
 	void generateAll()
 	{
 		postProcessFileInfos();
 
-		StringRef outputFolder = OutputOption.getValue();
-		std::stringstream generatedCppFileList;
-		std::stringstream generatedCsFileList;
+		StringRef cppOutputFolder = OutputCppOption.getValue();
+		StringRef csEngineOutputFolder = OutputCSEngineOption.getValue();
+		StringRef csEditorOutputFolder = OutputCSEditorOption.getValue();
 
+		for(auto& folderName : fileTypeFolders)
 		{
-			std::string folderName = "Cpp/Include";
 			StringRef filenameRef(folderName.data(), folderName.size());
 
-			SmallString<128> folderPath = outputFolder;
+			SmallString<128> folderPath = cppOutputFolder;
 			sys::path::append(folderPath, filenameRef);
 
-			sys::fs::create_directories(folderPath);
+			cleanAndPrepareFolder(folderPath);
 		}
 
-		{
-			std::string folderName = "Cpp/Source";
-			StringRef filenameRef(folderName.data(), folderName.size());
+		cleanAndPrepareFolder(csEngineOutputFolder);
+		cleanAndPrepareFolder(csEditorOutputFolder);
 
-			SmallString<128> folderPath = outputFolder;
-			sys::path::append(folderPath, filenameRef);
-
-			sys::fs::create_directories(folderPath);
-		}
-
-		{
-			std::string folderName = "Cs";
-			StringRef filenameRef(folderName.data(), folderName.size());
-
-			SmallString<128> folderPath = outputFolder;
-			sys::path::append(folderPath, filenameRef);
-
-			sys::fs::create_directories(folderPath);
-		}
-		
 		// Generate H
 		for(auto& fileInfo : outputFileInfos)
 		{
@@ -3095,14 +3194,8 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Cpp/Include/BsScript" + fileInfo.first + ".h";
-			StringRef filenameRef(filename.data(), filename.size());
-
-			SmallString<128> filepath = outputFolder;
-			sys::path::append(filepath, filenameRef);
-
-			std::ofstream output;
-			output.open(filepath.str(), std::ios::out);
+			FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_H : FT_ENGINE_H;
+			std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.h", fileType, cppOutputFolder);
 
 			output << "#pragma once" << std::endl;
 			output << std::endl;
@@ -3119,8 +3212,6 @@ public:
 			output << "}" << std::endl;
 
 			output.close();
-
-			generatedCppFileList << filename << ";";
 		}
 
 		// Generate CPP
@@ -3150,14 +3241,8 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Cpp/Source/BsScript" + fileInfo.first + ".cpp";
-			StringRef filenameRef(filename.data(), filename.size());
-
-			SmallString<128> filepath = outputFolder;
-			sys::path::append(filepath, filenameRef);
-
-			std::ofstream output;
-			output.open(filepath.str(), std::ios::out);
+			FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CPP : FT_ENGINE_CPP;
+			std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.cpp", fileType, cppOutputFolder);
 
 			// Output includes
 			for (auto& include : fileInfo.second.referencedSourceIncludes)
@@ -3171,8 +3256,6 @@ public:
 			output << "}" << std::endl;
 
 			output.close();
-
-			generatedCppFileList << filename << ";";
 		}
 
 		// Generate CS
@@ -3211,14 +3294,9 @@ public:
 					body << std::endl;
 			}
 
-			std::string filename = "Cs/" + fileInfo.first + ".cs";
-			StringRef filenameRef(filename.data(), filename.size());
-
-			SmallString<128> filepath = outputFolder;
-			sys::path::append(filepath, filenameRef);
-
-			std::ofstream output;
-			output.open(filepath.str(), std::ios::out);
+			FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CS : FT_ENGINE_CS;
+			StringRef outputFolder = fileInfo.second.inEditor ? csEditorOutputFolder : csEngineOutputFolder;
+			std::ofstream output = createFile(fileInfo.first + ".generated.cs", fileType, outputFolder);
 
 			output << "using System;" << std::endl;
 			output << "using System.Runtime.CompilerServices;" << std::endl;
@@ -3238,34 +3316,6 @@ public:
 			output << body.str();
 			output << "}" << std::endl;
 
-			output.close();
-
-			generatedCsFileList << filename << ";";
-		}
-
-		{
-			std::string filename = "generatedCppFiles.txt";
-			StringRef filenameRef(filename.data(), filename.size());
-
-			SmallString<128> filepath = outputFolder;
-			sys::path::append(filepath, filenameRef);
-
-			std::ofstream output;
-			output.open(filepath.str(), std::ios::out);
-			output << generatedCppFileList.str();
-			output.close();
-		}
-
-		{
-			std::string filename = "generatedCsFiles.txt";
-			StringRef filenameRef(filename.data(), filename.size());
-
-			SmallString<128> filepath = outputFolder;
-			sys::path::append(filepath, filenameRef);
-
-			std::ofstream output;
-			output.open(filepath.str(), std::ios::out);
-			output << generatedCsFileList.str();
 			output.close();
 		}
 	}

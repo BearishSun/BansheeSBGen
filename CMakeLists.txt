@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 3.6.1)
-project (BansheeScriptParser)
+project (SBGen)
 
 set(CMAKE_CXX_STANDARD 14)
 mark_as_advanced(CMAKE_CONFIGURATION_TYPES)
@@ -10,10 +10,10 @@ find_package(Clang)
 
 include_directories(${clang_INCLUDE_DIRS})
 
-add_executable(ScriptBindingParser Source/main.cpp)
-target_link_libraries(ScriptBindingParser ${clang_LIBRARIES})
+add_executable(SBGen Source/main.cpp)
+target_link_libraries(SBGen ${clang_LIBRARIES})
 
 if(WIN32)
-	target_link_libraries(ScriptBindingParser "version.lib")
+	target_link_libraries(SBGen "version.lib")
 endif()
 
