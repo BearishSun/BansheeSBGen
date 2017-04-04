@@ -101,6 +101,12 @@ enum class ExportFlags
 	Exclude = 1 << 6
 };
 
+enum class ClassFlags
+{
+	Editor = 1 << 0,
+	IsBase = 1 << 1,
+};
+
 struct UserTypeInfo
 {
 	UserTypeInfo() {}
@@ -162,11 +168,12 @@ struct ClassInfo
 {
 	std::string name;
 	CSVisibility visibility;
-	bool inEditor;
+	int flags;
 
 	std::vector<MethodInfo> ctorInfos;
 	std::vector<PropertyInfo> propertyInfos;
 	std::vector<MethodInfo> methodInfos;
+	std::string baseClass;
 	std::string documentation;
 };
 
@@ -669,6 +676,50 @@ public:
 			errs() << "Unrecognized type\n";
 			return false;
 		}
+	}
+
+	std::string parseExportableBaseClass(const CXXRecordDecl* decl)
+	{
+		std::stack<const CXXRecordDecl*> todo;
+		todo.push(decl);
+
+		while (!todo.empty())
+		{
+			const CXXRecordDecl* curDecl = todo.top();
+			todo.pop();
+
+			auto iter = curDecl->bases_begin();
+			while (iter != curDecl->bases_end())
+			{
+				const CXXBaseSpecifier* baseSpec = iter;
+				CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+
+				std::string className = baseDecl->getName();
+
+				if (className == BUILTIN_COMPONENT_TYPE)
+					continue;
+				else if (className == BUILTIN_RESOURCE_TYPE)
+					continue;
+				else if (className == BUILTIN_SCENEOBJECT_TYPE)
+					continue;
+
+				AnnotateAttr* attr = baseDecl->getAttr<AnnotateAttr>();
+				if (attr != nullptr)
+				{
+					StringRef sourceClassName = baseDecl->getName();
+					StringRef scriptClassName = sourceClassName;
+					int exportFlags;
+
+					if (parseExportAttribute(attr, sourceClassName, scriptClassName, exportFlags))
+						return sourceClassName;
+				}
+
+				todo.push(baseDecl);
+				iter++;
+			}
+		}
+
+		return "";
 	}
 
 	bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& exportName, StringRef& exportFile, 
@@ -1297,8 +1348,12 @@ public:
 			ClassInfo classInfo;
 			classInfo.name = sourceClassName;
 			classInfo.visibility = visibility;
-			classInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
+			classInfo.flags = 0;
 			classInfo.documentation = convertJavadocToXMLComments(decl, "\t");
+			classInfo.baseClass = parseExportableBaseClass(decl);
+
+			if ((classExportFlags & (int)ExportFlags::Editor) != 0)
+				classInfo.flags |= (int)ClassFlags::Editor;
 
 			ParsedType classType = getObjectType(decl);
 
@@ -1379,8 +1434,6 @@ public:
 					continue;
 
 				int methodFlags = 0;
-				if (methodDecl->isStatic())
-					methodFlags |= (int)MethodFlags::Static;
 
 				bool isExternal = false;
 				if ((methodExportFlags & (int)ExportFlags::External) != 0)
@@ -1396,6 +1449,9 @@ public:
 
 					isExternal = true;
 				}
+
+				if (methodDecl->isStatic() && !isExternal) // Note: Perhaps add a way to mark external methods as static
+					methodFlags |= (int)MethodFlags::Static;
 
 				if ((methodExportFlags & (int)ExportFlags::PropertyGetter) != 0)
 					methodFlags |= (int)MethodFlags::PropertyGetter;
@@ -1521,7 +1577,7 @@ public:
 				FileInfo& fileInfo = outputFileInfos[fileName.str()];
 				fileInfo.classInfos.push_back(classInfo);
 
-				if (classInfo.inEditor)
+				if ((classInfo.flags & (int)ClassFlags::Editor) != 0)
 					fileInfo.inEditor = true;
 			}
 		}
@@ -1874,8 +1930,42 @@ public:
 			if (classInfo == nullptr)
 				continue;
 
-			for(auto& method : entry.second.methods)
+			for (auto& method : entry.second.methods)
+			{
+				if(((int)method.flags & (int)MethodFlags::Constructor) != 0)
+				{
+					if (method.returnInfo.type.size() == 0)
+					{
+						errs() << "Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
+						continue;
+					}
+
+					if (method.returnInfo.type != entry.first)
+					{
+						errs() << "Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
+						continue;
+					}
+				}
+				else
+				{
+					if (method.paramInfos.size() == 0)
+					{
+						errs() << "Found an external method \"" << method.sourceName << "\" with no parameters this isn't supported, skipping.\n";
+						continue;
+					}
+
+					if (method.paramInfos[0].type != entry.first)
+					{
+						errs() << "Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
+							" accept the class its operating on. This is not supported, skipping. \n";
+						continue;
+					}
+
+					method.paramInfos.erase(method.paramInfos.begin());
+				}
+
 				classInfo->methodInfos.push_back(method);
+			}
 		}
 
 		// Generate unique interop method names
@@ -1980,6 +2070,25 @@ public:
 			}
 		}
 
+		// Generate meta-data about base classes
+		for (auto& fileInfo : outputFileInfos)
+		{
+			for (auto& classInfo : fileInfo.second.classInfos)
+			{
+				if (classInfo.baseClass.empty())
+					continue;
+
+				ClassInfo* baseClassInfo = findClassInfo(classInfo.baseClass);
+				if (baseClassInfo == nullptr)
+				{
+					assert(false);
+					continue;
+				}
+
+				baseClassInfo->flags |= (int)ClassFlags::IsBase;
+			}
+		}
+
 		// Generate referenced includes
 		{
 			for (auto& fileInfo : outputFileInfos)
@@ -2009,6 +2118,14 @@ public:
 						fileInfo.second.referencedHeaderIncludes.push_back("BsScriptComponent.h");
 					else // Class
 						fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
+
+					if(!classInfo.baseClass.empty())
+					{
+						UserTypeInfo& baseTypeInfo = cppToCsTypeMap[classInfo.baseClass];
+
+						std::string include = "BsScript" + baseTypeInfo.destFile + ".generated.h";
+						fileInfo.second.referencedHeaderIncludes.push_back(include);
+					}
 
 					fileInfo.second.referencedSourceIncludes.push_back(typeInfo.declFile);
 				}
@@ -2042,7 +2159,7 @@ public:
 		}
 	}
 
-	std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& interopClassName, const std::string& nestedName)
+	std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& thisPtrType, const std::string& nestedName)
 	{
 		bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
 		bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
@@ -2082,7 +2199,7 @@ public:
 		}
 		else if(!isStatic)
 		{
-			output << interopClassName << "* thisPtr";
+			output << thisPtrType << "* thisPtr";
 
 			if (methodInfo.paramInfos.size() > 0 || returnAsParameter)
 				output << ", ";
@@ -2220,7 +2337,11 @@ public:
 				{
 					argName = "tmp" + name;
 					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
-					postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
+
+					if(paramTypeInfo.type == ParsedType::Struct)
+						postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
+					else
+						postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 				}
 				else if(isOutput(flags))
 				{
@@ -2312,12 +2433,13 @@ public:
 
 			std::string argType = "Vector<" + typeName + ">";
 			std::string argName = "vec" + name;
-			preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
 
 			if (!isOutput(flags) && !returnValue)
 			{
 				std::string arrayName = "array" + name;
 				preCallActions << "\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
+				preCallActions << "\t\t" << argType << " " << argName << "(" << arrayName << ".size());" << std::endl;
+
 				preCallActions << "\t\tfor(int i = 0; i < " << arrayName << ".size(); i++)" << std::endl;
 				preCallActions << "\t\t{" << std::endl;
 
@@ -2361,6 +2483,8 @@ public:
 			}
 			else
 			{
+				preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
+
 				std::string arrayName = "array" + name;
 				postCallActions << "\t\tScriptArray " << arrayName << ";" << std::endl;
 				postCallActions << "\t\t" << arrayName << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size());" << std::endl;
@@ -2466,7 +2590,8 @@ public:
 				returnAsParameter = true;
 			else
 			{
-				postCallActions << "\t\t" << methodInfo.returnInfo.type << " __output;" << std::endl;
+				std::string returnType = getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
+				postCallActions << "\t\t" << returnType << " __output;" << std::endl;
 
 				std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
 										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
@@ -2499,7 +2624,7 @@ public:
 		if(returnAsParameter)
 		{
 			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type, 
-										methodInfo.returnInfo.flags, true, false, preCallActions, postCallActions);
+										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
 
 			returnAssignment = argName + " = ";
 		}
@@ -2609,39 +2734,99 @@ public:
 
 	std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 	{
-		// TODO - Handle inheritance (need to generate an intermediate class)
+		bool inEditor = (classInfo.flags & (int)ClassFlags::Editor) != 0;
+		bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+		bool isRootBase = classInfo.baseClass.empty();
+
+		std::string exportAttr;
+		if (!inEditor)
+			exportAttr = "BS_SCR_BE_EXPORT";
+		else
+			exportAttr = "BS_SCR_BED_EXPORT";
+
+		std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
+		std::string interopBaseClassName;
 
 		std::stringstream output;
 
-		output << "\tclass ";
-		
-		if (!classInfo.inEditor)
-			output << "BS_SCR_BE_EXPORT ";
-		else
-			output << "BS_SCR_BED_EXPORT ";
+		// Generate base class if required
+		if(isBase)
+		{
+			interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
 
+			output << "\tclass " << exportAttr << " ";
+			output << interopBaseClassName << " : public ";
+
+			if (isRootBase)
+			{
+				if (typeInfo.type == ParsedType::Class)
+					output << "ScriptObjectBase";
+				else if (typeInfo.type == ParsedType::Component)
+					output << "ScriptComponentBase";
+				else if(typeInfo.type == ParsedType::Resource)
+					output << "ScriptResourceBase";
+			}
+			else
+			{
+				std::string parentBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+				output << parentBaseClassName;
+			}
+
+			output << std::endl;
+			output << "\t{" << std::endl;
+			output << "\tpublic:" << std::endl;
+			output << interopBaseClassName << "(MonoObject* instance);" << std::endl;
+			output << "virtual ~" << interopBaseClassName << "() {}" << std::endl;
+			
+			if (typeInfo.type == ParsedType::Class)
+			{
+				output << std::endl;
+				output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
+
+				// Data member only present in the top-most base class
+				if (isRootBase)
+				{
+					output << "\tprotected:" << std::endl;
+					output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
+				}
+			}
+
+			output << "\t};" << std::endl;
+			output << std::endl;
+		}
+		else if(!classInfo.baseClass.empty())
+		{
+			interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+		}
+
+		// Generate main class
+		output << "\tclass " << exportAttr << " ";;
+		
 		std::string interopClassName = getScriptInteropType(classInfo.name);
 		output << interopClassName << " : public ";
 
 		if (typeInfo.type == ParsedType::Resource)
-			output << "TScriptResource<" << interopClassName << ", " << classInfo.name << ">";
+			output << "TScriptResource<" << interopClassName << ", " << classInfo.name;
 		else if (typeInfo.type == ParsedType::Component)
-			output << "TScriptComponent<" << interopClassName << ", " << classInfo.name << ">";
+			output << "TScriptComponent<" << interopClassName << ", " << classInfo.name;
 		else // Class
-			output << "ScriptObject<" << interopClassName << ">";
+			output << "ScriptObject<" << interopClassName;
+
+		if(!interopBaseClassName.empty())
+			output << ", " << interopBaseClassName;
+
+		output << ">";
 
 		output << std::endl;
 		output << "\t{" << std::endl;
 		output << "\tpublic:" << std::endl;
 
-		if (!classInfo.inEditor)
+		if (!inEditor)
 			output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.scriptName << "\")" << std::endl;
 		else
 			output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.scriptName << "\")" << std::endl;
 
 		output << std::endl;
-
-		std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
 
 		if (typeInfo.type == ParsedType::Class)
 		{
@@ -2672,11 +2857,17 @@ public:
 		}
 
 		// CLR hooks
+		std::string interopClassThisPtrType;
+		if (isBase)
+			interopClassThisPtrType = interopBaseClassName;
+		else
+			interopClassThisPtrType = interopClassName;
+
 		for (auto& methodInfo : classInfo.ctorInfos)
-			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassName, "") << ";" << std::endl;
+			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "") << ";" << std::endl;
 
 		for(auto& methodInfo : classInfo.methodInfos)
-			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassName, "") << ";" << std::endl;
+			output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "") << ";" << std::endl;
 
 		output << "\t};" << std::endl;
 		return output.str();
@@ -2684,8 +2875,16 @@ public:
 
 	std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 	{
+		bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+
 		std::string interopClassName = getScriptInteropType(classInfo.name);
 		std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
+
+		std::string interopBaseClassName;
+		if (isBase)
+			interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
+		else if (!classInfo.baseClass.empty())
+			interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
 
 		std::stringstream output;
 
@@ -2774,11 +2973,17 @@ public:
 		}
 
 		// CLR hook method implementations
+		std::string interopClassThisPtrType;
+		if (isBase)
+			interopClassThisPtrType = interopBaseClassName;
+		else
+			interopClassThisPtrType = interopClassName;
+
 		for (auto I = classInfo.ctorInfos.begin(); I != classInfo.ctorInfos.end(); ++I)
 		{
 			const MethodInfo& methodInfo = *I;
 
-			output << "\t" << generateCppMethodSignature(methodInfo, interopClassName, interopClassName) << std::endl;
+			output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName) << std::endl;
 			output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type);
 
 			if ((I + 1) != classInfo.methodInfos.end())
@@ -2789,7 +2994,7 @@ public:
 		{
 			const MethodInfo& methodInfo = *I;
 
-			output << "\t" << generateCppMethodSignature(methodInfo, interopClassName, interopClassName) << std::endl;
+			output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName) << std::endl;
 			output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type);
 
 			if((I + 1) != classInfo.methodInfos.end())
@@ -3074,9 +3279,13 @@ public:
 		else
 			output << "\t";
 
-		// TODO - Handle inheritance from other types
 		std::string baseType;
-		if(typeInfo.type == ParsedType::Resource)
+		if (!input.baseClass.empty())
+		{
+			UserTypeInfo baseTypeInfo = getTypeInfo(input.baseClass, 0);
+			baseType = baseTypeInfo.scriptName;
+		}
+		else if(typeInfo.type == ParsedType::Resource)
 			baseType = "Resource";
 		else if(typeInfo.type == ParsedType::Component)
 			baseType = "Component";
