@@ -97,7 +97,8 @@ enum class ExportFlags
 	PropertySetter = 1 << 2,
 	External = 1 << 3,
 	ExternalConstructor = 1 << 4,
-	Editor = 1 << 5
+	Editor = 1 << 5,
+	Exclude = 1 << 6
 };
 
 struct UserTypeInfo
@@ -523,19 +524,22 @@ public:
 			if (!realType.isConstQualified())
 				typeFlags |= (int)TypeFlags::Output;
 		}
-		else if(type->isStructureOrClassType())
+		else
+			realType = type;
+
+		if(realType->isStructureOrClassType())
 		{
 			// Check for arrays
 			// Note: Not supporting nested arrays
-			const TemplateSpecializationType* specType = type->getAs<TemplateSpecializationType>();
+			const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
 			int numArgs = 0;
 
 			if (specType != nullptr)
 				numArgs = specType->getNumArgs();
 
-			if(numArgs > 0)
+			if (numArgs > 0)
 			{
-				const RecordType* recordType = type->getAs<RecordType>();
+				const RecordType* recordType = realType->getAs<RecordType>();
 				const RecordDecl* recordDecl = recordType->getDecl();
 
 				std::string sourceTypeName = recordDecl->getName();
@@ -546,14 +550,8 @@ public:
 					realType = specType->getArg(0).getAsType();;
 					typeFlags |= (int)TypeFlags::Array;
 				}
-				else
-					realType = type;
 			}
-			else
-				realType = type;
 		}
-		else
-			realType = type;
 
 		if(realType->isPointerType())
 		{
@@ -758,12 +756,31 @@ public:
 						sourceName << "\".\n";
 				}
 			}
+			else if(annotParam.first == "ex")
+			{
+				if (annotParam.second == "true")
+					flags |= (int)ExportFlags::Exclude;
+				else if (annotParam.second != "false")
+				{
+					errs() << "Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
+						sourceName << "\".\n";
+				}
+			}
 			else
 				errs() << "Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
 				sourceName << "\".\n";
 		}
 
 		return true;
+	}
+
+	bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& exportName, int& exportFlags)
+	{
+		StringRef fileName;
+		StringRef externalClass;
+		CSVisibility visibility;
+
+		return parseExportAttribute(attr, sourceName, exportName, fileName, visibility, exportFlags, externalClass);
 	}
 
 	bool evaluateExpression(Expr* expr, std::string& evalValue)
@@ -909,6 +926,12 @@ public:
 
 					// TODO - Need to prettify this text. Remove all whitespace and break into lines based on char count
 					StringRef trimmedText = textCommand->getText().trim();
+					if (trimmedText.empty())
+					{
+						++childIter;
+						continue;
+					}
+
 					output << indent << "// " << trimmedText.str();
 
 					if ((childIter + 1) != paragraph->child_end())
@@ -1021,11 +1044,23 @@ public:
 		{
 			EnumConstantDecl* constDecl = *iter;
 
+			AnnotateAttr* enumAttr = constDecl->getAttr<AnnotateAttr>();
+			StringRef enumName = constDecl->getName();
+			int enumFlags = 0;
+			if (enumAttr != nullptr)
+				parseExportAttribute(enumAttr, constDecl->getName(), enumName, enumFlags);
+
+			if ((enumFlags & (int)ExportFlags::Exclude) != 0)
+			{
+				++iter;
+				continue;
+			}
+
 			SmallString<5> valueStr;
 			constDecl->getInitVal().toString(valueStr);
 
 			output << convertJavadocToXMLComments(constDecl, "\t\t");
-			output << "\t\t" << constDecl->getName().str();
+			output << "\t\t" << enumName.str();
 			output << " = ";
 			output << valueStr.str().str();
 
@@ -1657,7 +1692,7 @@ public:
 			else
 				output << "out ";
 		}
-		else if(forceStructAsRef && type == ParsedType::Struct)
+		else if(forceStructAsRef && type == ParsedType::Struct && !isArray(flags))
 			output << "ref ";
 
 		output << typeName;
@@ -2118,12 +2153,15 @@ public:
 				output << ", ";
 		}
 
-		generateCSMethodParams(methodInfo, true);
+		output << generateCSMethodParams(methodInfo, true);
 
 		if (returnAsParameter)
 		{
 			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 			std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, true, true, true);
+
+			if (methodInfo.paramInfos.size() > 0)
+				output << ", ";
 
 			output << qualifiedType << " __output";
 		}
@@ -2184,6 +2222,12 @@ public:
 					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
 					postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 				}
+				else if(isOutput(flags))
+				{
+					argName = "tmp" + name;
+					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
+					postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
+				}
 				else
 					argName = name;
 
@@ -2193,10 +2237,12 @@ public:
 				argName = "tmp" + name;
 				preCallActions << "\t\tString " << argName << ";" << std::endl;
 
-				if (!isOutput(flags) && !returnValue)
-					preCallActions << "\t\t" << argName << "MonoUtil::monoToString(" << name << ");" << std::endl;
+				if(returnValue)
+					postCallActions << "\t\t" << name << " = MonoUtil::stringToMono(" << argName << ");" << std::endl;
+				else if(isOutput(flags))
+					postCallActions << "\t\t*" << name << " = MonoUtil::stringToMono(" << argName << ");" << std::endl;
 				else
-					postCallActions << "\t\t" << name << " = " << "MonoUtil::stringToMono(" << argName << ");" << std::endl;
+					preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
 			}
 			break;
 			case ParsedType::WString:
@@ -2204,10 +2250,12 @@ public:
 				argName = "tmp" + name;
 				preCallActions << "\t\tWString " << argName << ";" << std::endl;
 
-				if (!isOutput(flags) && !returnValue)
-					preCallActions << "\t\t" << argName << "MonoUtil::monoToWString(" << name << ");" << std::endl;
+				if (returnValue)
+					postCallActions << "\t\t" << name << " = MonoUtil::wstringToMono(" << argName << ");" << std::endl;
+				else if (isOutput(flags))
+					postCallActions << "\t\t*" << name << " = MonoUtil::wstringToMono(" << argName << ");" << std::endl;
 				else
-					postCallActions << "\t\t" << name << " = " << "MonoUtil::wstringToMono(" << argName << ");" << std::endl;
+					preCallActions << "\t\t" << argName << " = MonoUtil::monoToWString(" << name << ");" << std::endl;
 			}
 			break;
 			default: // Some object type
@@ -2217,11 +2265,21 @@ public:
 
 				preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
 
-				if (!isOutput(flags) && !returnValue)
-				{
-					std::string scriptName = "script" + name;
-					std::string scriptType = getScriptInteropType(typeName);
+				std::string scriptName = "script" + name;
+				std::string scriptType = getScriptInteropType(typeName);
 
+				if(returnValue)
+				{
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+					postCallActions << "\t\t" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
+				}
+				else if(isOutput(flags))
+				{
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+					postCallActions << "\t\t*" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
+				}
+				else
+				{
 					preCallActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
 					preCallActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
 
@@ -2229,14 +2287,6 @@ public:
 						preCallActions << "\t\t" << argName << " = " << scriptName << "->getHandle();" << std::endl;
 					else
 						preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
-				}
-				else
-				{
-					std::string scriptName = "script" + name;
-					std::string scriptType = getScriptInteropType(typeName);
-
-					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-					postCallActions << "\t\t*" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
 				}
 			}
 			break;
@@ -2346,7 +2396,11 @@ public:
 				}
 
 				postCallActions << "\t\t}" << std::endl;
-				postCallActions << "\t\tMonoArray* " << name << " = " << arrayName << ".getInternal()" << std::endl;
+
+				if(returnValue)
+					postCallActions << "\t\t" << name << " = " << arrayName << ".getInternal()" << std::endl;
+				else
+					postCallActions << "\t\t*" << name << " = " << arrayName << ".getInternal()" << std::endl;
 			}
 
 			return argName;
@@ -2399,10 +2453,15 @@ public:
 		std::stringstream methodArgs;
 		std::stringstream postCallActions;
 
+		bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
+		bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
+		bool isExternal = (methodInfo.flags & (int)MethodFlags::External) != 0;
+
 		bool returnAsParameter = false;
-		if (!methodInfo.returnInfo.type.empty())
+		UserTypeInfo returnTypeInfo;
+		if (!methodInfo.returnInfo.type.empty() && !isCtor)
 		{
-			UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+			returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 			if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 				returnAsParameter = true;
 			else
@@ -2440,7 +2499,7 @@ public:
 		if(returnAsParameter)
 		{
 			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type, 
-										methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
+										methodInfo.returnInfo.flags, true, false, preCallActions, postCallActions);
 
 			returnAssignment = argName + " = ";
 		}
@@ -2448,10 +2507,6 @@ public:
 		std::stringstream output;
 		output << "\t{" << std::endl;
 		output << preCallActions.str();
-
-		bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
-		bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
-		bool isExternal = (methodInfo.flags & (int)MethodFlags::External) != 0;
 
 		if (isCtor)
 		{
@@ -2926,7 +2981,7 @@ public:
 					}
 
 					methods << entry.documentation;
-					methods << "\t\tpublic " << returnType << " " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
+					methods << "\t\tpublic " << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 					methods << "\t\t{" << std::endl;
 
 					bool returnTemp = false;
@@ -2969,6 +3024,7 @@ public:
 			UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
 			std::string propTypeName = getCSVarType(propTypeInfo.scriptName, propTypeInfo.type, entry.typeFlags, false, true, false);
 
+			properties << entry.documentation;
 			properties << "\t\tpublic " << propTypeName << " " << entry.name << std::endl;
 			properties << "\t\t{" << std::endl;
 
@@ -3129,9 +3185,6 @@ public:
 			output << "\t\tpublic ";
 			output << typeInfo.scriptName << " ";
 			output << fieldInfo.name;
-
-			if (!fieldInfo.defaultValue.empty())
-				output << " = " << fieldInfo.defaultValue;
 
 			output << ";" << std::endl;
 		}
