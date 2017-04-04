@@ -1385,6 +1385,7 @@ public:
 				methodInfo.flags = (int)MethodFlags::Constructor;
 
 				bool invalidParam = false;
+				bool skippedDefaultArg = false;
 				for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
 				{
 					ParmVarDecl* paramDecl = *J;
@@ -1398,6 +1399,16 @@ public:
 						errs() << "Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
 						invalidParam = true;
 						continue;
+					}
+
+					if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+					{
+						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+						{
+							errs() << "Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+								<< "argument that cannot be constantly evaluated, ignoring it.\n";
+							skippedDefaultArg = true;
+						}
 					}
 
 					methodInfo.paramInfos.push_back(paramInfo);
@@ -1483,6 +1494,7 @@ public:
 					}
 
 					bool invalidParam = false;
+					bool skippedDefaultArg = false;
 					for (auto J = methodDecl->param_begin(); J != methodDecl->param_end(); ++J)
 					{
 						ParmVarDecl* paramDecl = *J;
@@ -1496,6 +1508,16 @@ public:
 							errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 							invalidParam = true;
 							continue;
+						}
+
+						if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+						{
+							if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+							{
+								errs() << "Method parameter \"" << paramDecl->getName().str() << "\" has a default "
+									<< "argument that cannot be constantly evaluated, ignoring it.\n";
+								skippedDefaultArg = true;
+							}
 						}
 
 						methodInfo.paramInfos.push_back(paramInfo);
@@ -3097,6 +3119,9 @@ public:
 			std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, forInterop);
 
 			output << qualifiedType << " " << paramInfo.name;
+
+			if (!forInterop && !paramInfo.defaultValue.empty())
+				output << " = " << paramInfo.defaultValue;
 
 			if ((I + 1) != methodInfo.paramInfos.end())
 				output << ", ";
