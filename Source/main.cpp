@@ -1736,6 +1736,11 @@ public:
 			return typeName;
 	}
 
+	bool isPlainStruct(ParsedType type, int flags)
+	{
+		return type == ParsedType::Struct && !isArray(flags);
+	}
+
 	std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes, 
 		bool arraySuffixes, bool forceStructAsRef)
 	{
@@ -1743,12 +1748,12 @@ public:
 
 		if(paramPrefixes && isOutput(flags))
 		{
-			if (type == ParsedType::Struct)
+			if (isPlainStruct(type, flags))
 				output << "ref ";
 			else
 				output << "out ";
 		}
-		else if(forceStructAsRef && type == ParsedType::Struct && !isArray(flags))
+		else if(forceStructAsRef && (isPlainStruct(type, flags)))
 			output << "ref ";
 
 		output << typeName;
@@ -2247,7 +2252,9 @@ public:
 			}
 			else
 			{
-				output << returnTypeInfo.scriptName;
+				std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, 
+					methodInfo.returnInfo.flags, false, true, false);
+				output << qualifiedType;
 			}
 		}
 
@@ -3108,12 +3115,12 @@ public:
 
 			if (isOutput(paramInfo.flags))
 			{
-				if (paramTypeInfo.type == ParsedType::Struct)
+				if (isPlainStruct(paramTypeInfo.type, paramInfo.flags))
 					output << "ref ";
 				else
 					output << "out ";
 			}
-			else if (forInterop && paramTypeInfo.type == ParsedType::Struct)
+			else if (forInterop && isPlainStruct(paramTypeInfo.type, paramInfo.flags))
 				output << "ref ";
 
 			output << paramInfo.name;
@@ -3144,7 +3151,12 @@ public:
 			ctors << entry.documentation;
 			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
-			ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
+			ctors << "\t\t\tInternal_" << entry.interopName << "(this";
+
+			if (entry.paramInfos.size() > 0)
+				ctors << ", " << generateCSMethodArgs(entry, true);
+
+			ctors << ");" << std::endl;
 			ctors << "\t\t}" << std::endl;
 			ctors << std::endl;
 
@@ -3166,7 +3178,12 @@ public:
 				ctors << entry.documentation;
 				ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				ctors << "\t\t{" << std::endl;
-				ctors << "\t\t\tInternal_" << entry.interopName << "(this, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
+				ctors << "\t\t\tInternal_" << entry.interopName << "(this";
+
+				if (entry.paramInfos.size() > 0)
+					ctors << ", " << generateCSMethodArgs(entry, true);
+
+				ctors << ");" << std::endl;
 				ctors << "\t\t}" << std::endl;
 				ctors << std::endl;
 			}
@@ -3189,14 +3206,14 @@ public:
 					methods << "\t\tpublic " << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 					methods << "\t\t{" << std::endl;
 
-					bool returnTemp = false;
+					bool returnByParam = false;
 					if (!entry.returnInfo.type.empty())
 					{
 						if (!canBeReturned(returnTypeInfo.type, entry.returnInfo.flags))
 						{
 							methods << "\t\t\t" << returnType << " temp;" << std::endl;
-							methods << "\t\t\ttemp = Internal_" << entry.interopName << "(";
-							returnTemp = true;
+							methods << "\t\t\tInternal_" << entry.interopName << "(";
+							returnByParam = true;
 						}
 						else
 							methods << "\t\t\treturn Internal_" << entry.interopName << "(";
@@ -3205,11 +3222,24 @@ public:
 						methods << "\t\t\tInternal_" << entry.interopName << "(";
 
 					if (!isStatic)
-						methods << "mCachedPtr, " << generateCSMethodArgs(entry, true) << ");" << std::endl;
-					else
-						methods << generateCSMethodArgs(entry, true) << ");" << std::endl;
+						methods << "mCachedPtr";
 
-					if (returnTemp)
+					if (entry.paramInfos.size() > 0 || returnByParam)
+						methods << ", ";
+
+					methods << generateCSMethodArgs(entry, true);
+
+					if(returnByParam)
+					{
+						if (entry.paramInfos.size() > 0)
+							methods << ", ";
+
+						methods << getCSVarType("temp", returnTypeInfo.type, entry.returnInfo.flags, true, false, true);
+					}
+
+					methods << ");" << std::endl;
+
+					if (returnByParam)
 						methods << "\t\t\treturn temp;" << std::endl;
 
 					methods << "\t\t}" << std::endl;
