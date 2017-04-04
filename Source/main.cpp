@@ -81,7 +81,8 @@ enum class MethodFlags
 	External = 1 << 1,
 	Constructor = 1 << 2,
 	PropertyGetter = 1 << 3,
-	PropertySetter = 1 << 4
+	PropertySetter = 1 << 4,
+	InteropOnly = 1 << 5
 };
 
 enum class CSVisibility
@@ -98,7 +99,8 @@ enum class ExportFlags
 	External = 1 << 3,
 	ExternalConstructor = 1 << 4,
 	Editor = 1 << 5,
-	Exclude = 1 << 6
+	Exclude = 1 << 6,
+	InteropOnly = 1 << 7
 };
 
 enum class ClassFlags
@@ -813,7 +815,17 @@ public:
 					flags |= (int)ExportFlags::Exclude;
 				else if (annotParam.second != "false")
 				{
-					errs() << "Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
+					errs() << "Unrecognized value for \"ex\" option: \"" + annotParam.second + "\" for type \"" <<
+						sourceName << "\".\n";
+				}
+			}
+			else if (annotParam.first == "in")
+			{
+				if (annotParam.second == "true")
+					flags |= (int)ExportFlags::InteropOnly;
+				else if (annotParam.second != "false")
+				{
+					errs() << "Unrecognized value for \"in\" option: \"" + annotParam.second + "\" for type \"" <<
 						sourceName << "\".\n";
 				}
 			}
@@ -1384,6 +1396,9 @@ public:
 				methodInfo.documentation = convertJavadocToXMLComments(ctorDecl, "\t\t");
 				methodInfo.flags = (int)MethodFlags::Constructor;
 
+				if ((methodExportFlags & (int)ExportFlags::InteropOnly))
+					methodInfo.flags |= (int)MethodFlags::InteropOnly;
+
 				bool invalidParam = false;
 				bool skippedDefaultArg = false;
 				for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
@@ -1460,6 +1475,9 @@ public:
 
 					isExternal = true;
 				}
+
+				if ((methodExportFlags & (int)ExportFlags::InteropOnly))
+					methodFlags |= (int)MethodFlags::InteropOnly;
 
 				if (methodDecl->isStatic() && !isExternal) // Note: Perhaps add a way to mark external methods as static
 					methodFlags |= (int)MethodFlags::Static;
@@ -3173,6 +3191,16 @@ public:
 		// Constructors
 		for (auto& entry : input.ctorInfos)
 		{
+			// Generate interop
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName
+				<< " managedInstance, " << generateCSMethodParams(entry, true) << ");";
+			interops << std::endl;
+
+			bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+			if (interopOnly)
+				continue;
+
 			ctors << entry.documentation;
 			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
@@ -3184,17 +3212,20 @@ public:
 			ctors << ");" << std::endl;
 			ctors << "\t\t}" << std::endl;
 			ctors << std::endl;
-
-			// Generate interop
-			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName 
-				<< " managedInstance, " << generateCSMethodParams(entry, true) << ");";
-			interops << std::endl;
 		}
 
 		// External constructors, methods and interop stubs
 		for (auto& entry : input.methodInfos)
 		{
+			// Generate interop
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+			interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName) << ";";
+			interops << std::endl;
+
+			bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+			if (interopOnly)
+				continue;
+
 			bool isConstructor = (entry.flags & (int)MethodFlags::Constructor) != 0;
 			bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
 
@@ -3271,11 +3302,6 @@ public:
 					methods << std::endl;
 				}
 			}
-
-			// Generate interop
-			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-			interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName) << ";";
-			interops << std::endl;
 		}
 
 		// Properties
