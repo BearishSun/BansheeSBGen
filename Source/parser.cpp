@@ -618,6 +618,16 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	if (!parseExportAttribute(attr, sourceClassName, className, fileName, visibility, exportFlags, externalClass))
 		return true;
 
+	FileInfo& fileInfo = outputFileInfos[fileName.str()];
+	auto iterFind = std::find_if(fileInfo.enumInfos.begin(), fileInfo.enumInfos.end(), 
+		[&sourceClassName](const EnumInfo& ei)
+	{
+		return ei.name == sourceClassName;
+	});
+
+	if (iterFind != fileInfo.enumInfos.end())
+		return true; // Already parsed
+
 	QualType underlyingType = decl->getIntegerType();
 	if (!underlyingType->isBuiltinType())
 	{
@@ -691,12 +701,11 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 	output << "\t}" << std::endl;
 
-	FileInfo& fileInfo = outputFileInfos[fileName.str()];
+	EnumInfo enumEntry;
+	enumEntry.name = sourceClassName;
+	enumEntry.code = output.str();
 
-	EnumInfo simpleEntry;
-	simpleEntry.code = output.str();
-
-	fileInfo.enumInfos.push_back(simpleEntry);
+	fileInfo.enumInfos.push_back(enumEntry);
 
 	return true;
 }
@@ -717,8 +726,18 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 	if (!parseExportAttribute(attr, sourceClassName, className, fileName, visibility, classExportFlags, externalClass))
 		return true;
 
+	FileInfo& fileInfo = outputFileInfos[fileName.str()];
 	if ((classExportFlags & (int)ExportFlags::Plain) != 0)
 	{
+		auto iterFind = std::find_if(fileInfo.structInfos.begin(), fileInfo.structInfos.end(), 
+			[&sourceClassName](const StructInfo& si)
+		{
+			return si.name == sourceClassName;
+		});
+
+		if (iterFind != fileInfo.structInfos.end())
+			return true; // Already parsed
+
 		StructInfo structInfo;
 		structInfo.name = sourceClassName;
 		structInfo.visibility = visibility;
@@ -903,7 +922,6 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Struct, declFile, fileName);
 
-		FileInfo& fileInfo = outputFileInfos[fileName.str()];
 		fileInfo.structInfos.push_back(structInfo);
 
 		if (structInfo.inEditor)
@@ -911,6 +929,15 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 	}
 	else
 	{
+		auto iterFind = std::find_if(fileInfo.classInfos.begin(), fileInfo.classInfos.end(), 
+			[&sourceClassName](const ClassInfo& ci)
+		{
+			return ci.name == sourceClassName;
+		});
+
+		if (iterFind != fileInfo.classInfos.end())
+			return true; // Already parsed
+
 		ClassInfo classInfo;
 		classInfo.name = sourceClassName;
 		classInfo.visibility = visibility;

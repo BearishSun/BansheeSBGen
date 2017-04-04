@@ -185,6 +185,7 @@ struct StructInfo
 
 struct EnumInfo
 {
+	std::string name;
 	std::string code;
 };
 
