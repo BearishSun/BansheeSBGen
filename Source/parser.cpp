@@ -549,7 +549,7 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 					continue;
 				}
 
-				output << indent << "// " << trimmedText.str();
+				output << indent << "/// " << trimmedText.str();
 
 				if ((childIter + 1) != paragraph->child_end())
 					output << std::endl;
@@ -561,21 +561,21 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 
 	if (brief != nullptr)
 	{
-		output << indent << "// <summary>" << std::endl;
+		output << indent << "/// <summary>" << std::endl;
 		parseParagraphComment(brief->getParagraph());
 		output << std::endl;
-		output << indent << "// <summary/>" << std::endl;
+		output << indent << "/// </summary>" << std::endl;
 	}
 	else if (firstParagraph != nullptr)
 	{
-		output << indent << "// <summary>" << std::endl;
+		output << indent << "/// <summary>" << std::endl;
 		parseParagraphComment(firstParagraph);
 		output << std::endl;
-		output << indent << "// <summary/>" << std::endl;
+		output << indent << "/// </summary>" << std::endl;
 	}
 	else
 	{
-		output << indent << "// <summary><summary/>" << std::endl;
+		output << indent << "/// <summary></summary>" << std::endl;
 	}
 
 	for (auto& entry : params)
@@ -587,16 +587,16 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 		else
 			paramName = entry->getParamNameAsWritten().str();
 
-		output << indent << "// <param name=\"" << paramName << "\">";
+		output << indent << "/// <param name=\"" << paramName << "\">";
 		parseParagraphComment(entry->getParagraph());
-		output << indent << "// <returns/>" << std::endl;
+		output << indent << "/// </param>" << std::endl;
 	}
 
 	if (returns != nullptr)
 	{
-		output << indent << "// <returns>";
+		output << indent << "/// <returns>";
 		parseParagraphComment(returns->getParagraph());
-		output << indent << "// <returns/>" << std::endl;
+		output << indent << "/// </returns>" << std::endl;
 	}
 
 	return output.str();

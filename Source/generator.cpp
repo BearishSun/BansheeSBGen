@@ -57,12 +57,7 @@ std::string getCSVarType(const std::string& typeName, ParsedType type, int flags
 	std::stringstream output;
 
 	if (paramPrefixes && isOutput(flags))
-	{
-		if (isPlainStruct(type, flags))
-			output << "ref ";
-		else
-			output << "out ";
-	}
+		output << "out ";
 	else if (forceStructAsRef && (isPlainStruct(type, flags)))
 		output << "ref ";
 
@@ -168,6 +163,19 @@ bool isValidStructType(UserTypeInfo& typeInfo, int flags)
 		return true;
 
 	return false;
+}
+
+std::string getDefaultValue(const std::string& typeName, const UserTypeInfo& typeInfo)
+{
+	if (typeInfo.type == ParsedType::Builtin)
+		return "0";
+	else if (typeInfo.type == ParsedType::Enum)
+		return "(" + typeName + ")0";
+	else if (typeInfo.type == ParsedType::Struct)
+		return "new " + typeName + "()";
+
+	assert(false);
+	return ""; // Shouldn't be reached
 }
 
 MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
@@ -1389,12 +1397,7 @@ std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
 
 		if (isOutput(paramInfo.flags))
-		{
-			if (isPlainStruct(paramTypeInfo.type, paramInfo.flags))
-				output << "ref ";
-			else
-				output << "out ";
-		}
+			output << "out ";
 		else if (forInterop && isPlainStruct(paramTypeInfo.type, paramInfo.flags))
 			output << "ref ";
 
@@ -1457,12 +1460,12 @@ std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const
 	if (returnAsParameter)
 	{
 		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
-		std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, true, true, true);
+		std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, false, true, false);
 
 		if (methodInfo.paramInfos.size() > 0)
 			output << ", ";
 
-		output << qualifiedType << " __output";
+		output << "out " << qualifiedType << " __output";
 	}
 
 	output << ")";
@@ -1584,7 +1587,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 					if (entry.paramInfos.size() > 0)
 						methods << ", ";
 
-					methods << getCSVarType("temp", returnTypeInfo.type, entry.returnInfo.flags, true, false, true);
+					methods << "out temp";
 				}
 
 				methods << ");" << std::endl;
@@ -1623,7 +1626,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				if (!entry.isStatic)
 					properties << "mCachedPtr, ";
 
-				properties << "ref temp);" << std::endl;
+				properties << "out temp);" << std::endl;
 
 				properties << "\t\t\t\treturn temp;" << std::endl;
 				properties << "\t\t\t}" << std::endl;
@@ -1702,7 +1705,14 @@ std::string generateCSStruct(StructInfo& input)
 
 	for (auto& entry : input.ctors)
 	{
-		output << "\t\tpublic " << scriptName << "(";
+		bool isParameterless = entry.params.size() == 0;
+		if (isParameterless) // Parameterless constructors not supported on C# structs
+		{
+			output << "\t\t/// <summary>Initializes the struct with default values.</summary>" << std::endl;
+			output << "\t\tpublic static " << scriptName << " Default(";
+		}
+		else
+			output << "\t\tpublic " << scriptName << "(";
 
 		for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
 		{
@@ -1728,26 +1738,51 @@ std::string generateCSStruct(StructInfo& input)
 		output << ")" << std::endl;
 		output << "\t\t{" << std::endl;
 
-		for (auto I = entry.params.begin(); I != entry.params.end(); ++I)
+		std::string thisPtr;
+		if (isParameterless)
 		{
-			const VarInfo& paramInfo = *I;
+			output << "\t\t\t" << scriptName << " value = new " << scriptName << "();" << std::endl;
+			thisPtr = "value";
+		}
+		else
+			thisPtr = "this";
 
-			UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		for (auto I = input.fields.begin(); I != input.fields.end(); ++I)
+		{
+			const VarInfo& fieldInfo = *I;
 
-			if (!isValidStructType(typeInfo, paramInfo.flags))
+			UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+
+			if (!isValidStructType(typeInfo, fieldInfo.flags))
 			{
 				// We report the error during field generation, as it checks for the same condition
 				continue;
 			}
 
-			auto iterFind = entry.fieldAssignments.find(I->name);
-			if (iterFind == entry.fieldAssignments.end())
-				continue;
+			std::string fieldName = fieldInfo.name;
+			
+			auto iterFind = entry.fieldAssignments.find(fieldInfo.name);
+			if (iterFind != entry.fieldAssignments.end())
+			{
+				std::string paramName = iterFind->second;
+				output << "\t\t\t" << thisPtr << "." << fieldName << " = " << paramName << ";" << std::endl;
+			}
+			else
+			{
+				std::string defaultValue;
+				if (!fieldInfo.defaultValue.empty())
+					defaultValue = fieldInfo.defaultValue;
+				else
+					defaultValue = getDefaultValue(fieldInfo.type, typeInfo);
 
-			std::string fieldName = iterFind->first;
-			std::string paramName = iterFind->second;
+				output << "\t\t\t" << thisPtr << "." << fieldName << " = " << defaultValue << ";" << std::endl;
+			}
+		}
 
-			output << "\t\t\tthis." << fieldName << " = " << paramName << ";" << std::endl;
+		if (isParameterless)
+		{
+			output << std::endl;
+			output << "\t\t\treturn value;" << std::endl;
 		}
 
 		output << "\t\t}" << std::endl;
