@@ -225,9 +225,9 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 void gatherIncludes(const std::string& typeName, int flags, std::unordered_map<std::string, IncludeInfo>& output)
 {
 	UserTypeInfo typeInfo = getTypeInfo(typeName, flags);
-	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Component ||
-		typeInfo.type == ParsedType::SceneObject || typeInfo.type == ParsedType::Resource ||
-		typeInfo.type == ParsedType::Enum)
+	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Struct ||
+		typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject || 
+		typeInfo.type == ParsedType::Resource || typeInfo.type == ParsedType::Enum)
 	{
 		auto iterFind = output.find(typeName);
 		if (iterFind == output.end())
@@ -248,6 +248,16 @@ void gatherIncludes(const MethodInfo& methodInfo, std::unordered_map<std::string
 
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 		gatherIncludes(I->type, I->flags, output);
+
+	if((methodInfo.flags & (int)MethodFlags::External) != 0)
+	{
+		auto iterFind = output.find(methodInfo.externalClass);
+		if (iterFind == output.end())
+		{
+			UserTypeInfo typeInfo = getTypeInfo(methodInfo.externalClass, 0);
+			output[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, true, true);
+		}
+	}
 }
 
 void gatherIncludes(const ClassInfo& classInfo, std::unordered_map<std::string, IncludeInfo>& output)
@@ -495,15 +505,29 @@ void postProcessFileInfos()
 				if (entry.second.sourceInclude)
 				{
 					std::string include = entry.second.typeInfo.declFile;
-					fileInfo.second.referencedHeaderIncludes.push_back(include);
+
+					if(entry.second.declOnly)
+						fileInfo.second.referencedSourceIncludes.push_back(include);
+					else
+						fileInfo.second.referencedHeaderIncludes.push_back(include);
 				}
 
-				if (entry.second.typeInfo.type != ParsedType::Enum)
+				if (!entry.second.declOnly)
 				{
-					if (!entry.second.typeInfo.destFile.empty())
+					if (entry.second.typeInfo.type != ParsedType::Enum)
 					{
-						std::string include = "BsScript" + entry.second.typeInfo.destFile + ".generated.h";
-						fileInfo.second.referencedSourceIncludes.push_back(include);
+						if (!entry.second.typeInfo.destFile.empty())
+						{
+							std::string include;
+
+							// If .h is present include destFile as is
+							if (endsWith(entry.second.typeInfo.destFile, ".h"))
+								include = entry.second.typeInfo.destFile;
+							else
+								include = "BsScript" + entry.second.typeInfo.destFile + ".generated.h";
+
+							fileInfo.second.referencedSourceIncludes.push_back(include);
+						}
 					}
 				}
 			}
@@ -778,8 +802,8 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
 
 			std::string arrayName = "array" + name;
-			postCallActions << "\t\tScriptArray " << arrayName << ";" << std::endl;
-			postCallActions << "\t\t" << arrayName << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size());" << std::endl;
+			postCallActions << "\t\tScriptArray " << arrayName;
+			postCallActions << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size());" << std::endl;
 			postCallActions << "\t\tfor(int i = 0; i < (int)" << argName << ".size(); i++)" << std::endl;
 			postCallActions << "\t\t{" << std::endl;
 
@@ -814,9 +838,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			postCallActions << "\t\t}" << std::endl;
 
 			if (returnValue)
-				postCallActions << "\t\t" << name << " = " << arrayName << ".getInternal()" << std::endl;
+				postCallActions << "\t\t" << name << " = " << arrayName << ".getInternal();" << std::endl;
 			else
-				postCallActions << "\t\t*" << name << " = " << arrayName << ".getInternal()" << std::endl;
+				postCallActions << "\t\t*" << name << " = " << arrayName << ".getInternal();" << std::endl;
 		}
 
 		return argName;
@@ -1209,7 +1233,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << "\t{" << std::endl;
 
 			output << ctorParamsInit.str();
-			output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(" << ctorSignature.str() << ", ctorParams);" << std::endl;
+			output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(\"" << ctorSignature.str() << "\", ctorParams);" << std::endl;
 			output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">()) " << interopClassName << "(managedInstance, value);" << std::endl;
 			output << "\t\treturn managedInstance;" << std::endl;
 
@@ -1221,7 +1245,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << "\t{" << std::endl;
 
 			output << ctorParamsInit.str();
-			output << "\t\treturn metaData.scriptClass->createInstance(" << ctorSignature.str() << ", ctorParams);" << std::endl;
+			output << "\t\treturn metaData.scriptClass->createInstance(\"" << ctorSignature.str() << "\", ctorParams);" << std::endl;
 
 			output << "\t}" << std::endl;
 		}
@@ -1806,6 +1830,9 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		auto& classInfos = fileInfo.second.classInfos;
 		auto& structInfos = fileInfo.second.structInfos;
 
+		if (classInfos.empty() && structInfos.empty())
+			continue;
+
 		for (auto I = classInfos.begin(); I != classInfos.end(); ++I)
 		{
 			ClassInfo& classInfo = *I;
@@ -1854,6 +1881,9 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		auto& classInfos = fileInfo.second.classInfos;
 		auto& structInfos = fileInfo.second.structInfos;
 
+		if (classInfos.empty() && structInfos.empty())
+			continue;
+
 		for (auto I = classInfos.begin(); I != classInfos.end(); ++I)
 		{
 			ClassInfo& classInfo = *I;
@@ -1898,6 +1928,9 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		auto& classInfos = fileInfo.second.classInfos;
 		auto& structInfos = fileInfo.second.structInfos;
 		auto& enumInfos = fileInfo.second.enumInfos;
+
+		if (classInfos.empty() && structInfos.empty() && enumInfos.empty())
+			continue;
 
 		for (auto I = classInfos.begin(); I != classInfos.end(); ++I)
 		{

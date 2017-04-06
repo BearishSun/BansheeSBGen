@@ -203,13 +203,14 @@ struct FileInfo
 struct IncludeInfo
 {
 	IncludeInfo() { }
-	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude)
-		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude)
+	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude, bool declOnly = false)
+		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude), declOnly(declOnly)
 	{ }
 
 	std::string typeName;
 	UserTypeInfo typeInfo;
 	bool sourceInclude;
+	bool declOnly;
 };
 
 enum FileType
@@ -502,6 +503,14 @@ inline bool canBeReturned(ParsedType type, int flags)
 		return false;
 
 	return true;
+}
+
+inline bool endsWith(const std::string& str, const std::string& end) 
+{
+	if (str.length() >= end.length()) 
+		return (0 == str.compare(str.length() - end.length(), end.length(), end));
+
+	return false;
 }
 
 void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder);

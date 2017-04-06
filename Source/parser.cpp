@@ -1192,7 +1192,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				classInfo.methodInfos.push_back(methodInfo);
 		}
 
-		// External classes are just containers for external methods, we don't need to process them
+		// External classes are just containers for external methods, we don't need to process them directly
 		if ((classExportFlags & (int)ExportFlags::External) == 0)
 		{
 			FileInfo& fileInfo = outputFileInfos[fileName.str()];
