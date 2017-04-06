@@ -5,7 +5,7 @@ This tool depends on Clang & LLVM.
 
 - Download LLVM & Clang source code: http://releases.llvm.org/download.html
 - Place the Clang source code under llvm/tools.
-- Build using the release configuration.
+- Build Clang using the release configuration.
 
 
 - Build BansheeSBGen with llvm_BUILD_DIR, llvm_LIB_DIR and llvm_SOURCE_DIR variables pointing to your LLVM install. 
