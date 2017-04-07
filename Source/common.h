@@ -312,7 +312,7 @@ inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 inline std::string mapCppTypeToCSType(const std::string& cppType)
 {
 	if (cppType == "INT8")
-		return "sbyte";
+		return "byte";
 
 	if (cppType == "UINT8")
 		return "byte";
@@ -321,19 +321,19 @@ inline std::string mapCppTypeToCSType(const std::string& cppType)
 		return "short";
 
 	if (cppType == "UINT16")
-		return "ushort";
+		return "short";
 
 	if (cppType == "INT32")
 		return "int";
 
 	if (cppType == "UINT32")
-		return "uint";
+		return "int";
 
 	if (cppType == "INT64")
 		return "long";
 
 	if (cppType == "UINT64")
-		return "ulong";
+		return "long";
 
 	if (cppType == "wchar_t")
 		return "char";

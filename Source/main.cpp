@@ -105,7 +105,7 @@ int main(int argc, const char** argv)
 
 	generateAll(cppOutputFolder, csEngineOutputFolder, csEditorOutputFolder);
 
-	system("pause");
+	//system("pause");
 	return output;
 }
 
