@@ -1,4 +1,5 @@
 #include "common.h"
+#include <chrono>
 
 std::string getInteropCppVarType(const std::string& typeName, ParsedType type, int flags)
 {
@@ -294,6 +295,20 @@ void postProcessFileInfos()
 		return nullptr;
 	};
 
+	auto findEnumInfo = [](const std::string& name) -> EnumInfo*
+	{
+		for (auto& fileInfo : outputFileInfos)
+		{
+			for (auto& enumInfo : fileInfo.second.enumInfos)
+			{
+				if (enumInfo.name == name)
+					return &enumInfo;
+			}
+		}
+
+		return nullptr;
+	};
+
 	for (auto& entry : externalMethodInfos)
 	{
 		ClassInfo* classInfo = findClassInfo(entry.first);
@@ -456,6 +471,67 @@ void postProcessFileInfos()
 			}
 
 			baseClassInfo->flags |= (int)ClassFlags::IsBase;
+		}
+	}
+
+	// Properly generate enum default values
+	auto parseDefaultValue = [&](VarInfo& paramInfo)
+	{
+		if (paramInfo.defaultValue.empty())
+			return;
+
+		UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+
+		if (typeInfo.type != ParsedType::Enum)
+			return;
+
+		int enumIdx = atoi(paramInfo.defaultValue.c_str());
+		EnumInfo* enumInfo = findEnumInfo(paramInfo.type);
+		if(enumInfo == nullptr)
+		{
+			errs() << "Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			paramInfo.defaultValue = "";
+			return;
+		}
+
+		auto iterFind = enumInfo->entries.find(enumIdx);
+		if(iterFind == enumInfo->entries.end())
+		{
+			errs() << "Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			paramInfo.defaultValue = "";
+			return;
+		}
+
+		paramInfo.defaultValue = enumInfo->scriptName + "." + iterFind->second.scriptName;
+	};
+
+	for (auto& fileInfo : outputFileInfos)
+	{
+		for (auto& classInfo : fileInfo.second.classInfos)
+		{
+			for(auto& methodInfo : classInfo.methodInfos)
+			{
+				for (auto& paramInfo : methodInfo.paramInfos)
+					parseDefaultValue(paramInfo);
+			}
+
+			for (auto& ctorInfo : classInfo.ctorInfos)
+			{
+				for (auto& paramInfo : ctorInfo.paramInfos)
+					parseDefaultValue(paramInfo);
+			}
+		}
+
+		for(auto& structInfo : fileInfo.second.structInfos)
+		{
+			for(auto& fieldInfo : structInfo.fields)
+				parseDefaultValue(fieldInfo);
+
+			for (auto& ctorInfo : structInfo.ctors)
+			{
+				for (auto& paramInfo : ctorInfo.params)
+					parseDefaultValue(paramInfo);
+			}
 		}
 	}
 
@@ -1844,8 +1920,9 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 {
 	postProcessFileInfos();
 
-	for (auto& folderName : fileTypeFolders)
+	for(int i = 0; i < 4;  i++)
 	{
+		std::string folderName = fileTypeFolders[i];
 		StringRef filenameRef(folderName.data(), folderName.size());
 
 		SmallString<128> folderPath = cppOutputFolder;
@@ -1856,6 +1933,22 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 	cleanAndPrepareFolder(csEngineOutputFolder);
 	cleanAndPrepareFolder(csEditorOutputFolder);
+
+	{
+		std::string relativePath = "scriptBindings.timestamp";
+		StringRef filenameRef(relativePath.data(), relativePath.size());
+
+		SmallString<128> filepath = cppOutputFolder;
+		sys::path::append(filepath, filenameRef);
+
+		std::ofstream output;
+		output.open(filepath.str(), std::ios::out);
+
+		std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch());
+		output << std::to_string(ms.count());
+		output.close();
+	}
 
 	// Generate H
 	for (auto& fileInfo : outputFileInfos)

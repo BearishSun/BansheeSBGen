@@ -183,9 +183,18 @@ struct StructInfo
 	std::string documentation;
 };
 
+struct EnumEntryInfo
+{
+	std::string name;
+	std::string scriptName;
+};
+
 struct EnumInfo
 {
 	std::string name;
+	std::string scriptName;
+
+	std::unordered_map<int, EnumEntryInfo> entries;
 	std::string code;
 };
 

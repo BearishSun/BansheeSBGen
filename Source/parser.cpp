@@ -462,6 +462,22 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 			return false;
 		}
 	}
+	else if(type->isEnumeralType())
+	{
+		const EnumType* enumType = type->getAs<EnumType>();
+		const EnumDecl* enumDecl = enumType->getDecl();
+
+		APSInt result;
+		expr->EvaluateAsInt(result, *astContext);
+
+		SmallString<5> valueStr;
+		result.toString(valueStr);
+		evalValue = valueStr.str().str();
+
+		return true;
+	}
+
+	return false;
 }
 
 std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const std::string& indent)
@@ -635,6 +651,10 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		return true;
 	}
 
+	EnumInfo enumEntry;
+	enumEntry.name = sourceClassName;
+	enumEntry.scriptName = className;
+
 	const BuiltinType* builtinType = underlyingType->getAs<BuiltinType>();
 
 	bool explicitType = false;
@@ -672,10 +692,11 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		EnumConstantDecl* constDecl = *iter;
 
 		AnnotateAttr* enumAttr = constDecl->getAttr<AnnotateAttr>();
-		StringRef enumName = constDecl->getName();
+		StringRef entryName = constDecl->getName();
+		StringRef scriptEntryName = constDecl->getName();
 		int enumFlags = 0;
 		if (enumAttr != nullptr)
-			parseExportAttribute(enumAttr, constDecl->getName(), enumName, enumFlags);
+			parseExportAttribute(enumAttr, entryName, scriptEntryName, enumFlags);
 
 		if ((enumFlags & (int)ExportFlags::Exclude) != 0)
 		{
@@ -683,11 +704,19 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 			continue;
 		}
 
+		const APSInt& entryVal = constDecl->getInitVal();
+
+		EnumEntryInfo entryInfo;
+		entryInfo.name = entryName.str();
+		entryInfo.scriptName = scriptEntryName.str();
+
+		enumEntry.entries[(int)entryVal.getExtValue()] = entryInfo;
+
 		SmallString<5> valueStr;
-		constDecl->getInitVal().toString(valueStr);
+		entryVal.toString(valueStr);
 
 		output << convertJavadocToXMLComments(constDecl, "\t\t");
-		output << "\t\t" << enumName.str();
+		output << "\t\t" << scriptEntryName.str();
 		output << " = ";
 		output << valueStr.str().str();
 
@@ -701,8 +730,6 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 	output << "\t}" << std::endl;
 
-	EnumInfo enumEntry;
-	enumEntry.name = sourceClassName;
 	enumEntry.code = output.str();
 
 	fileInfo.enumInfos.push_back(enumEntry);
