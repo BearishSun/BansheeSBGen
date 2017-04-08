@@ -1191,6 +1191,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	output << std::endl;
 
+	// Constructor
+	output << "\t\t" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value);" << std::endl;
+	output << std::endl;
+
 	if (typeInfo.type == ParsedType::Class)
 	{
 		// getInternal() method (handle types have getHandle() implemented by their base type)
@@ -1198,19 +1202,16 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 		// create() method
 		output << "\t\tstatic MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
+		output << std::endl;
 	}
 	else if (typeInfo.type == ParsedType::Resource)
 	{
 		// createInstance() method required by script resource manager
 		output << "\t\tstatic MonoObject* createInstance();" << std::endl;
+		output << std::endl;
 	}
 
-	output << std::endl;
 	output << "\tprivate:" << std::endl;
-
-	// Constructor
-	output << "\t\t" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value);" << std::endl;
-	output << std::endl;
 
 	// Data member
 	if (typeInfo.type == ParsedType::Class)
