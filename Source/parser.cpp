@@ -62,7 +62,7 @@ std::string getNamespace(const RecordDecl* decl)
 	return nsName;
 }
 
-bool parseType(QualType type, std::string& outType, int& typeFlags)
+bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnValue = false)
 {
 	typeFlags = 0;
 
@@ -72,7 +72,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags)
 		realType = type->getPointeeType();
 		typeFlags |= (int)TypeFlags::SrcPtr;
 
-		if (!realType.isConstQualified())
+		if (!returnValue && !realType.isConstQualified())
 			typeFlags |= (int)TypeFlags::Output;
 	}
 	else if (type->isReferenceType())
@@ -80,7 +80,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags)
 		realType = type->getPointeeType();
 		typeFlags |= (int)TypeFlags::SrcRef;
 
-		if (!realType.isConstQualified())
+		if (!returnValue && !realType.isConstQualified())
 			typeFlags |= (int)TypeFlags::Output;
 	}
 	else
@@ -207,6 +207,20 @@ bool parseType(QualType type, std::string& outType, int& typeFlags)
 
 				if (isValid)
 					return true;
+			}
+		}
+		else
+		{
+			// Check for ScriptObject types (this is a special type that allows interop with manually coded script bindings)
+			if(sourceTypeName == "ScriptObjectBase")
+			{
+				if (isSrcPointer(typeFlags))
+					typeFlags |= (int)TypeFlags::ScriptObject;
+				else
+				{
+					errs() << "Found an object of type ScriptObjectBase but not passed by pointer. This is not supported. \n";
+					return false;
+				}
 			}
 		}
 
@@ -371,11 +385,20 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 			std::string className = baseDecl->getName();
 
 			if (className == BUILTIN_COMPONENT_TYPE)
+			{
+				iter++;
 				continue;
+			}
 			else if (className == BUILTIN_RESOURCE_TYPE)
+			{
+				iter++;
 				continue;
+			}
 			else if (className == BUILTIN_SCENEOBJECT_TYPE)
+			{
+				iter++;
 				continue;
+			}
 
 			AnnotateAttr* attr = baseDecl->getAttr<AnnotateAttr>();
 			if (attr != nullptr)
@@ -536,8 +559,6 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 
 			break;
 		}
-		default:
-			errs() << "Unrecognized comment command.\n";
 		}
 
 		++commentIter;
@@ -1063,6 +1084,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			if (!parseExportAttribute(methodAttr, sourceMethodName, methodName, dummy0, dummy1, methodExportFlags, externalClass))
 				continue;
 
+			if (methodDecl->getAccess() != AS_public)
+				errs() << "Exported method \"" + sourceMethodName + "\" isn't public. This will likely result in invalid code generation.";
+
 			int methodFlags = 0;
 
 			bool isExternal = false;
@@ -1083,8 +1107,12 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			if ((methodExportFlags & (int)ExportFlags::InteropOnly))
 				methodFlags |= (int)MethodFlags::InteropOnly;
 
+			bool isStatic = false;
 			if (methodDecl->isStatic() && !isExternal) // Note: Perhaps add a way to mark external methods as static
+			{
 				methodFlags |= (int)MethodFlags::Static;
+				isStatic = true;
+			}
 
 			if ((methodExportFlags & (int)ExportFlags::PropertyGetter) != 0)
 				methodFlags |= (int)MethodFlags::PropertyGetter;
@@ -1106,7 +1134,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				if (!returnType->isVoidType())
 				{
 					ReturnInfo returnInfo;
-					if (!parseType(returnType, returnInfo.type, returnInfo.flags))
+					if (!parseType(returnType, returnInfo.type, returnInfo.flags, true))
 					{
 						errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 						continue;
@@ -1114,39 +1142,6 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					methodInfo.returnInfo = returnInfo;
 				}
-
-				bool invalidParam = false;
-				bool skippedDefaultArg = false;
-				for (auto J = methodDecl->param_begin(); J != methodDecl->param_end(); ++J)
-				{
-					ParmVarDecl* paramDecl = *J;
-					QualType paramType = paramDecl->getType();
-
-					VarInfo paramInfo;
-					paramInfo.name = paramDecl->getName();
-
-					if (!parseType(paramType, paramInfo.type, paramInfo.flags))
-					{
-						errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
-						invalidParam = true;
-						continue;
-					}
-
-					if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
-					{
-						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
-						{
-							errs() << "Method parameter \"" << paramDecl->getName().str() << "\" has a default "
-								<< "argument that cannot be constantly evaluated, ignoring it.\n";
-							skippedDefaultArg = true;
-						}
-					}
-
-					methodInfo.paramInfos.push_back(paramInfo);
-				}
-
-				if (invalidParam)
-					continue;
 			}
 			else
 			{
@@ -1161,14 +1156,14 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					}
 
 					// Note: I can potentially allow an output parameter instead of a return value
-					if (methodDecl->param_size() > 0)
+					if (methodDecl->param_size() > 1 || ((!isExternal || isStatic) && methodDecl->param_size() > 0))
 					{
 						errs() << "Unable to create a getter for property because method \"" << sourceMethodName
 							<< "\" has parameters.\n";
 						continue;
 					}
 
-					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags))
+					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, true))
 					{
 						errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
@@ -1184,7 +1179,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						continue;
 					}
 
-					if (methodDecl->param_size() != 1)
+					if (methodDecl->param_size() == 0 || methodDecl->param_size() > 2 || ((!isExternal || isStatic) && methodDecl->param_size() != 1))
 					{
 						errs() << "Unable to create a setter for property because method \"" << sourceMethodName
 							<< "\" has more or less than one parameter.\n";
@@ -1205,6 +1200,39 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					methodInfo.paramInfos.push_back(paramInfo);
 				}
 			}
+
+			bool invalidParam = false;
+			bool skippedDefaultArg = false;
+			for (auto J = methodDecl->param_begin(); J != methodDecl->param_end(); ++J)
+			{
+				ParmVarDecl* paramDecl = *J;
+				QualType paramType = paramDecl->getType();
+
+				VarInfo paramInfo;
+				paramInfo.name = paramDecl->getName();
+
+				if (!parseType(paramType, paramInfo.type, paramInfo.flags))
+				{
+					errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
+					invalidParam = true;
+					continue;
+				}
+
+				if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+				{
+					if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+					{
+						errs() << "Method parameter \"" << paramDecl->getName().str() << "\" has a default "
+							<< "argument that cannot be constantly evaluated, ignoring it.\n";
+						skippedDefaultArg = true;
+					}
+				}
+
+				methodInfo.paramInfos.push_back(paramInfo);
+			}
+
+			if (invalidParam)
+				continue;
 
 			if (isExternal)
 			{

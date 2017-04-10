@@ -39,7 +39,8 @@ enum class ParsedType
 	Enum,
 	Builtin,
 	String,
-	WString
+	WString,
+	ScriptObject
 };
 
 enum class TypeFlags
@@ -53,7 +54,8 @@ enum class TypeFlags
 	SrcRHandle = 1 << 6,
 	SrcGHandle = 1 << 7,
 	String = 1 << 8,
-	WString = 1 << 9
+	WString = 1 << 9,
+	ScriptObject = 1 << 10
 };
 
 enum class MethodFlags
@@ -204,6 +206,7 @@ struct FileInfo
 	std::vector<StructInfo> structInfos;
 	std::vector<EnumInfo> enumInfos;
 
+	std::unordered_set<std::string> forwardDeclarations;
 	std::vector<std::string> referencedHeaderIncludes;
 	std::vector<std::string> referencedSourceIncludes;
 	bool inEditor;
@@ -434,6 +437,15 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 		UserTypeInfo outType;
 		outType.scriptName = "string";
 		outType.type = ParsedType::WString;
+
+		return outType;
+	}
+
+	if ((flags & (int)TypeFlags::ScriptObject) != 0)
+	{
+		UserTypeInfo outType;
+		outType.scriptName = "object";
+		outType.type = ParsedType::ScriptObject;
 
 		return outType;
 	}

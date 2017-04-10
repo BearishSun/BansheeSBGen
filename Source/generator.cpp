@@ -27,7 +27,7 @@ std::string getInteropCppVarType(const std::string& typeName, ParsedType type, i
 			return "MonoString**";
 		else
 			return "MonoString*";
-	default:
+	default: // Class, resource, component or ScriptObject
 		if (isOutput(flags))
 			return "MonoObject**";
 		else
@@ -90,10 +90,17 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 	switch (type)
 	{
 	case ParsedType::Builtin:
-	case ParsedType::Enum: // Input type is either value or pointer depending or output or not
+	case ParsedType::Enum: // Input type is either value or pointer depending if output or not
 		return getArgumentPlain(isOutput(flags));
 	case ParsedType::Struct: // Input type is always a pointer
 		return getArgumentPlain(true);
+	case ParsedType::ScriptObject: // Input type is either a pointer or a pointer to pointer, depending if output or not
+		{
+			if (isOutput(flags))
+				return "&" + name;
+			else
+				return name;
+		}
 	case ParsedType::String:
 	case ParsedType::WString: // Input type is always a value
 		return getArgumentPlain(false);
@@ -121,10 +128,10 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 
 		if (isSrcPointer(flags))
 			return name + ".get()";
-		else if (isSrcReference(flags) || isSrcValue(flags))
-			return "*" + name;
 		else if (isSrcSPtr(flags))
 			return name;
+		else if (isSrcReference(flags) || isSrcValue(flags))
+			return "*" + name;
 		else
 		{
 			errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
@@ -147,7 +154,8 @@ std::string getScriptInteropType(const std::string& name)
 	bool isValidInteropType = iterFind->second.type != ParsedType::Builtin &&
 		iterFind->second.type != ParsedType::Enum &&
 		iterFind->second.type != ParsedType::String &&
-		iterFind->second.type != ParsedType::WString;
+		iterFind->second.type != ParsedType::WString &&
+		iterFind->second.type != ParsedType::ScriptObject;
 
 	if (!isValidInteropType)
 		errs() << "Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
@@ -335,7 +343,7 @@ void postProcessFileInfos()
 			{
 				if (method.paramInfos.size() == 0)
 				{
-					errs() << "Found an external method \"" << method.sourceName << "\" with no parameters this isn't supported, skipping.\n";
+					errs() << "Found an external method \"" << method.sourceName << "\" with no parameters. This isn't supported, skipping.\n";
 					continue;
 				}
 
@@ -558,6 +566,8 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
+				fileInfo.second.forwardDeclarations.insert(classInfo.name);
+
 				if (typeInfo.type == ParsedType::Resource)
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptResource.h");
 				else if (typeInfo.type == ParsedType::Component)
@@ -580,6 +590,8 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
 
+				fileInfo.second.forwardDeclarations.insert(structInfo.name);
+
 				fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
 				fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
 			}
@@ -590,8 +602,11 @@ void postProcessFileInfos()
 				{
 					std::string include = entry.second.typeInfo.declFile;
 
-					if(entry.second.declOnly)
+					if (entry.second.declOnly)
+					{
 						fileInfo.second.referencedSourceIncludes.push_back(include);
+						fileInfo.second.forwardDeclarations.insert(entry.second.typeName);
+					}
 					else
 						fileInfo.second.referencedHeaderIncludes.push_back(include);
 				}
@@ -709,10 +724,6 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getOrCreateScriptSceneObject(" <<
 			argName << ");" << std::endl;
 	}
-	else if (type == ParsedType::Class)
-	{
-		output << indent << scriptName << " = " << scriptType << "::create(" << argName << ");" << std::endl;
-	}
 	else
 		assert(false);
 
@@ -779,7 +790,49 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToWString(" << name << ");" << std::endl;
 		}
 		break;
-		default: // Some object type
+		case ParsedType::ScriptObject:
+		{
+			argName = "tmp" + name;
+			
+			if (returnValue)
+			{
+				preCallActions << "\t\tScriptObjectBase* " << argName << ";" << std::endl;
+				postCallActions << "\t\t" << name << " = " << argName << "->getManagedInstance();" << std::endl;
+			}
+			else if (isOutput(flags))
+			{
+				preCallActions << "\t\tScriptObjectBase* " << argName << ";" << std::endl;
+				postCallActions << "\t\t*" << name << " = " << argName << "->getManagedInstance();" << std::endl;
+			}
+			else
+			{
+				errs() << "ScriptObjectBase type not supported as input. Ignoring. \n";
+			}
+		}
+		break;
+		case ParsedType::Class:
+		{
+			argName = "tmp" + name;
+			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+			std::string scriptType = getScriptInteropType(typeName);
+
+			preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
+
+			if (returnValue)
+				postCallActions << "\t\t" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
+			else if (isOutput(flags))
+				postCallActions << "\t\t*" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
+			else
+			{
+				std::string scriptName = "script" + name;
+
+				preCallActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
+				preCallActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
+				preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
+			}
+		}
+			break;
+		default: // Some resource or game object type
 		{
 			argName = "tmp" + name;
 			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
@@ -826,6 +879,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		case ParsedType::Enum:
 			entryType = typeName;
 			break;
+		case ParsedType::ScriptObject:
+			entryType = "MonoObject*";
+			break;
 		default: // Some object or struct type
 			entryType = getScriptInteropType(typeName);
 			break;
@@ -849,6 +905,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::String:
 			case ParsedType::WString:
 				preCallActions << "\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
+				break;
+			case ParsedType::ScriptObject:
+				errs() << "ScriptObjectBase type not supported as input. Ignoring. \n";
 				break;
 			case ParsedType::Enum:
 			{
@@ -909,7 +968,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::Struct:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::box(" << argName << "[i]));" << std::endl;
 				break;
-			default: // Some object type
+			case ParsedType::ScriptObject:
+				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]->getManagedInstance());" << std::endl;
+				break;
+			case ParsedType::Class:
+				postCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << argName << "[i]));" << std::endl;
+			break;
+			default: // Some resource or game object type
 			{
 				std::string scriptName = "script" + name;
 
@@ -1996,6 +2061,14 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 		output << "namespace bs" << std::endl;
 		output << "{" << std::endl;
+
+		// Output forward declarations
+		for (auto& decl : fileInfo.second.forwardDeclarations)
+			output << "\tclass " << decl << ";" << std::endl;
+
+		if (!fileInfo.second.forwardDeclarations.empty())
+			output << std::endl;
+
 		output << body.str();
 		output << "}" << std::endl;
 
