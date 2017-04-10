@@ -18,6 +18,7 @@ std::array<std::string, FT_COUNT> fileTypeFolders =
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
 std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
+std::unordered_map<std::string, std::string> commentLookup;
 
 static cl::OptionCategory OptCategory("Script binding options");
 static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);

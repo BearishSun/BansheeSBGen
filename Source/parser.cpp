@@ -635,8 +635,37 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 	return output.str();
 }
 
+void ScriptExportParser::parseComments(NamedDecl* decl)
+{
+	// Not used for now
+	return;
+
+	std::string qualifiedName = decl->getQualifiedNameAsString();
+	auto commentIter = commentLookup.find(qualifiedName);
+	if (commentIter == commentLookup.end())
+	{
+		std::string comment = convertJavadocToXMLComments(decl, "\t");
+
+		if(!comment.empty())
+			commentLookup[qualifiedName] = comment;
+	}
+}
+
+void ScriptExportParser::parseComments(CXXRecordDecl* decl)
+{
+	parseComments(static_cast<NamedDecl*>(decl));
+
+	for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
+		parseComments(*I);
+
+	for (auto I = decl->method_begin(); I != decl->method_end(); ++I)
+		parseComments(*I);
+}
+
 bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 {
+	parseComments(decl);
+
 	AnnotateAttr* attr = decl->getAttr<AnnotateAttr>();
 	if (attr == nullptr)
 		return true;
@@ -756,6 +785,8 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 {
+	parseComments(decl);
+
 	AnnotateAttr* attr = decl->getAttr<AnnotateAttr>();
 	if (attr == nullptr)
 		return true;

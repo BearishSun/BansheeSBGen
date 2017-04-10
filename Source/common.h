@@ -241,6 +241,7 @@ extern std::array<std::string, FT_COUNT> fileTypeFolders;
 extern std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 extern std::unordered_map<std::string, FileInfo> outputFileInfos;
 extern std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
+extern std::unordered_map<std::string, std::string> commentLookup;
 
 inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 {
