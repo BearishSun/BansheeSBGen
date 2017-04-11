@@ -122,6 +122,20 @@ struct ReturnInfo
 	int flags;
 };
 
+struct CommentParamEntry
+{
+	std::string name;
+	SmallVector<std::string, 2> comments;
+};
+
+struct CommentEntry
+{
+	SmallVector<std::string, 2> brief;
+
+	SmallVector<CommentParamEntry, 4> params;
+	SmallVector<std::string, 2> returns;
+};
+
 struct MethodInfo
 {
 	std::string sourceName;
@@ -130,7 +144,7 @@ struct MethodInfo
 
 	ReturnInfo returnInfo;
 	std::vector<VarInfo> paramInfos;
-	std::string documentation;
+	CommentEntry documentation;
 
 	std::string externalClass;
 	int flags;
@@ -146,7 +160,7 @@ struct PropertyInfo
 
 	int typeFlags;
 	bool isStatic;
-	std::string documentation;
+	CommentEntry documentation;
 };
 
 struct ClassInfo
@@ -154,12 +168,13 @@ struct ClassInfo
 	std::string name;
 	CSVisibility visibility;
 	int flags;
+	SmallVector<std::string, 4> ns;
 
 	std::vector<MethodInfo> ctorInfos;
 	std::vector<PropertyInfo> propertyInfos;
 	std::vector<MethodInfo> methodInfos;
 	std::string baseClass;
-	std::string documentation;
+	CommentEntry documentation;
 };
 
 struct ExternalMethodInfos
@@ -177,27 +192,33 @@ struct StructInfo
 {
 	std::string name;
 	CSVisibility visibility;
+	SmallVector<std::string, 4> ns;
 
 	std::vector<SimpleConstructorInfo> ctors;
 	std::vector<VarInfo> fields;
 	bool inEditor;
 
-	std::string documentation;
+	CommentEntry documentation;
 };
 
 struct EnumEntryInfo
 {
 	std::string name;
 	std::string scriptName;
+	std::string value;
+	CommentEntry documentation;
 };
 
 struct EnumInfo
 {
 	std::string name;
 	std::string scriptName;
+	CSVisibility visibility;
+	SmallVector<std::string, 4> ns;
 
+	std::string explicitType;
 	std::unordered_map<int, EnumEntryInfo> entries;
-	std::string code;
+	CommentEntry documentation;
 };
 
 struct FileInfo
@@ -225,6 +246,24 @@ struct IncludeInfo
 	bool declOnly;
 };
 
+struct CommentMethodInfo
+{
+	SmallVector<std::string, 3> params;
+	CommentEntry comment;
+};
+
+struct CommentInfo
+{
+	std::string name;
+	std::string fullName;
+
+	SmallVector<std::string, 2> namespaces;
+	SmallVector<CommentMethodInfo, 2> overloads;
+
+	CommentEntry comment;
+	bool isFunction;
+};
+
 enum FileType
 {
 	FT_ENGINE_H,
@@ -241,7 +280,9 @@ extern std::array<std::string, FT_COUNT> fileTypeFolders;
 extern std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 extern std::unordered_map<std::string, FileInfo> outputFileInfos;
 extern std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
-extern std::unordered_map<std::string, std::string> commentLookup;
+extern std::vector<CommentInfo> commentInfos;
+extern std::unordered_map<std::string, int> commentFullLookup;
+extern std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
 
 inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 {

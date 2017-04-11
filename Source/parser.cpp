@@ -503,11 +503,11 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 	return false;
 }
 
-std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const std::string& indent)
+bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 {
 	comments::FullComment* comment = astContext->getCommentForDecl(decl, nullptr);
 	if (comment == nullptr)
-		return "";
+		return false;
 
 	const comments::CommandTraits& traits = astContext->getCommentCommandTraits();
 
@@ -564,11 +564,13 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 		++commentIter;
 	}
 
-	std::stringstream output;
-
-	auto parseParagraphComment = [&output, &indent, this](comments::ParagraphComment* paragraph)
+	bool hasAnyData = false;
+	auto parseParagraphComment = [&traits, &hasAnyData, this](comments::ParagraphComment* paragraph, SmallVector<std::string, 2>& output)
 	{
 		auto childIter = paragraph->child_begin();
+
+		bool isCopydoc = false;
+		std::stringstream copydocArg;
 		while (childIter != paragraph->child_end())
 		{
 			comments::Comment* childComment = *childIter;
@@ -578,7 +580,6 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 			{
 				comments::TextComment* textCommand = cast<comments::TextComment>(childComment);
 
-				// TODO - Need to prettify this text. Remove all whitespace and break into lines based on char count
 				StringRef trimmedText = textCommand->getText().trim();
 				if (trimmedText.empty())
 				{
@@ -586,68 +587,198 @@ std::string ScriptExportParser::convertJavadocToXMLComments(Decl* decl, const st
 					continue;
 				}
 
-				output << indent << "/// " << trimmedText.str();
-				output << std::endl;
+				if (isCopydoc)
+					copydocArg << trimmedText.str();
+				else
+					output.push_back(trimmedText.str());
+
+				hasAnyData = true;
+			}
+			else if (kind == comments::Comment::CommentKind::InlineCommandCommentKind)
+			{
+				comments::InlineCommandComment* inlineCommand = cast<comments::InlineCommandComment>(childComment);
+
+				std::string name = inlineCommand->getCommandName(traits);
+				if (name == "copydoc")
+					isCopydoc = true;
 			}
 
 			++childIter;
 		}
+
+		if (isCopydoc)
+			output.push_back("@copydoc " + copydocArg.str());
 	};
 
 	if (brief != nullptr)
-	{
-		output << indent << "/// <summary>" << std::endl;
-		parseParagraphComment(brief->getParagraph());
-		output << indent << "/// </summary>" << std::endl;
-	}
+		parseParagraphComment(brief->getParagraph(), output.brief);
 	else if (firstParagraph != nullptr)
-	{
-		output << indent << "/// <summary>" << std::endl;
-		parseParagraphComment(firstParagraph);
-		output << indent << "/// </summary>" << std::endl;
-	}
-	else
-	{
-		output << indent << "/// <summary></summary>" << std::endl;
-	}
+		parseParagraphComment(firstParagraph, output.brief);
 
 	for (auto& entry : params)
 	{
-		std::string paramName;
+		CommentParamEntry paramEntry;
 
 		if (entry->isParamIndexValid())
-			paramName = entry->getParamName(comment).str();
+			paramEntry.name = entry->getParamName(comment).str();
 		else
-			paramName = entry->getParamNameAsWritten().str();
+			paramEntry.name = entry->getParamNameAsWritten().str();
 
-		output << indent << "/// <param name=\"" << paramName << "\">" << std::endl;
-		parseParagraphComment(entry->getParagraph());
-		output << indent << "/// </param>" << std::endl;
+		parseParagraphComment(entry->getParagraph(), paramEntry.comments);
+
+		output.params.push_back(paramEntry);
 	}
 
 	if (returns != nullptr)
+		parseParagraphComment(returns->getParagraph(), output.returns);
+
+	return hasAnyData;
+}
+
+void ScriptExportParser::parseCommentInfo(NamedDecl* decl, CommentInfo& commentInfo)
+{
+	commentInfo.isFunction = false;
+
+	const DeclContext* context = decl->getDeclContext();
+	SmallVector<const NamedDecl *, 8> contexts;
+
+	// Collect contexts
+	if(dyn_cast<NamedDecl>(context) != decl)
+		contexts.push_back(decl);
+
+	while (context && isa<NamedDecl>(context)) 
 	{
-		output << indent << "/// <returns>" << std::endl;
-		parseParagraphComment(returns->getParagraph());
-		output << indent << "/// </returns>" << std::endl;
+		contexts.push_back(dyn_cast<NamedDecl>(context));
+		context = context->getParent();
 	}
 
-	return output.str();
+	SmallVector<std::string, 2> typeName;
+	for (const NamedDecl* dc : reverse(contexts))
+	{
+		if (const auto* nd = dyn_cast<NamespaceDecl>(dc)) 
+		{
+			if (!nd->isAnonymousNamespace())
+				commentInfo.namespaces.push_back(nd->getDeclName().getAsString());
+		}
+		else if (const auto* rd = dyn_cast<RecordDecl>(dc)) 
+		{
+			if (rd->getIdentifier())
+				typeName.push_back(rd->getDeclName().getAsString());
+		}
+		else if (const auto* fd = dyn_cast<FunctionDecl>(dc)) 
+		{
+			const FunctionProtoType* ft = nullptr;
+			if (fd->hasWrittenPrototype())
+				ft = dyn_cast<FunctionProtoType>(fd->getType()->castAs<FunctionType>());
+
+			typeName.push_back(fd->getDeclName().getAsString());
+
+			CommentMethodInfo paramInfo;
+			if (ft) 
+			{
+				unsigned numParams = fd->getNumParams();
+				for (unsigned i = 0; i < numParams; ++i) 
+				{
+					std::string paramType = fd->getParamDecl(i)->getType().getAsString(astContext->getPrintingPolicy());
+					paramInfo.params.push_back(paramType);
+				}
+			}
+
+			commentInfo.overloads.push_back(paramInfo);
+			commentInfo.isFunction = true;
+		}
+		else if (const auto* ed = dyn_cast<EnumDecl>(dc)) {
+			if (ed->isScoped() || ed->getIdentifier())
+				typeName.push_back(ed->getDeclName().getAsString());
+		}
+		else 
+		{
+			typeName.push_back(cast<NamedDecl>(dc)->getDeclName().getAsString());
+		}
+	}
+
+	std::stringstream typeNameStream;
+	for(int i = 0; i < (int)typeName.size(); i++)
+	{
+		if (i > 0)
+			typeNameStream << "::";
+
+		typeNameStream << typeName[i];
+	}
+
+	commentInfo.name = typeNameStream.str();
+
+	std::stringstream fullTypeNameStream;
+	for(int i = 0; i < (int)commentInfo.namespaces.size(); i++)
+	{
+		if (i > 0)
+			fullTypeNameStream << "::";
+
+		fullTypeNameStream << commentInfo.namespaces[i];
+	}
+
+	fullTypeNameStream << "::" << commentInfo.name;
+	commentInfo.fullName = fullTypeNameStream.str();
 }
 
 void ScriptExportParser::parseComments(NamedDecl* decl)
 {
-	// Not used for now
-	return;
+	CommentInfo commentInfo;
+	parseCommentInfo(decl, commentInfo);
 
-	std::string qualifiedName = decl->getQualifiedNameAsString();
-	auto commentIter = commentLookup.find(qualifiedName);
-	if (commentIter == commentLookup.end())
+	auto iterFind = commentFullLookup.find(commentInfo.fullName);
+	if (iterFind == commentFullLookup.end())
 	{
-		std::string comment = convertJavadocToXMLComments(decl, "\t");
+		bool hasComment;
+		if (commentInfo.isFunction)
+			hasComment = parseJavadocComments(decl, commentInfo.overloads[0].comment);
+		else
+			hasComment = parseJavadocComments(decl, commentInfo.comment);
 
-		if(!comment.empty())
-			commentLookup[qualifiedName] = comment;
+		if (!hasComment)
+			return;
+
+		commentFullLookup[commentInfo.fullName] = (int)commentInfos.size();
+
+		SmallVector<int, 2>& entries = commentSimpleLookup[commentInfo.name];
+		entries.push_back((int)commentInfos.size());
+
+		commentInfos.push_back(commentInfo);
+	}
+	else if(commentInfo.isFunction) // Can be an overload
+	{
+		CommentInfo& existingInfo = commentInfos[iterFind->second];
+
+		bool foundExisting = false;
+		for(auto& paramInfo : commentInfo.overloads)
+		{
+			int numParams = paramInfo.params.size();
+			if (numParams != commentInfo.overloads[0].params.size())
+				continue;
+
+			bool paramsMatch = true;
+			for(int i = 0; i < numParams; i++)
+			{
+				if(paramInfo.params[i] != commentInfo.overloads[0].params[i])
+				{
+					paramsMatch = false;
+					break;
+				}
+			}
+
+			if(paramsMatch)
+			{
+				foundExisting = true;
+				break;
+			}
+		}
+
+		if(!foundExisting)
+		{
+			bool hasComment = parseJavadocComments(decl, commentInfo.overloads[0].comment);
+			if (hasComment)
+				existingInfo.overloads.push_back(commentInfo.overloads[0]);
+		}
 	}
 }
 
@@ -655,11 +786,35 @@ void ScriptExportParser::parseComments(CXXRecordDecl* decl)
 {
 	parseComments(static_cast<NamedDecl*>(decl));
 
-	for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
-		parseComments(*I);
-
 	for (auto I = decl->method_begin(); I != decl->method_end(); ++I)
+	{
+		if (decl->isImplicit())
+			continue;
+
 		parseComments(*I);
+	}
+}
+
+void parseNamespace(NamedDecl* decl, SmallVector<std::string, 4>& output)
+{
+	const DeclContext* context = decl->getDeclContext();
+	SmallVector<const DeclContext *, 8> contexts;
+
+	// Collect contexts.
+	while (context && isa<NamedDecl>(context))
+	{
+		contexts.push_back(context);
+		context = context->getParent();
+	}
+
+	for (const DeclContext* dc : reverse(contexts))
+	{
+		if (const auto* nd = dyn_cast<NamespaceDecl>(dc))
+		{
+			if (!nd->isAnonymousNamespace())
+				output.push_back(nd->getDeclName().getAsString());
+		}
+	}
 }
 
 bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
@@ -700,38 +855,21 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	EnumInfo enumEntry;
 	enumEntry.name = sourceClassName;
 	enumEntry.scriptName = className;
+	enumEntry.visibility = visibility;
+	parseJavadocComments(decl, enumEntry.documentation);
+	parseNamespace(decl, enumEntry.ns);
 
 	const BuiltinType* builtinType = underlyingType->getAs<BuiltinType>();
 
-	bool explicitType = false;
 	std::string enumType;
 	if (builtinType->getKind() != BuiltinType::Kind::Int)
-	{
-		if (mapBuiltinTypeToCSType(builtinType->getKind(), enumType))
-			explicitType = true;
-	}
+		mapBuiltinTypeToCSType(builtinType->getKind(), enumEntry.explicitType);
 
 	std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
 	cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Enum, declFile, fileName);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
-
-	std::stringstream output;
-
-	output << convertJavadocToXMLComments(decl, "\t");
-	if (visibility == CSVisibility::Internal)
-		output << "\tinternal ";
-	else if (visibility == CSVisibility::Public)
-		output << "\tpublic ";
-
-	output << "enum " << className.str();
-
-	if (explicitType)
-		output << " : " << enumType;
-
-	output << std::endl;
-	output << "\t{" << std::endl;
-
+	
 	auto iter = decl->enumerator_begin();
 	while (iter != decl->enumerator_end())
 	{
@@ -755,28 +893,16 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		EnumEntryInfo entryInfo;
 		entryInfo.name = entryName.str();
 		entryInfo.scriptName = scriptEntryName.str();
+		parseJavadocComments(constDecl, entryInfo.documentation);
 
 		enumEntry.entries[(int)entryVal.getExtValue()] = entryInfo;
 
 		SmallString<5> valueStr;
 		entryVal.toString(valueStr);
-
-		output << convertJavadocToXMLComments(constDecl, "\t\t");
-		output << "\t\t" << scriptEntryName.str();
-		output << " = ";
-		output << valueStr.str().str();
+		entryInfo.value = valueStr.str();
 
 		++iter;
-
-		if (iter != decl->enumerator_end())
-			output << ",";
-
-		output << std::endl;
 	}
-
-	output << "\t}" << std::endl;
-
-	enumEntry.code = output.str();
 
 	fileInfo.enumInfos.push_back(enumEntry);
 
@@ -817,7 +943,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.name = sourceClassName;
 		structInfo.visibility = visibility;
 		structInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
-		structInfo.documentation = convertJavadocToXMLComments(decl, "\t");
+		parseJavadocComments(decl, structInfo.documentation);
+		parseNamespace(decl, structInfo.ns);
 
 		std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
 
@@ -1017,8 +1144,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		classInfo.name = sourceClassName;
 		classInfo.visibility = visibility;
 		classInfo.flags = 0;
-		classInfo.documentation = convertJavadocToXMLComments(decl, "\t");
 		classInfo.baseClass = parseExportableBaseClass(decl);
+		parseJavadocComments(decl, classInfo.documentation);
+		parseNamespace(decl, classInfo.ns);
 
 		if ((classExportFlags & (int)ExportFlags::Editor) != 0)
 			classInfo.flags |= (int)ClassFlags::Editor;
@@ -1049,8 +1177,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			MethodInfo methodInfo;
 			methodInfo.sourceName = sourceClassName;
 			methodInfo.scriptName = className;
-			methodInfo.documentation = convertJavadocToXMLComments(ctorDecl, "\t\t");
 			methodInfo.flags = (int)MethodFlags::Constructor;
+			parseJavadocComments(ctorDecl, methodInfo.documentation);
 
 			if ((methodExportFlags & (int)ExportFlags::InteropOnly))
 				methodInfo.flags |= (int)MethodFlags::InteropOnly;
@@ -1153,9 +1281,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			MethodInfo methodInfo;
 			methodInfo.sourceName = sourceMethodName;
 			methodInfo.scriptName = methodName;
-			methodInfo.documentation = convertJavadocToXMLComments(methodDecl, "\t\t");
 			methodInfo.flags = methodFlags;
 			methodInfo.externalClass = sourceClassName;
+			parseJavadocComments(methodDecl, methodInfo.documentation);
 
 			bool isProperty = (methodExportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
 

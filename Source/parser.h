@@ -11,7 +11,8 @@ public:
 
 private:
 	bool evaluateExpression(Expr* expr, std::string& evalValue);
-	std::string convertJavadocToXMLComments(Decl* decl, const std::string& indent);
+	bool parseJavadocComments(Decl* decl, CommentEntry& entry);
+	void parseCommentInfo(NamedDecl* decl, CommentInfo& commentInfo);
 	void parseComments(NamedDecl* decl);
 	void parseComments(CXXRecordDecl* decl);
 

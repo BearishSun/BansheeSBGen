@@ -286,6 +286,284 @@ void gatherIncludes(const ClassInfo& classInfo, std::unordered_map<std::string, 
 		gatherIncludes(methodInfo, output);
 }
 
+bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4>& curNS, CommentEntry& outputComment)
+{
+	StringRef inputStr(str.data(), str.length());
+
+	bool hasParamList = inputStr.find('(');
+
+	StringRef fullTypeName;
+	StringRef params;
+
+	if (hasParamList)
+	{
+		auto paramSplit = inputStr.split('(');
+
+		fullTypeName = paramSplit.first.trim();
+		params = paramSplit.second.trim(") \t\n\v\f\r");
+	}
+	else
+	{
+		fullTypeName = inputStr;
+	}
+
+	SmallVector<StringRef, 4> typeSplits;
+	fullTypeName.split(typeSplits, "::", -1, false);
+
+	if (typeSplits.empty())
+	{
+		errs() << "Cannot deduce type from @copydoc command: \"" << str << "\".";
+		return false;
+	}
+
+	// Find matching type (no namespace)
+	int namespaceStart = -1;
+	std::string simpleTypeName;
+	SmallVector<int, 2> lookup;
+
+	if (typeSplits.size() > 1)
+	{
+		simpleTypeName = typeSplits[typeSplits.size() - 2].str() + "::" + typeSplits[typeSplits.size() - 1].str();
+		namespaceStart = 2;
+
+		auto iterFind = commentSimpleLookup.find(simpleTypeName);
+		if (iterFind == commentSimpleLookup.end())
+		{
+			simpleTypeName = typeSplits[typeSplits.size() - 1].str();
+			iterFind = commentSimpleLookup.find(simpleTypeName);
+			namespaceStart = 1;
+		}
+
+		if (iterFind == commentSimpleLookup.end())
+		{
+			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			return false;
+		}
+		else
+			lookup = iterFind->second;
+	}
+	else
+	{
+		simpleTypeName = typeSplits[typeSplits.size() - 1].str();
+		namespaceStart = 1;
+
+		auto iterFind = commentSimpleLookup.find(simpleTypeName);
+		if (iterFind == commentSimpleLookup.end())
+		{
+			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			return false;
+		}
+		else
+			lookup = iterFind->second;
+	}
+
+	// Confirm namespace matches
+	SmallVector<std::string, 4> copydocNS;
+	for (int i = 0; i < (int)(typeSplits.size() - namespaceStart); i++)
+		copydocNS.push_back(typeSplits[i].str());
+
+	SmallVector<std::string, 4> fullNS;
+	for (int i = 0; i < (int)curNS.size(); i++)
+		fullNS.push_back(curNS[i]);
+
+	for (int i = 0; i < (int)copydocNS.size(); i++)
+		fullNS.push_back(copydocNS[i]);
+
+	// First try to assume @copydoc specified namespace is relative to current NS
+	int entryMatch = -1;
+	for (int i = 0; i < (int)lookup.size(); i++)
+	{
+		CommentInfo& curCommentInfo = commentInfos[lookup[i]];
+
+		if (fullNS.size() != curCommentInfo.namespaces.size())
+			continue;
+
+		bool matches = true;
+		for (int j = 0; j < (int)curCommentInfo.namespaces.size(); j++)
+		{
+			if (fullNS[j] != curCommentInfo.namespaces[j])
+			{
+				matches = false;
+				break;
+			}
+		}
+
+		if (matches)
+		{
+			entryMatch = i;
+			break;
+		}
+	}
+
+	// If nothing is found, assume provided namespace is global
+	if (entryMatch == -1)
+	{
+		for (int i = 0; i < (int)lookup.size(); i++)
+		{
+			CommentInfo& curCommentInfo = commentInfos[lookup[i]];
+
+			if (copydocNS.size() != curCommentInfo.namespaces.size())
+				continue;
+
+			bool matches = true;
+			for (int j = 0; j < (int)curCommentInfo.namespaces.size(); j++)
+			{
+				if (copydocNS[j] != curCommentInfo.namespaces[j])
+				{
+					matches = false;
+					break;
+				}
+			}
+
+			if (matches)
+			{
+				entryMatch = i;
+				break;
+			}
+		}
+	}
+
+	if (entryMatch == -1)
+	{
+		errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+		return false;
+	}
+
+	CommentInfo& finalCommentInfo = commentInfos[lookup[entryMatch]];
+	if (hasParamList)
+	{
+		if (!finalCommentInfo.isFunction)
+		{
+			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			return false;
+		}
+
+		SmallVector<StringRef, 8> paramSplits;
+		params.split(paramSplits, ",", -1, false);
+
+		for (int i = 0; i < (int)paramSplits.size(); i++)
+			paramSplits[i] = paramSplits[i].trim();
+
+		int overloadMatch = -1;
+		for (int i = 0; i < (int)finalCommentInfo.overloads.size(); i++)
+		{
+			if (paramSplits.size() != finalCommentInfo.overloads[i].params.size())
+				continue;
+
+			bool matches = true;
+			for (int j = 0; j < (int)paramSplits.size(); j++)
+			{
+				if (paramSplits[j] != finalCommentInfo.overloads[i].params[j])
+				{
+					matches = false;
+					break;
+				}
+			}
+
+			if (matches)
+			{
+				overloadMatch = i;
+				break;
+			}
+		}
+
+		if (overloadMatch == -1)
+		{
+			// Assume the user doesn't care which overload is used
+			if (paramSplits.empty())
+				overloadMatch = 0;
+			else
+			{
+				errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+				return false;
+			}
+		}
+
+		outputComment = finalCommentInfo.overloads[overloadMatch].comment;
+		return true;
+	}
+
+	if (finalCommentInfo.isFunction)
+		outputComment = finalCommentInfo.overloads[0].comment;
+	else
+		outputComment = finalCommentInfo.comment;
+
+	return true;
+}
+
+void resolveCopydocComment(CommentEntry& comment, const SmallVector<std::string, 4>& curNS)
+{
+	StringRef copydocArg;
+	for(auto& entry : comment.brief)
+	{
+		StringRef commentRef(entry.data(), entry.length());
+
+		if (commentRef.startswith("@copydoc"))
+		{
+			copydocArg = commentRef.split(' ').second;
+			break;
+		}
+	}
+
+	if (copydocArg.empty())
+		return;
+
+	CommentEntry outComment;
+	if (!parseCopydocString(copydocArg, curNS, outComment))
+	{
+		comment = CommentEntry();
+		return;
+	}
+	else
+		comment = outComment;
+
+	resolveCopydocComment(comment, curNS);
+}
+
+std::string generateXMLComments(const CommentEntry& commentEntry, const std::string& indent)
+{
+	std::stringstream output;
+	
+	if (!commentEntry.brief.empty())
+	{
+		output << indent << "/// <summary>" << std::endl;
+
+		for (auto& entry : commentEntry.brief)
+			output << indent << "/// " << entry << std::endl;
+
+		output << indent << "/// </summary>" << std::endl;
+	}
+	else
+	{
+		output << indent << "/// <summary></summary>" << std::endl;
+	}
+
+	for(auto& entry : commentEntry.params)
+	{
+		if (entry.comments.empty())
+			continue;
+
+		output << indent << "/// <param name=\"" << entry.name << "\">" << std::endl;
+
+		for(auto& paramEntry : entry.comments)
+			output << indent << "/// " << paramEntry << std::endl;
+
+		output << indent << "/// </param>" << std::endl;
+	}
+
+	if(!commentEntry.returns.empty())
+	{
+		output << indent << "/// <returns>" << std::endl;
+
+		for (auto& paramEntry : commentEntry.returns)
+			output << indent << "/// " << paramEntry << std::endl;
+
+		output << indent << "/// </returns>" << std::endl;
+	}
+
+	return output.str();
+}
+
 void postProcessFileInfos()
 {
 	// Inject external methods into their appropriate class infos
@@ -358,6 +636,32 @@ void postProcessFileInfos()
 			}
 
 			classInfo->methodInfos.push_back(method);
+		}
+	}
+
+	// Resolve copydoc comment commands
+	for (auto& fileInfo : outputFileInfos)
+	{
+		for (auto& classInfo : fileInfo.second.classInfos)
+		{
+			resolveCopydocComment(classInfo.documentation, classInfo.ns);
+
+			for (auto& methodInfo : classInfo.methodInfos)
+				resolveCopydocComment(methodInfo.documentation, classInfo.ns);
+
+			for (auto& ctorInfo : classInfo.ctorInfos)
+				resolveCopydocComment(ctorInfo.documentation, classInfo.ns);
+		}
+
+		for (auto& structInfo : fileInfo.second.structInfos)
+			resolveCopydocComment(structInfo.documentation, structInfo.ns);
+
+		for(auto& enumInfo : fileInfo.second.enumInfos)
+		{
+			resolveCopydocComment(enumInfo.documentation, enumInfo.ns);
+
+			for (auto& enumEntryInfo : enumInfo.entries)
+				resolveCopydocComment(enumEntryInfo.second.documentation, enumInfo.ns);
 		}
 	}
 
@@ -448,14 +752,14 @@ void postProcessFileInfos()
 						existingInfo.getter = propertyInfo.getter;
 
 						// Prefer documentation from setter, but use getter if no other available
-						if (existingInfo.documentation.empty())
+						if (existingInfo.documentation.brief.empty())
 							existingInfo.documentation = propertyInfo.documentation;
 					}
 					else
 					{
 						existingInfo.setter = propertyInfo.setter;
 
-						if (!propertyInfo.documentation.empty())
+						if (!propertyInfo.documentation.brief.empty())
 							existingInfo.documentation = propertyInfo.documentation;
 					}
 				}
@@ -1640,7 +1944,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (interopOnly)
 			continue;
 
-		ctors << entry.documentation;
+		ctors << generateXMLComments(entry.documentation, "\t\t");
 		ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 		ctors << "\t\t{" << std::endl;
 		ctors << "\t\t\tInternal_" << entry.interopName << "(this";
@@ -1670,7 +1974,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		if (isConstructor)
 		{
-			ctors << entry.documentation;
+			ctors << generateXMLComments(entry.documentation, "\t\t");
 			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
 			ctors << "\t\t\tInternal_" << entry.interopName << "(this";
@@ -1697,7 +2001,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 					returnType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, entry.returnInfo.flags, false, true, false);
 				}
 
-				methods << entry.documentation;
+				methods << generateXMLComments(entry.documentation, "\t\t");
 				methods << "\t\tpublic " << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				methods << "\t\t{" << std::endl;
 
@@ -1749,7 +2053,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
 		std::string propTypeName = getCSVarType(propTypeInfo.scriptName, propTypeInfo.type, entry.typeFlags, false, true, false);
 
-		properties << entry.documentation;
+		properties << generateXMLComments(entry.documentation, "\t\t");
 		properties << "\t\tpublic " << propTypeName << " " << entry.name << std::endl;
 		properties << "\t\t{" << std::endl;
 
@@ -1790,7 +2094,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	}
 
 	std::stringstream output;
-	output << input.documentation;
+	output << generateXMLComments(input.documentation, "\t");
 
 	if (input.visibility == CSVisibility::Internal)
 		output << "\tinternal ";
@@ -1830,7 +2134,7 @@ std::string generateCSStruct(StructInfo& input)
 {
 	std::stringstream output;
 
-	output << input.documentation;
+	output << generateXMLComments(input.documentation, "\t");
 
 	if (input.visibility == CSVisibility::Internal)
 		output << "\tinternal ";
@@ -1951,6 +2255,43 @@ std::string generateCSStruct(StructInfo& input)
 	}
 
 	output << "\t}" << std::endl;
+	return output.str();
+}
+
+std::string generateCSEnum(EnumInfo& input)
+{
+	std::stringstream output;
+
+	output << generateXMLComments(input.documentation, "\t");
+	if (input.visibility == CSVisibility::Internal)
+		output << "\tinternal ";
+	else if (input.visibility == CSVisibility::Public)
+		output << "\tpublic ";
+
+	output << "enum " << input.scriptName;
+
+	if (!input.explicitType.empty())
+		output << " : " << input.explicitType;
+
+	output << std::endl;
+	output << "\t{" << std::endl;
+
+	for (auto I = input.entries.begin(); I != input.entries.end(); ++I)
+	{
+		if (I != input.entries.begin())
+			output << ",";
+
+		const EnumEntryInfo& entryInfo = I->second;
+
+		output << generateXMLComments(entryInfo.documentation, "\t\t");
+		output << "\t\t" << entryInfo.scriptName;
+		output << " = ";
+		output << entryInfo.value;
+		output << std::endl;
+	}
+	
+	output << "\t}" << std::endl;
+
 	return output.str();
 }
 
@@ -2155,7 +2496,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 		for (auto I = enumInfos.begin(); I != enumInfos.end(); ++I)
 		{
-			body << I->code;
+			body << generateCSEnum(*I);
 
 			if ((I + 1) != enumInfos.end())
 				body << std::endl;
