@@ -225,6 +225,7 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 	output.sourceName = classInfo.name;
 	output.scriptName = classInfo.name;
 	output.flags = (int)MethodFlags::Constructor;
+	output.visibility = CSVisibility::Private;
 
 	for (int i = 0; i < numBools; i++)
 	{
@@ -524,13 +525,67 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 {
 	std::stringstream output;
 	
+	auto wordWrap = [](const std::string& input, const std::string& linePrefix, int columnLength = 124)
+	{
+		int prefixLength = (int)linePrefix.length();
+		int inputLength = (int)input.length();
+
+		if ((inputLength + prefixLength) <= columnLength)
+			return linePrefix + input + "\n";
+
+		StringRef inputRef(input.data(), input.length());
+		std::stringstream wordWrapped;
+
+		int lineLength = columnLength - prefixLength;
+		int curIdx = 0;
+		while(curIdx < inputLength)
+		{
+			int remainingLength = inputLength - curIdx;
+			if(remainingLength <= lineLength)
+			{
+				StringRef lineRef = inputRef.substr(curIdx, remainingLength);
+				wordWrapped << linePrefix << lineRef.str() << std::endl;
+				break;
+			}
+			else
+			{
+				int lastSpace = inputRef.find_last_of(' ', curIdx + lineLength);
+				if(lastSpace == -1 || lastSpace <= curIdx) // Need to break word
+				{
+					StringRef lineRef = inputRef.substr(curIdx, lineLength);
+
+					wordWrapped << linePrefix << lineRef.str() << std::endl;
+					curIdx += lineLength;
+				}
+				else
+				{
+					int length = lastSpace - curIdx + 1;
+					StringRef lineRef = inputRef.substr(curIdx, length);
+
+					wordWrapped << linePrefix << lineRef.str() << std::endl;
+					curIdx += length;
+				}
+			}
+		}
+		
+		return wordWrapped.str();
+	};
+
+	auto printParagraphs = [&output, &indent, &wordWrap](const SmallVector<std::string, 2>& input)
+	{
+		for(auto I = input.begin(); I != input.end(); ++I)
+		{
+			if (I != input.begin())
+				output << std::endl;
+
+			output << wordWrap(*I, indent + "/// ");
+		}
+	};
+
 	if (!commentEntry.brief.empty())
 	{
 		output << indent << "/// <summary>" << std::endl;
-
-		for (auto& entry : commentEntry.brief)
-			output << indent << "/// " << entry << std::endl;
-
+		printParagraphs(commentEntry.brief);
 		output << indent << "/// </summary>" << std::endl;
 	}
 	else
@@ -544,20 +599,14 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 			continue;
 
 		output << indent << "/// <param name=\"" << entry.name << "\">" << std::endl;
-
-		for(auto& paramEntry : entry.comments)
-			output << indent << "/// " << paramEntry << std::endl;
-
+		printParagraphs(entry.comments);
 		output << indent << "/// </param>" << std::endl;
 	}
 
 	if(!commentEntry.returns.empty())
 	{
 		output << indent << "/// <returns>" << std::endl;
-
-		for (auto& paramEntry : commentEntry.returns)
-			output << indent << "/// " << paramEntry << std::endl;
-
+		printParagraphs(commentEntry.returns);
 		output << indent << "/// </returns>" << std::endl;
 	}
 
@@ -716,6 +765,7 @@ void postProcessFileInfos()
 				propertyInfo.name = methodInfo.scriptName;
 				propertyInfo.documentation = methodInfo.documentation;
 				propertyInfo.isStatic = (methodInfo.flags & (int)MethodFlags::Static);
+				propertyInfo.visibility = methodInfo.visibility;
 
 				if (isGetter)
 				{
@@ -1945,7 +1995,15 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 			continue;
 
 		ctors << generateXMLComments(entry.documentation, "\t\t");
-		ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
+
+		if (entry.visibility == CSVisibility::Internal)
+			ctors << "\t\tinternal ";
+		else if (entry.visibility == CSVisibility::Private)
+			ctors << "\t\tprivate ";
+		else
+			ctors << "\t\tpublic ";
+
+		ctors << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 		ctors << "\t\t{" << std::endl;
 		ctors << "\t\t\tInternal_" << entry.interopName << "(this";
 
@@ -1975,7 +2033,15 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (isConstructor)
 		{
 			ctors << generateXMLComments(entry.documentation, "\t\t");
-			ctors << "\t\tpublic " << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
+
+			if (entry.visibility == CSVisibility::Internal)
+				ctors << "\t\tinternal ";
+			else if (entry.visibility == CSVisibility::Private)
+				ctors << "\t\tprivate ";
+			else
+				ctors << "\t\tpublic ";
+
+			ctors << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
 			ctors << "\t\t\tInternal_" << entry.interopName << "(this";
 
@@ -2002,7 +2068,15 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				}
 
 				methods << generateXMLComments(entry.documentation, "\t\t");
-				methods << "\t\tpublic " << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
+
+				if (entry.visibility == CSVisibility::Internal)
+					methods << "\t\tinternal ";
+				else if (entry.visibility == CSVisibility::Private)
+					methods << "\t\tprivate ";
+				else
+					methods << "\t\tpublic ";
+
+				methods << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				methods << "\t\t{" << std::endl;
 
 				bool returnByParam = false;
@@ -2054,7 +2128,15 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		std::string propTypeName = getCSVarType(propTypeInfo.scriptName, propTypeInfo.type, entry.typeFlags, false, true, false);
 
 		properties << generateXMLComments(entry.documentation, "\t\t");
-		properties << "\t\tpublic " << propTypeName << " " << entry.name << std::endl;
+
+		if (entry.visibility == CSVisibility::Internal)
+			properties << "\t\tinternal ";
+		else if (entry.visibility == CSVisibility::Private)
+			properties << "\t\tprivate ";
+		else
+			properties << "\t\tpublic ";
+
+		properties << propTypeName << " " << entry.name << std::endl;
 		properties << "\t\t{" << std::endl;
 
 		if (!entry.getter.empty())
@@ -2100,6 +2182,8 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		output << "\tinternal ";
 	else if (input.visibility == CSVisibility::Public)
 		output << "\tpublic ";
+	else if (input.visibility == CSVisibility::Private)
+		output << "\tprivate ";
 	else
 		output << "\t";
 
@@ -2140,6 +2224,8 @@ std::string generateCSStruct(StructInfo& input)
 		output << "\tinternal ";
 	else if (input.visibility == CSVisibility::Public)
 		output << "\tpublic ";
+	else if (input.visibility == CSVisibility::Private)
+		output << "\tprivate ";
 	else
 		output << "\t";
 
@@ -2267,6 +2353,8 @@ std::string generateCSEnum(EnumInfo& input)
 		output << "\tinternal ";
 	else if (input.visibility == CSVisibility::Public)
 		output << "\tpublic ";
+	else if (input.visibility == CSVisibility::Private)
+		output << "\tprivate ";
 
 	output << "enum " << input.scriptName;
 

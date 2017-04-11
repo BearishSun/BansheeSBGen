@@ -71,7 +71,8 @@ enum class MethodFlags
 enum class CSVisibility
 {
 	Public,
-	Internal
+	Internal,
+	Private
 };
 
 enum class ExportFlags
@@ -141,6 +142,7 @@ struct MethodInfo
 	std::string sourceName;
 	std::string interopName;
 	std::string scriptName;
+	CSVisibility visibility;
 
 	ReturnInfo returnInfo;
 	std::vector<VarInfo> paramInfos;
@@ -158,6 +160,7 @@ struct PropertyInfo
 	std::string getter;
 	std::string setter;
 
+	CSVisibility visibility;
 	int typeFlags;
 	bool isStatic;
 	CommentEntry documentation;

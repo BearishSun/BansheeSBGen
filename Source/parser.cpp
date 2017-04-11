@@ -1,4 +1,5 @@
 #include "parser.h"
+#include <cctype>
 
 ParsedType getObjectType(const CXXRecordDecl* decl)
 {
@@ -277,6 +278,8 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				visibility = CSVisibility::Public;
 			else if (annotParam.second == "internal")
 				visibility = CSVisibility::Internal;
+			else if (annotParam.second == "private")
+				visibility = CSVisibility::Private;
 			else
 				errs() << "Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
 				sourceName << "\".\n";
@@ -567,9 +570,39 @@ bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 	bool hasAnyData = false;
 	auto parseParagraphComment = [&traits, &hasAnyData, this](comments::ParagraphComment* paragraph, SmallVector<std::string, 2>& output)
 	{
+		auto getTrimmedText = [](const StringRef& input, std::stringstream& output)
+		{
+			bool lastIsSpace = true;
+			for (auto& entry : input)
+			{
+				if (lastIsSpace)
+				{
+					if (entry == ' ' || entry == '\t')
+						continue;
+
+					output << entry;
+					lastIsSpace = false;
+				}
+				else
+				{
+					if (entry == ' ')
+						lastIsSpace = true;
+
+					if (entry == '\t')
+					{
+						output << " ";
+						lastIsSpace = true;
+					}
+					else
+						output << entry;
+				}
+			}
+		};
+
 		auto childIter = paragraph->child_begin();
 
 		bool isCopydoc = false;
+		std::stringstream paragraphText;
 		std::stringstream copydocArg;
 		while (childIter != paragraph->child_end())
 		{
@@ -580,17 +613,17 @@ bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 			{
 				comments::TextComment* textCommand = cast<comments::TextComment>(childComment);
 
-				StringRef trimmedText = textCommand->getText().trim();
-				if (trimmedText.empty())
+				StringRef text = textCommand->getText();
+				if (text.empty())
 				{
 					++childIter;
 					continue;
 				}
 
 				if (isCopydoc)
-					copydocArg << trimmedText.str();
+					getTrimmedText(text, copydocArg);
 				else
-					output.push_back(trimmedText.str());
+					getTrimmedText(text, paragraphText);
 
 				hasAnyData = true;
 			}
@@ -608,6 +641,14 @@ bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 
 		if (isCopydoc)
 			output.push_back("@copydoc " + copydocArg.str());
+		else
+		{
+			std::string paragraphStr = paragraphText.str();
+			StringRef trimmedText(paragraphStr.data(), paragraphStr.length());
+			trimmedText = trimmedText.trim();
+
+			output.push_back(trimmedText);
+		}
 	};
 
 	if (brief != nullptr)
@@ -895,12 +936,11 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		entryInfo.scriptName = scriptEntryName.str();
 		parseJavadocComments(constDecl, entryInfo.documentation);
 
-		enumEntry.entries[(int)entryVal.getExtValue()] = entryInfo;
-
 		SmallString<5> valueStr;
 		entryVal.toString(valueStr);
 		entryInfo.value = valueStr.str();
 
+		enumEntry.entries[(int)entryVal.getExtValue()] = entryInfo;
 		++iter;
 	}
 
@@ -1168,16 +1208,17 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			StringRef dummy0;
 			StringRef dummy1;
 			StringRef dummy2;
-			CSVisibility dummy3;
+			CSVisibility ctorVisbility;
 			int methodExportFlags;
 
-			if (!parseExportAttribute(methodAttr, dummy0, dummy1, dummy2, dummy3, methodExportFlags, externalClass))
+			if (!parseExportAttribute(methodAttr, dummy0, dummy1, dummy2, ctorVisbility, methodExportFlags, externalClass))
 				continue;
 
 			MethodInfo methodInfo;
 			methodInfo.sourceName = sourceClassName;
 			methodInfo.scriptName = className;
 			methodInfo.flags = (int)MethodFlags::Constructor;
+			methodInfo.visibility = ctorVisbility;
 			parseJavadocComments(ctorDecl, methodInfo.documentation);
 
 			if ((methodExportFlags & (int)ExportFlags::InteropOnly))
@@ -1237,10 +1278,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			StringRef sourceMethodName = methodDecl->getName();
 			StringRef methodName = sourceMethodName;
 			StringRef dummy0;
-			CSVisibility dummy1;
+			CSVisibility methodVisibility;
 			int methodExportFlags;
 
-			if (!parseExportAttribute(methodAttr, sourceMethodName, methodName, dummy0, dummy1, methodExportFlags, externalClass))
+			if (!parseExportAttribute(methodAttr, sourceMethodName, methodName, dummy0, methodVisibility, methodExportFlags, externalClass))
 				continue;
 
 			if (methodDecl->getAccess() != AS_public)
@@ -1283,6 +1324,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			methodInfo.scriptName = methodName;
 			methodInfo.flags = methodFlags;
 			methodInfo.externalClass = sourceClassName;
+			methodInfo.visibility = methodVisibility;
 			parseJavadocComments(methodDecl, methodInfo.documentation);
 
 			bool isProperty = (methodExportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
