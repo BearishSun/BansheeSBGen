@@ -335,7 +335,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 
 		if (iterFind == commentSimpleLookup.end())
 		{
-			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
 			return false;
 		}
 		else
@@ -349,7 +349,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 		auto iterFind = commentSimpleLookup.find(simpleTypeName);
 		if (iterFind == commentSimpleLookup.end())
 		{
-			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
 			return false;
 		}
 		else
@@ -424,7 +424,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 
 	if (entryMatch == -1)
 	{
-		outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+		outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
 		return false;
 	}
 
@@ -433,7 +433,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 	{
 		if (!finalCommentInfo.isFunction)
 		{
-			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
 			return false;
 		}
 
@@ -473,7 +473,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 				overloadMatch = 0;
 			else
 			{
-				outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+				outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
 				return false;
 			}
 		}
@@ -1197,12 +1197,12 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 			{
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-				postCallActions << "\t\t" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
+				postCallActions << "\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
 			}
 			else if (isOutput(flags))
 			{
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-				postCallActions << "\t\t*" << name << " = " << scriptName << "->getMangedInstance();" << std::endl;
+				postCallActions << "\t\t*" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
 			}
 			else
 			{
@@ -1331,7 +1331,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string scriptName = "script" + name;
 
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, argName + "[i]", "\t\t\t");
-				postCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getMangedInstance());" << std::endl;
+				postCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 			}
 			break;
 			}
@@ -2613,14 +2613,17 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		output.close();
 	}
 
-	// Generate C++ component lookup
+	// Generate C++ component lookup file
 	{
 		std::stringstream body;
+		std::stringstream includes;
 		for (auto& fileInfo : outputFileInfos)
 		{
 			auto& classInfos = fileInfo.second.classInfos;
 			if (classInfos.empty())
 				continue;
+
+			includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
 
 			for (auto& classInfo : classInfos)
 			{
@@ -2628,14 +2631,20 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 				if (typeInfo.type != ParsedType::Component)
 					continue;
 
+				includes << "#include \"" << typeInfo.declFile << "\"" << std::endl;
+
 				std::string interopClassName = getScriptInteropType(classInfo.name);
-				body << "\t\tADD_ENTRY(" << typeInfo.rttiTID << ", " << interopClassName << ")" << std::endl;
+				body << "\t\tADD_ENTRY(" << classInfo.name << ", " << interopClassName << ")" << std::endl;
 			}
 		}
 
 		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppOutputFolder);
 
-		output << "#include \"BuiltinComponentLookup.h\"" << std::endl;
+		output << "#pragma once" << std::endl;
+		output << std::endl;
+
+		output << "#include \"BsBuiltinComponentLookup.h\"" << std::endl;
+		output << includes.str();
 
 		output << std::endl;
 

@@ -245,8 +245,17 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 	}
 }
 
-bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& exportName, StringRef& exportFile,
-	CSVisibility& visibility, int& flags, StringRef& externalClass)
+struct ParsedDeclInfo
+{
+	StringRef exportName;
+	StringRef exportFile;
+	StringRef externalClass;
+	CSVisibility visibility;
+	int exportFlags;
+};
+
+
+bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclInfo& output)
 {
 	SmallVector<StringRef, 4> annotEntries;
 	attr->getAnnotation().split(annotEntries, ',');
@@ -259,10 +268,10 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 	if (exportTypeStr != "se")
 		return false;
 
-	exportName = sourceName;
-	exportFile = sourceName;
-	visibility = CSVisibility::Public;
-	flags = 0;
+	output.exportName = sourceName;
+	output.exportFile = sourceName;
+	output.visibility = CSVisibility::Public;
+	output.exportFlags = 0;
 
 	for (size_t i = 1; i < annotEntries.size(); i++)
 	{
@@ -271,27 +280,27 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 
 		auto annotParam = annotEntries[i].split(':');
 		if (annotParam.first == "n")
-			exportName = annotParam.second;
+			output.exportName = annotParam.second;
 		else if (annotParam.first == "v")
 		{
 			if (annotParam.second == "public")
-				visibility = CSVisibility::Public;
+				output.visibility = CSVisibility::Public;
 			else if (annotParam.second == "internal")
-				visibility = CSVisibility::Internal;
+				output.visibility = CSVisibility::Internal;
 			else if (annotParam.second == "private")
-				visibility = CSVisibility::Private;
+				output.visibility = CSVisibility::Private;
 			else
 				outs() << "Warning: Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
 				sourceName << "\".\n";
 		}
 		else if (annotParam.first == "f")
 		{
-			exportFile = annotParam.second;
+			output.exportFile = annotParam.second;
 		}
 		else if (annotParam.first == "pl")
 		{
 			if (annotParam.second == "true")
-				flags |= (int)ExportFlags::Plain;
+				output.exportFlags |= (int)ExportFlags::Plain;
 			else if (annotParam.second != "false")
 			{
 				outs() << "Warning: Unrecognized value for \"pl\" option: \"" + annotParam.second + "\" for type \"" <<
@@ -301,9 +310,9 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 		else if (annotParam.first == "pr")
 		{
 			if (annotParam.second == "getter")
-				flags |= (int)ExportFlags::PropertyGetter;
+				output.exportFlags |= (int)ExportFlags::PropertyGetter;
 			else if (annotParam.second == "setter")
-				flags |= (int)ExportFlags::PropertySetter;
+				output.exportFlags |= (int)ExportFlags::PropertySetter;
 			else
 			{
 				outs() << "Warning: Unrecognized value for \"pr\" option: \"" + annotParam.second + "\" for type \"" <<
@@ -312,20 +321,20 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 		}
 		else if (annotParam.first == "e")
 		{
-			flags |= (int)ExportFlags::External;
+			output.exportFlags |= (int)ExportFlags::External;
 
-			externalClass = annotParam.second;
+			output.externalClass = annotParam.second;
 		}
 		else if (annotParam.first == "ec")
 		{
-			flags |= (int)ExportFlags::ExternalConstructor;
+			output.exportFlags |= (int)ExportFlags::ExternalConstructor;
 
-			externalClass = annotParam.second;
+			output.externalClass = annotParam.second;
 		}
 		else if (annotParam.first == "ed")
 		{
 			if (annotParam.second == "true")
-				flags |= (int)ExportFlags::Editor;
+				output.exportFlags |= (int)ExportFlags::Editor;
 			else if (annotParam.second != "false")
 			{
 				outs() << "Warning: Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
@@ -335,7 +344,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 		else if (annotParam.first == "ex")
 		{
 			if (annotParam.second == "true")
-				flags |= (int)ExportFlags::Exclude;
+				output.exportFlags |= (int)ExportFlags::Exclude;
 			else if (annotParam.second != "false")
 			{
 				outs() << "Warning: Unrecognized value for \"ex\" option: \"" + annotParam.second + "\" for type \"" <<
@@ -345,7 +354,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 		else if (annotParam.first == "in")
 		{
 			if (annotParam.second == "true")
-				flags |= (int)ExportFlags::InteropOnly;
+				output.exportFlags |= (int)ExportFlags::InteropOnly;
 			else if (annotParam.second != "false")
 			{
 				outs() << "Warning: Unrecognized value for \"in\" option: \"" + annotParam.second + "\" for type \"" <<
@@ -358,15 +367,6 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 	}
 
 	return true;
-}
-
-bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& exportName, int& exportFlags)
-{
-	StringRef fileName;
-	StringRef externalClass;
-	CSVisibility visibility;
-
-	return parseExportAttribute(attr, sourceName, exportName, fileName, visibility, exportFlags, externalClass);
 }
 
 std::string parseExportableBaseClass(const CXXRecordDecl* decl)
@@ -407,10 +407,9 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 			if (attr != nullptr)
 			{
 				StringRef sourceClassName = baseDecl->getName();
-				StringRef scriptClassName = sourceClassName;
-				int exportFlags;
+				ParsedDeclInfo parsedDeclInfo;
 
-				if (parseExportAttribute(attr, sourceClassName, scriptClassName, exportFlags))
+				if (parseExportAttribute(attr, sourceClassName, parsedDeclInfo))
 					return sourceClassName;
 			}
 
@@ -867,16 +866,13 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		return true;
 
 	StringRef sourceClassName = decl->getName();
-	StringRef className = sourceClassName;
-	StringRef fileName;
-	StringRef externalClass;
-	int exportFlags;
-	CSVisibility visibility;
+	ParsedDeclInfo parsedEnumInfo;
+	parsedEnumInfo.exportName = sourceClassName;
 
-	if (!parseExportAttribute(attr, sourceClassName, className, fileName, visibility, exportFlags, externalClass))
+	if (!parseExportAttribute(attr, sourceClassName, parsedEnumInfo))
 		return true;
 
-	FileInfo& fileInfo = outputFileInfos[fileName.str()];
+	FileInfo& fileInfo = outputFileInfos[parsedEnumInfo.exportFile.str()];
 	auto iterFind = std::find_if(fileInfo.enumInfos.begin(), fileInfo.enumInfos.end(), 
 		[&sourceClassName](const EnumInfo& ei)
 	{
@@ -895,8 +891,8 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 	EnumInfo enumEntry;
 	enumEntry.name = sourceClassName;
-	enumEntry.scriptName = className;
-	enumEntry.visibility = visibility;
+	enumEntry.scriptName = parsedEnumInfo.exportName;
+	enumEntry.visibility = parsedEnumInfo.visibility;
 	parseJavadocComments(decl, enumEntry.documentation);
 	parseNamespace(decl, enumEntry.ns);
 
@@ -908,7 +904,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 	std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-	cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Enum, declFile, fileName);
+	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, parsedEnumInfo.exportFile);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
 	
 	auto iter = decl->enumerator_begin();
@@ -916,14 +912,17 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	{
 		EnumConstantDecl* constDecl = *iter;
 
+		ParsedDeclInfo parsedEnumEntryInfo;
 		AnnotateAttr* enumAttr = constDecl->getAttr<AnnotateAttr>();
-		StringRef entryName = constDecl->getName();
-		StringRef scriptEntryName = constDecl->getName();
-		int enumFlags = 0;
-		if (enumAttr != nullptr)
-			parseExportAttribute(enumAttr, entryName, scriptEntryName, enumFlags);
 
-		if ((enumFlags & (int)ExportFlags::Exclude) != 0)
+		StringRef entryName = constDecl->getName();
+		parsedEnumEntryInfo.exportName = entryName;
+		parsedEnumEntryInfo.exportFlags = 0;
+
+		if (enumAttr != nullptr)
+			parseExportAttribute(enumAttr, entryName, parsedEnumEntryInfo);
+
+		if ((parsedEnumEntryInfo.exportFlags & (int)ExportFlags::Exclude) != 0)
 		{
 			++iter;
 			continue;
@@ -933,7 +932,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 		EnumEntryInfo entryInfo;
 		entryInfo.name = entryName.str();
-		entryInfo.scriptName = scriptEntryName.str();
+		entryInfo.scriptName = parsedEnumEntryInfo.exportName.str();
 		parseJavadocComments(constDecl, entryInfo.documentation);
 
 		SmallString<5> valueStr;
@@ -958,17 +957,15 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		return true;
 
 	StringRef sourceClassName = decl->getName();
-	StringRef className = sourceClassName;
-	StringRef fileName;
-	StringRef externalClass;
-	int classExportFlags;
-	CSVisibility visibility;
 
-	if (!parseExportAttribute(attr, sourceClassName, className, fileName, visibility, classExportFlags, externalClass))
+	ParsedDeclInfo parsedClassInfo;
+	parsedClassInfo.exportName = sourceClassName;
+
+	if (!parseExportAttribute(attr, sourceClassName, parsedClassInfo))
 		return true;
 
-	FileInfo& fileInfo = outputFileInfos[fileName.str()];
-	if ((classExportFlags & (int)ExportFlags::Plain) != 0)
+	FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile.str()];
+	if ((parsedClassInfo.exportFlags & (int)ExportFlags::Plain) != 0)
 	{
 		auto iterFind = std::find_if(fileInfo.structInfos.begin(), fileInfo.structInfos.end(), 
 			[&sourceClassName](const StructInfo& si)
@@ -981,8 +978,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		StructInfo structInfo;
 		structInfo.name = sourceClassName;
-		structInfo.visibility = visibility;
-		structInfo.inEditor = (classExportFlags & (int)ExportFlags::Editor) != 0;
+		structInfo.visibility = parsedClassInfo.visibility;
+		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 		parseJavadocComments(decl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
 
@@ -1162,7 +1159,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		}
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, ParsedType::Struct, declFile, fileName);
+		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.externalClass, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
 
 		fileInfo.structInfos.push_back(structInfo);
 
@@ -1182,20 +1179,20 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		ClassInfo classInfo;
 		classInfo.name = sourceClassName;
-		classInfo.visibility = visibility;
+		classInfo.visibility = parsedClassInfo.visibility;
 		classInfo.flags = 0;
 		classInfo.baseClass = parseExportableBaseClass(decl);
 		parseJavadocComments(decl, classInfo.documentation);
 		parseNamespace(decl, classInfo.ns);
 
-		if ((classExportFlags & (int)ExportFlags::Editor) != 0)
+		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
 			classInfo.flags |= (int)ClassFlags::Editor;
 
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(className, classType, declFile, fileName);
+		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, parsedClassInfo.exportFile);
 
 		for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
 		{
@@ -1205,23 +1202,19 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			if (methodAttr == nullptr)
 				continue;
 
-			StringRef dummy0;
-			StringRef dummy1;
-			StringRef dummy2;
-			CSVisibility ctorVisbility;
-			int methodExportFlags;
-
-			if (!parseExportAttribute(methodAttr, dummy0, dummy1, dummy2, ctorVisbility, methodExportFlags, externalClass))
+			StringRef dummy;
+			ParsedDeclInfo parsedMethodInfo;
+			if (!parseExportAttribute(methodAttr, dummy, parsedMethodInfo))
 				continue;
 
 			MethodInfo methodInfo;
 			methodInfo.sourceName = sourceClassName;
-			methodInfo.scriptName = className;
+			methodInfo.scriptName = parsedClassInfo.exportName;
 			methodInfo.flags = (int)MethodFlags::Constructor;
-			methodInfo.visibility = ctorVisbility;
+			methodInfo.visibility = parsedMethodInfo.visibility;
 			parseJavadocComments(ctorDecl, methodInfo.documentation);
 
-			if ((methodExportFlags & (int)ExportFlags::InteropOnly))
+			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
 				methodInfo.flags |= (int)MethodFlags::InteropOnly;
 
 			bool invalidParam = false;
@@ -1276,12 +1269,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				continue;
 
 			StringRef sourceMethodName = methodDecl->getName();
-			StringRef methodName = sourceMethodName;
-			StringRef dummy0;
-			CSVisibility methodVisibility;
-			int methodExportFlags;
 
-			if (!parseExportAttribute(methodAttr, sourceMethodName, methodName, dummy0, methodVisibility, methodExportFlags, externalClass))
+			ParsedDeclInfo parsedMethodInfo;
+			if (!parseExportAttribute(methodAttr, sourceMethodName, parsedMethodInfo))
 				continue;
 
 			if (methodDecl->getAccess() != AS_public)
@@ -1290,13 +1280,13 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			int methodFlags = 0;
 
 			bool isExternal = false;
-			if ((methodExportFlags & (int)ExportFlags::External) != 0)
+			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::External) != 0)
 			{
 				methodFlags |= (int)MethodFlags::External;
 				isExternal = true;
 			}
 
-			if ((methodExportFlags & (int)ExportFlags::ExternalConstructor) != 0)
+			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::ExternalConstructor) != 0)
 			{
 				methodFlags |= (int)MethodFlags::External;
 				methodFlags |= (int)MethodFlags::Constructor;
@@ -1304,7 +1294,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				isExternal = true;
 			}
 
-			if ((methodExportFlags & (int)ExportFlags::InteropOnly))
+			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
 				methodFlags |= (int)MethodFlags::InteropOnly;
 
 			bool isStatic = false;
@@ -1314,20 +1304,20 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				isStatic = true;
 			}
 
-			if ((methodExportFlags & (int)ExportFlags::PropertyGetter) != 0)
+			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
 				methodFlags |= (int)MethodFlags::PropertyGetter;
-			else if ((methodExportFlags & (int)ExportFlags::PropertySetter) != 0)
+			else if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertySetter) != 0)
 				methodFlags |= (int)MethodFlags::PropertySetter;
 
 			MethodInfo methodInfo;
 			methodInfo.sourceName = sourceMethodName;
-			methodInfo.scriptName = methodName;
+			methodInfo.scriptName = parsedMethodInfo.exportName;
 			methodInfo.flags = methodFlags;
 			methodInfo.externalClass = sourceClassName;
-			methodInfo.visibility = methodVisibility;
+			methodInfo.visibility = parsedMethodInfo.visibility;
 			parseJavadocComments(methodDecl, methodInfo.documentation);
 
-			bool isProperty = (methodExportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
+			bool isProperty = (parsedMethodInfo.exportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
 
 			if (!isProperty)
 			{
@@ -1346,7 +1336,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			}
 			else
 			{
-				if ((methodExportFlags & (int)ExportFlags::PropertyGetter) != 0)
+				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
 				{
 					QualType returnType = methodDecl->getReturnType();
 					if (returnType->isVoidType())
@@ -1397,8 +1387,6 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
 					}
-
-					methodInfo.paramInfos.push_back(paramInfo);
 				}
 			}
 
@@ -1437,7 +1425,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 			if (isExternal)
 			{
-				ExternalMethodInfos& infos = externalMethodInfos[externalClass];
+				ExternalMethodInfos& infos = externalMethodInfos[parsedMethodInfo.externalClass];
 				infos.methods.push_back(methodInfo);
 			}
 			else
@@ -1445,9 +1433,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		}
 
 		// External classes are just containers for external methods, we don't need to process them directly
-		if ((classExportFlags & (int)ExportFlags::External) == 0)
+		if ((parsedClassInfo.exportFlags & (int)ExportFlags::External) == 0)
 		{
-			FileInfo& fileInfo = outputFileInfos[fileName.str()];
+			FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile.str()];
 			fileInfo.classInfos.push_back(classInfo);
 
 			if ((classInfo.flags & (int)ClassFlags::Editor) != 0)

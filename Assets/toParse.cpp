@@ -4,3 +4,5 @@
 #include "C:/Projects/BansheeEngineDev/BansheeEngineCpy2/Source/SBansheeEngine/Include/BsAsyncOpEx.h"
 #include "C:/Projects/BansheeEngineDev/BansheeEngineCpy2/Source/BansheeCore/Include/BsTexture.h"
 #include "C:/Projects/BansheeEngineDev/BansheeEngineCpy2/Source/SBansheeEngine/Include/BsTextureEx.h"
+#include "C:/Projects/BansheeEngineDev/BansheeEngineCpy2/Source/BansheeCore/Include/BsCSkybox.h"
+#include "C:/Projects/BansheeEngineDev/BansheeEngineCpy2/Source/BansheeCore/Include/BsSkybox.h"
