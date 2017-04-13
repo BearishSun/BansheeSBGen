@@ -505,7 +505,7 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 	return false;
 }
 
-bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
+bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& output)
 {
 	comments::FullComment* comment = astContext->getCommentForDecl(decl, nullptr);
 	if (comment == nullptr)
@@ -571,7 +571,7 @@ bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 	{
 		auto getTrimmedText = [](const StringRef& input, std::stringstream& output)
 		{
-			bool lastIsSpace = true;
+			bool lastIsSpace = false;
 			for (auto& entry : input)
 			{
 				if (lastIsSpace)
@@ -675,7 +675,27 @@ bool ScriptExportParser::parseJavadocComments(Decl* decl, CommentEntry& output)
 	return hasAnyData;
 }
 
-void ScriptExportParser::parseCommentInfo(NamedDecl* decl, CommentInfo& commentInfo)
+void ScriptExportParser::parseCommentInfo(const FunctionDecl* decl, CommentInfo& commentInfo)
+{
+	const FunctionProtoType* ft = nullptr;
+	if (decl->hasWrittenPrototype())
+		ft = dyn_cast<FunctionProtoType>(decl->getType()->castAs<FunctionType>());
+
+	CommentMethodInfo methodInfo;
+	if (ft)
+	{
+		unsigned numParams = decl->getNumParams();
+		for (unsigned i = 0; i < numParams; ++i)
+		{
+			std::string paramType = decl->getParamDecl(i)->getType().getAsString(astContext->getPrintingPolicy());
+			methodInfo.params.push_back(paramType);
+		}
+	}
+
+	commentInfo.overloads.push_back(methodInfo);
+}
+
+void ScriptExportParser::parseCommentInfo(const NamedDecl* decl, CommentInfo& commentInfo)
 {
 	commentInfo.isFunction = false;
 
@@ -707,24 +727,9 @@ void ScriptExportParser::parseCommentInfo(NamedDecl* decl, CommentInfo& commentI
 		}
 		else if (const auto* fd = dyn_cast<FunctionDecl>(dc)) 
 		{
-			const FunctionProtoType* ft = nullptr;
-			if (fd->hasWrittenPrototype())
-				ft = dyn_cast<FunctionProtoType>(fd->getType()->castAs<FunctionType>());
+			parseCommentInfo(fd, commentInfo);
 
 			typeName.push_back(fd->getDeclName().getAsString());
-
-			CommentMethodInfo paramInfo;
-			if (ft) 
-			{
-				unsigned numParams = fd->getNumParams();
-				for (unsigned i = 0; i < numParams; ++i) 
-				{
-					std::string paramType = fd->getParamDecl(i)->getType().getAsString(astContext->getPrintingPolicy());
-					paramInfo.params.push_back(paramType);
-				}
-			}
-
-			commentInfo.overloads.push_back(paramInfo);
 			commentInfo.isFunction = true;
 		}
 		else if (const auto* ed = dyn_cast<EnumDecl>(dc)) {
@@ -761,11 +766,8 @@ void ScriptExportParser::parseCommentInfo(NamedDecl* decl, CommentInfo& commentI
 	commentInfo.fullName = fullTypeNameStream.str();
 }
 
-void ScriptExportParser::parseComments(NamedDecl* decl)
+void ScriptExportParser::parseComments(const NamedDecl* decl, CommentInfo& commentInfo)
 {
-	CommentInfo commentInfo;
-	parseCommentInfo(decl, commentInfo);
-
 	auto iterFind = commentFullLookup.find(commentInfo.fullName);
 	if (iterFind == commentFullLookup.end())
 	{
@@ -822,16 +824,52 @@ void ScriptExportParser::parseComments(NamedDecl* decl)
 	}
 }
 
-void ScriptExportParser::parseComments(CXXRecordDecl* decl)
+void ScriptExportParser::parseComments(const CXXRecordDecl* decl)
 {
-	parseComments(static_cast<NamedDecl*>(decl));
+	if (!decl->isCompleteDefinition())
+		return;
 
-	for (auto I = decl->method_begin(); I != decl->method_end(); ++I)
+	CommentInfo commentInfo;
+	parseCommentInfo(decl, commentInfo);
+	parseComments(decl, commentInfo);
+
+	std::stack<const CXXRecordDecl*> todo;
+	todo.push(decl);
+
+	while (!todo.empty())
 	{
-		if (decl->isImplicit())
-			continue;
+		const CXXRecordDecl* curDecl = todo.top();
+		todo.pop();
 
-		parseComments(*I);
+		for (auto I = curDecl->method_begin(); I != curDecl->method_end(); ++I)
+		{
+			if (I->isImplicit())
+				continue;
+
+			if (const auto* fd = dyn_cast<FunctionDecl>(*I))
+			{
+				CommentInfo methodCommentInfo;
+				methodCommentInfo.isFunction = true;
+				methodCommentInfo.namespaces = commentInfo.namespaces;
+				methodCommentInfo.name = commentInfo.name + "::" + I->getDeclName().getAsString();
+				methodCommentInfo.fullName = commentInfo.fullName + "::" + I->getDeclName().getAsString();
+
+				parseCommentInfo(fd, methodCommentInfo);
+				parseComments(fd, methodCommentInfo);
+			}
+		}
+
+		auto iter = curDecl->bases_begin();
+		while (iter != curDecl->bases_end())
+		{
+			const CXXBaseSpecifier* baseSpec = iter;
+			CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+
+			if(baseDecl != nullptr)
+				todo.push(baseDecl);
+
+			iter++;
+		}
 	}
 }
 
@@ -859,7 +897,9 @@ void parseNamespace(NamedDecl* decl, SmallVector<std::string, 4>& output)
 
 bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 {
-	parseComments(decl);
+	CommentInfo commentInfo;
+	parseCommentInfo(decl, commentInfo);
+	parseComments(decl, commentInfo);
 
 	AnnotateAttr* attr = decl->getAttr<AnnotateAttr>();
 	if (attr == nullptr)
