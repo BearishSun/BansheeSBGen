@@ -115,7 +115,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 
 	if (realType->isPointerType())
 	{
-		errs() << "Only normal pointers are supported for parameter types.\n";
+		outs() << "Error: Only normal pointers are supported for parameter types.\n";
 		return false;
 	}
 
@@ -188,7 +188,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 							isValid = true;
 						else
 						{
-							errs() << "Game object and resource types are only allowed to be referenced through handles"
+							outs() << "Error: Game object and resource types are only allowed to be referenced through handles"
 								<< " for scripting purposes\n";
 						}
 					}
@@ -219,7 +219,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 					typeFlags |= (int)TypeFlags::ScriptObject;
 				else
 				{
-					errs() << "Found an object of type ScriptObjectBase but not passed by pointer. This is not supported. \n";
+					outs() << "Error: Found an object of type ScriptObjectBase but not passed by pointer. This is not supported. \n";
 					return false;
 				}
 			}
@@ -240,7 +240,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 	}
 	else
 	{
-		errs() << "Unrecognized type\n";
+		outs() << "Error: Unrecognized type\n";
 		return false;
 	}
 }
@@ -281,7 +281,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 			else if (annotParam.second == "private")
 				visibility = CSVisibility::Private;
 			else
-				errs() << "Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
 				sourceName << "\".\n";
 		}
 		else if (annotParam.first == "f")
@@ -294,7 +294,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				flags |= (int)ExportFlags::Plain;
 			else if (annotParam.second != "false")
 			{
-				errs() << "Unrecognized value for \"pl\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"pl\" option: \"" + annotParam.second + "\" for type \"" <<
 					sourceName << "\".\n";
 			}
 		}
@@ -306,7 +306,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				flags |= (int)ExportFlags::PropertySetter;
 			else
 			{
-				errs() << "Unrecognized value for \"pr\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"pr\" option: \"" + annotParam.second + "\" for type \"" <<
 					sourceName << "\".\n";
 			}
 		}
@@ -328,7 +328,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				flags |= (int)ExportFlags::Editor;
 			else if (annotParam.second != "false")
 			{
-				errs() << "Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
 					sourceName << "\".\n";
 			}
 		}
@@ -338,7 +338,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				flags |= (int)ExportFlags::Exclude;
 			else if (annotParam.second != "false")
 			{
-				errs() << "Unrecognized value for \"ex\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"ex\" option: \"" + annotParam.second + "\" for type \"" <<
 					sourceName << "\".\n";
 			}
 		}
@@ -348,12 +348,12 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, StringRef& e
 				flags |= (int)ExportFlags::InteropOnly;
 			else if (annotParam.second != "false")
 			{
-				errs() << "Unrecognized value for \"in\" option: \"" + annotParam.second + "\" for type \"" <<
+				outs() << "Warning: Unrecognized value for \"in\" option: \"" + annotParam.second + "\" for type \"" <<
 					sourceName << "\".\n";
 			}
 		}
 		else
-			errs() << "Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
+			outs() << "Warning: Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
 			sourceName << "\".\n";
 	}
 
@@ -889,7 +889,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	QualType underlyingType = decl->getIntegerType();
 	if (!underlyingType->isBuiltinType())
 	{
-		errs() << "Found an enum with non-builtin underlying type, skipping.\n";
+		outs() << "Error: Found an enum with non-builtin underlying type, skipping.\n";
 		return true;
 	}
 
@@ -1014,7 +1014,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					std::string typeName;
 					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
 					{
-						errs() << "Unable to detect type for constructor parameter \"" << paramDecl->getName().str()
+						outs() << "Error: Unable to detect type for constructor parameter \"" << paramDecl->getName().str()
 							<< "\". Skipping.\n";
 						continue;
 					}
@@ -1023,7 +1023,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					{
 						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
 						{
-							errs() << "Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+							outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
 								<< "argument that cannot be constantly evaluated, ignoring it.\n";
 							skippedDefaultArgument = true;
 						}
@@ -1105,7 +1105,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 						if (parmVarDecl == nullptr)
 						{
-							errs() << "Found a non-trivial field assignment for field \"" << fieldDecl->getName() << "\" in"
+							outs() << "Warning: Found a non-trivial field assignment for field \"" << fieldDecl->getName() << "\" in"
 								<< " constructor of \"" << sourceClassName << "\". Ignoring assignment.\n";
 							continue;
 						}
@@ -1153,7 +1153,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			std::string typeName;
 			if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags))
 			{
-				errs() << "Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
+				outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
 					<< sourceClassName << "\". Skipping field.\n";
 				continue;
 			}
@@ -1236,7 +1236,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 				{
-					errs() << "Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
+					outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
 					invalidParam = true;
 					continue;
 				}
@@ -1245,7 +1245,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				{
 					if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
 					{
-						errs() << "Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+						outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
 							<< "argument that cannot be constantly evaluated, ignoring it.\n";
 						skippedDefaultArg = true;
 					}
@@ -1285,7 +1285,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				continue;
 
 			if (methodDecl->getAccess() != AS_public)
-				errs() << "Exported method \"" + sourceMethodName + "\" isn't public. This will likely result in invalid code generation.";
+				outs() << "Error: Exported method \"" + sourceMethodName + "\" isn't public. This will likely result in invalid code generation.";
 
 			int methodFlags = 0;
 
@@ -1337,7 +1337,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					ReturnInfo returnInfo;
 					if (!parseType(returnType, returnInfo.type, returnInfo.flags, true))
 					{
-						errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
+						outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 						continue;
 					}
 
@@ -1351,7 +1351,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					QualType returnType = methodDecl->getReturnType();
 					if (returnType->isVoidType())
 					{
-						errs() << "Unable to create a getter for property because method \"" << sourceMethodName
+						outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
 							<< "\" has no return value.\n";
 						continue;
 					}
@@ -1359,14 +1359,14 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					// Note: I can potentially allow an output parameter instead of a return value
 					if (methodDecl->param_size() > 1 || ((!isExternal || isStatic) && methodDecl->param_size() > 0))
 					{
-						errs() << "Unable to create a getter for property because method \"" << sourceMethodName
+						outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
 							<< "\" has parameters.\n";
 						continue;
 					}
 
 					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, true))
 					{
-						errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
+						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
 					}
 				}
@@ -1375,14 +1375,14 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					QualType returnType = methodDecl->getReturnType();
 					if (!returnType->isVoidType())
 					{
-						errs() << "Unable to create a setter for property because method \"" << sourceMethodName
+						outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
 							<< "\" has a return value.\n";
 						continue;
 					}
 
 					if (methodDecl->param_size() == 0 || methodDecl->param_size() > 2 || ((!isExternal || isStatic) && methodDecl->param_size() != 1))
 					{
-						errs() << "Unable to create a setter for property because method \"" << sourceMethodName
+						outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
 							<< "\" has more or less than one parameter.\n";
 						continue;
 					}
@@ -1394,7 +1394,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
 					{
-						errs() << "Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
+						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
 					}
 
@@ -1414,7 +1414,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 				{
-					errs() << "Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
+					outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 					invalidParam = true;
 					continue;
 				}
@@ -1423,7 +1423,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				{
 					if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
 					{
-						errs() << "Method parameter \"" << paramDecl->getName().str() << "\" has a default "
+						outs() << "Error: Method parameter \"" << paramDecl->getName().str() << "\" has a default "
 							<< "argument that cannot be constantly evaluated, ignoring it.\n";
 						skippedDefaultArg = true;
 					}

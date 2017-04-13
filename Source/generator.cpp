@@ -82,7 +82,7 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 			return (isPtr ? "*" : "") + name;
 		else
 		{
-			errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 			return name;
 		}
 	};
@@ -118,7 +118,7 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 			return name;
 		else
 		{
-			errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 			return name;
 		}
 	}
@@ -134,7 +134,7 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 			return "*" + name;
 		else
 		{
-			errs() << "Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
 			return name;
 		}
 
@@ -149,7 +149,7 @@ std::string getScriptInteropType(const std::string& name)
 {
 	auto iterFind = cppToCsTypeMap.find(name);
 	if (iterFind == cppToCsTypeMap.end())
-		errs() << "Type \"" << name << "\" referenced as a script interop type, but no script interop mapping found. Assuming default type name.\n";
+		outs() << "Warning: Type \"" << name << "\" referenced as a script interop type, but no script interop mapping found. Assuming default type name.\n";
 
 	bool isValidInteropType = iterFind->second.type != ParsedType::Builtin &&
 		iterFind->second.type != ParsedType::Enum &&
@@ -158,7 +158,7 @@ std::string getScriptInteropType(const std::string& name)
 		iterFind->second.type != ParsedType::ScriptObject;
 
 	if (!isValidInteropType)
-		errs() << "Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
+		outs() << "Error: Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
 
 	return "Script" + name;
 }
@@ -290,8 +290,9 @@ void gatherIncludes(const ClassInfo& classInfo, std::unordered_map<std::string, 
 bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4>& curNS, CommentEntry& outputComment)
 {
 	StringRef inputStr(str.data(), str.length());
+	inputStr = inputStr.trim();
 
-	bool hasParamList = inputStr.find('(');
+	bool hasParamList = inputStr.find('(') != -1;
 
 	StringRef fullTypeName;
 	StringRef params;
@@ -312,10 +313,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 	fullTypeName.split(typeSplits, "::", -1, false);
 
 	if (typeSplits.empty())
-	{
-		errs() << "Cannot deduce type from @copydoc command: \"" << str << "\".";
-		return false;
-	}
+		typeSplits.push_back(fullTypeName);
 
 	// Find matching type (no namespace)
 	int namespaceStart = -1;
@@ -337,7 +335,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 
 		if (iterFind == commentSimpleLookup.end())
 		{
-			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
 			return false;
 		}
 		else
@@ -351,7 +349,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 		auto iterFind = commentSimpleLookup.find(simpleTypeName);
 		if (iterFind == commentSimpleLookup.end())
 		{
-			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
 			return false;
 		}
 		else
@@ -426,7 +424,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 
 	if (entryMatch == -1)
 	{
-		errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+		outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
 		return false;
 	}
 
@@ -435,7 +433,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 	{
 		if (!finalCommentInfo.isFunction)
 		{
-			errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
 			return false;
 		}
 
@@ -475,7 +473,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 				overloadMatch = 0;
 			else
 			{
-				errs() << "Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
+				outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".";
 				return false;
 			}
 		}
@@ -656,13 +654,13 @@ void postProcessFileInfos()
 			{
 				if (method.returnInfo.type.size() == 0)
 				{
-					errs() << "Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
+					outs() << "Error: Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
 					continue;
 				}
 
 				if (method.returnInfo.type != entry.first)
 				{
-					errs() << "Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
+					outs() << "Error: Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
 					continue;
 				}
 			}
@@ -670,13 +668,13 @@ void postProcessFileInfos()
 			{
 				if (method.paramInfos.size() == 0)
 				{
-					errs() << "Found an external method \"" << method.sourceName << "\" with no parameters. This isn't supported, skipping.\n";
+					outs() << "Error: Found an external method \"" << method.sourceName << "\" with no parameters. This isn't supported, skipping.\n";
 					continue;
 				}
 
 				if (method.paramInfos[0].type != entry.first)
 				{
-					errs() << "Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
+					outs() << "Error: Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
 						" accept the class its operating on. This is not supported, skipping. \n";
 					continue;
 				}
@@ -793,7 +791,7 @@ void postProcessFileInfos()
 					PropertyInfo& existingInfo = *iterFind;
 					if (existingInfo.type != propertyInfo.type || existingInfo.isStatic != propertyInfo.isStatic)
 					{
-						errs() << "Getter and setter types for the property \"" << propertyInfo.name << "\" don't match. Skipping property.\n";
+						outs() << "Error: Getter and setter types for the property \"" << propertyInfo.name << "\" don't match. Skipping property.\n";
 						continue;
 					}
 
@@ -851,7 +849,7 @@ void postProcessFileInfos()
 		EnumInfo* enumInfo = findEnumInfo(paramInfo.type);
 		if(enumInfo == nullptr)
 		{
-			errs() << "Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			outs() << "Error: Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -859,7 +857,7 @@ void postProcessFileInfos()
 		auto iterFind = enumInfo->entries.find(enumIdx);
 		if(iterFind == enumInfo->entries.end())
 		{
-			errs() << "Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			outs() << "Error: Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -1160,7 +1158,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else
 			{
-				errs() << "ScriptObjectBase type not supported as input. Ignoring. \n";
+				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
 			}
 		}
 		break;
@@ -1261,7 +1259,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << "\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
 				break;
 			case ParsedType::ScriptObject:
-				errs() << "ScriptObjectBase type not supported as input. Ignoring. \n";
+				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
 				break;
 			case ParsedType::Enum:
 			{
@@ -1445,7 +1443,7 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 		if (isValid)
 			output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 		else
-			errs() << "Cannot generate a constructor for \"" << sourceClassName << "\". Unsupported class type. \n";
+			outs() << "Error: Cannot generate a constructor for \"" << sourceClassName << "\". Unsupported class type. \n";
 	}
 	else
 	{
@@ -2329,7 +2327,7 @@ std::string generateCSStruct(StructInfo& input)
 
 		if (!isValidStructType(typeInfo, fieldInfo.flags))
 		{
-			errs() << "Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.\n";
+			outs() << "Error: Invalid field type found in struct \"" << scriptName << "\" for field \"" << fieldInfo.name << "\". Skipping.\n";
 			continue;
 		}
 
@@ -2611,6 +2609,48 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		output << "{" << std::endl;
 		output << body.str();
 		output << "}" << std::endl;
+
+		output.close();
+	}
+
+	// Generate C++ component lookup
+	{
+		std::stringstream body;
+		for (auto& fileInfo : outputFileInfos)
+		{
+			auto& classInfos = fileInfo.second.classInfos;
+			if (classInfos.empty())
+				continue;
+
+			for (auto& classInfo : classInfos)
+			{
+				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+				if (typeInfo.type != ParsedType::Component)
+					continue;
+
+				std::string interopClassName = getScriptInteropType(classInfo.name);
+				body << "\t\tADD_ENTRY(" << typeInfo.rttiTID << ", " << interopClassName << ")" << std::endl;
+			}
+		}
+
+		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppOutputFolder);
+
+		output << "#include \"BuiltinComponentLookup.h\"" << std::endl;
+
+		output << std::endl;
+
+		output << "namespace bs" << std::endl;
+		output << "{" << std::endl;
+		output << "\tLOOKUP_BEGIN" << std::endl;
+
+		output << body.str();
+
+		output << "\tLOOKUP_END" << std::endl;
+		output << "}" << std::endl;
+
+		output << "#undef LOOKUP_BEGIN" << std::endl;
+		output << "#undef ADD_ENTRY" << std::endl;
+		output << "#undef LOOKUP_END" << std::endl;
 
 		output.close();
 	}
