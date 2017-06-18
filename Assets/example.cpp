@@ -16,6 +16,22 @@ template<class Elem> class basic_string
 typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
 
+namespace bs
+{
+template <class RetType, class... Args>
+class TEvent
+{
+};
+
+template <typename Signature>
+class Event;
+
+/** @copydoc TEvent */
+template <class RetType, class... Args>
+class Event<RetType(Args...) > : public TEvent <RetType, Args...>
+{ };
+}
+
 class Component
 {
 public:
@@ -95,4 +111,10 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	static int create(const int& initialData, const int& desc);
+	
+	BS_SCRIPT_EXPORT()
+	bs::Event<void(int)> myEvent;
+	
+	BS_SCRIPT_EXPORT()
+	static bs::Event<void(int)> myStaticEvent;
 };

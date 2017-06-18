@@ -107,7 +107,7 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 
 			if (sourceTypeName == "vector" && nsName == "std")
 			{
-				realType = specType->getArg(0).getAsType();;
+				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::Array;
 			}
 		}
@@ -243,6 +243,70 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 		outs() << "Error: Unrecognized type\n";
 		return false;
 	}
+}
+
+struct ParsedTypeInfo
+{
+	std::string name;
+	int flags;
+};
+
+struct FunctionTypeInfo
+{
+	// Only relevant for function types
+	std::vector<ParsedTypeInfo> paramTypes;
+	ParsedTypeInfo returnType;
+};
+
+bool parseEventSignature(QualType type, FunctionTypeInfo& typeInfo)
+{
+	if (type->isStructureOrClassType())
+	{
+		// Check for arrays
+		// Note: Not supporting nested arrays
+		const TemplateSpecializationType* specType = type->getAs<TemplateSpecializationType>();
+		int numArgs = 0;
+
+		if (specType != nullptr)
+			numArgs = specType->getNumArgs();
+
+		if (numArgs > 0)
+		{
+			const RecordType* recordType = type->getAs<RecordType>();
+			const RecordDecl* recordDecl = recordType->getDecl();
+
+			std::string sourceTypeName = recordDecl->getName();
+			std::string nsName = getNamespace(recordDecl);
+
+			if (sourceTypeName == "Event" && nsName == "bs")
+			{
+				type = specType->getArg(0).getAsType();
+				if(type->isFunctionProtoType())
+				{
+					const FunctionProtoType* funcType = type->getAs<FunctionProtoType>();
+
+					unsigned int numParams = funcType->getNumParams();
+					typeInfo.paramTypes.resize(numParams);
+
+					for(unsigned int i = 0; i < numParams; i++)
+					{
+						QualType paramType = funcType->getParamType(i);
+						parseType(paramType, typeInfo.paramTypes[i].name, typeInfo.paramTypes[i].flags, false);
+					}
+
+					QualType returnType = funcType->getReturnType();
+					if (!returnType->isVoidType())
+						parseType(returnType, typeInfo.returnType.name, typeInfo.returnType.flags, true);
+					else
+						typeInfo.returnType.flags = 0;
+				}
+			}
+
+			return true;
+		}
+	}
+
+	return false;
 }
 
 struct ParsedDeclInfo
@@ -873,6 +937,62 @@ void ScriptExportParser::parseComments(const CXXRecordDecl* decl)
 	}
 }
 
+bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& className, MethodInfo& eventInfo)
+{
+	AnnotateAttr* fieldAttr = decl->getAttr<AnnotateAttr>();
+	if (fieldAttr == nullptr)
+		return false;
+
+	StringRef sourceFieldName = decl->getName();
+
+	ParsedDeclInfo parsedEventInfo;
+	if (!parseExportAttribute(fieldAttr, sourceFieldName, parsedEventInfo))
+		return false;
+
+	FunctionTypeInfo eventSignature;
+	if (!parseEventSignature(decl->getType(), eventSignature))
+	{
+		outs() << "Error: Exported class field \"" + sourceFieldName + "\" isn't an event. Non-event class fields cannot be exported to the script interface.";
+		return false;
+	}
+
+	if (decl->getAccess() != AS_public)
+		outs() << "Error: Exported event \"" + sourceFieldName + "\" isn't public. This will likely result in invalid code generation.";
+
+	int eventFlags = 0;
+
+	if ((parsedEventInfo.exportFlags & (int)ExportFlags::External) != 0)
+	{
+		outs() << "Error: External events currently not supported. Skipping export for event \"" + sourceFieldName + "\".";
+		return false;
+	}
+
+	if ((parsedEventInfo.exportFlags & (int)ExportFlags::InteropOnly))
+		eventFlags |= (int)MethodFlags::InteropOnly;
+
+	eventInfo.sourceName = sourceFieldName;
+	eventInfo.scriptName = parsedEventInfo.exportName;
+	eventInfo.flags = eventFlags;
+	eventInfo.externalClass = className;
+	eventInfo.visibility = parsedEventInfo.visibility;
+	parseJavadocComments(decl, eventInfo.documentation);
+
+	if (!eventSignature.returnType.name.empty())
+	{
+		eventInfo.returnInfo.type = eventSignature.returnType.name;
+		eventInfo.returnInfo.flags = eventSignature.returnType.flags;
+	}
+
+	for(auto& entry : eventSignature.paramTypes)
+	{
+		VarInfo paramInfo;
+		paramInfo.flags = entry.flags;
+		paramInfo.type = entry.name;
+
+		eventInfo.paramInfos.push_back(paramInfo);
+	}
+}
+
 void parseNamespace(NamedDecl* decl, SmallVector<std::string, 4>& output)
 {
 	const DeclContext* context = decl->getDeclContext();
@@ -1199,7 +1319,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		}
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.externalClass, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
+		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
 
 		fileInfo.structInfos.push_back(structInfo);
 
@@ -1465,11 +1585,41 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 			if (isExternal)
 			{
-				ExternalMethodInfos& infos = externalMethodInfos[parsedMethodInfo.externalClass];
+				ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
 				infos.methods.push_back(methodInfo);
 			}
 			else
 				classInfo.methodInfos.push_back(methodInfo);
+		}
+
+		// Look for exported events
+		for (auto I = decl->field_begin(); I != decl->field_end(); ++I)
+		{
+			FieldDecl* fieldDecl = *I;
+
+			MethodInfo eventInfo;
+			if (!parseEvent(fieldDecl, sourceClassName, eventInfo))
+				continue;
+
+			classInfo.eventInfos.push_back(eventInfo);
+		}
+
+		// Find static data events
+		DeclContext* context = dyn_cast<DeclContext>(decl);
+		for (auto I = context->decls_begin(); I != context->decls_end(); ++I)
+		{
+			if(VarDecl* varDecl = dyn_cast<VarDecl>(*I))
+			{
+				if (!varDecl->isStaticDataMember())
+					continue;
+
+				MethodInfo eventInfo;
+				if (!parseEvent(varDecl, sourceClassName, eventInfo))
+					continue;
+
+				eventInfo.flags |= (int)MethodFlags::Static;
+				classInfo.eventInfos.push_back(eventInfo);
+			}
 		}
 
 		// External classes are just containers for external methods, we don't need to process them directly

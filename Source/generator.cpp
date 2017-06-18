@@ -108,14 +108,14 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
 	{
-		if (isSrcPointer(flags))
+		if (isSrcRHandle(flags) || isSrcGHandle(flags))
+			return name;
+		else if (isSrcSPtr(flags))
+			return name + ".getInternalPtr()";
+		else if (isSrcPointer(flags))
 			return name + ".get()";
 		else if (isSrcReference(flags) || isSrcValue(flags))
 			return "*" + name;
-		else if (isSrcSPtr(flags))
-			return name + ".getInternalPtr()";
-		else if (isSrcRHandle(flags) || isSrcGHandle(flags))
-			return name;
 		else
 		{
 			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
@@ -240,25 +240,28 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 	return output;
 }
 
-void gatherIncludes(const std::string& typeName, int flags, std::unordered_map<std::string, IncludeInfo>& output)
+void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output)
 {
 	UserTypeInfo typeInfo = getTypeInfo(typeName, flags);
 	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Struct ||
 		typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject || 
 		typeInfo.type == ParsedType::Resource || typeInfo.type == ParsedType::Enum)
 	{
-		auto iterFind = output.find(typeName);
-		if (iterFind == output.end())
+		auto iterFind = output.includes.find(typeName);
+		if (iterFind == output.includes.end())
 		{
 			// If enum or passed by value we need to include the header for the source type
 			bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags);
 
-			output[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude);
+			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude);
 		}
 	}
+
+	if (typeInfo.type == ParsedType::Resource)
+		output.requiresResourceManager = true;
 }
 
-void gatherIncludes(const MethodInfo& methodInfo, std::unordered_map<std::string, IncludeInfo>& output)
+void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
 {
 	bool returnAsParameter = false;
 	if (!methodInfo.returnInfo.type.empty())
@@ -269,22 +272,25 @@ void gatherIncludes(const MethodInfo& methodInfo, std::unordered_map<std::string
 
 	if((methodInfo.flags & (int)MethodFlags::External) != 0)
 	{
-		auto iterFind = output.find(methodInfo.externalClass);
-		if (iterFind == output.end())
+		auto iterFind = output.includes.find(methodInfo.externalClass);
+		if (iterFind == output.includes.end())
 		{
 			UserTypeInfo typeInfo = getTypeInfo(methodInfo.externalClass, 0);
-			output[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, true, true);
+			output.includes[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, true, true);
 		}
 	}
 }
 
-void gatherIncludes(const ClassInfo& classInfo, std::unordered_map<std::string, IncludeInfo>& output)
+void gatherIncludes(const ClassInfo& classInfo, IncludesInfo& output)
 {
 	for (auto& methodInfo : classInfo.ctorInfos)
 		gatherIncludes(methodInfo, output);
 
 	for (auto& methodInfo : classInfo.methodInfos)
 		gatherIncludes(methodInfo, output);
+
+	for (auto& eventInfo : classInfo.eventInfos)
+		gatherIncludes(eventInfo, output);
 }
 
 bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4>& curNS, CommentEntry& outputComment)
@@ -642,7 +648,7 @@ void postProcessFileInfos()
 		return nullptr;
 	};
 
-	for (auto& entry : externalMethodInfos)
+	for (auto& entry : externalClassInfos)
 	{
 		ClassInfo* classInfo = findClassInfo(entry.first);
 		if (classInfo == nullptr)
@@ -698,6 +704,9 @@ void postProcessFileInfos()
 
 			for (auto& ctorInfo : classInfo.ctorInfos)
 				resolveCopydocComment(ctorInfo.documentation, classInfo.ns);
+
+			for (auto& eventInfo : classInfo.eventInfos)
+				resolveCopydocComment(eventInfo.documentation, classInfo.ns);
 		}
 
 		for (auto& structInfo : fileInfo.second.structInfos)
@@ -743,6 +752,9 @@ void postProcessFileInfos()
 
 			for (auto& methodInfo : classInfo.ctorInfos)
 				generateInteropName(methodInfo);
+
+			for (auto& eventInfo : classInfo.eventInfos)
+				generateInteropName(eventInfo);
 		}
 	}
 
@@ -899,9 +911,9 @@ void postProcessFileInfos()
 	{
 		for (auto& fileInfo : outputFileInfos)
 		{
-			std::unordered_map<std::string, IncludeInfo> includes;
+			IncludesInfo includesInfo;
 			for (auto& classInfo : fileInfo.second.classInfos)
-				gatherIncludes(classInfo, includes);
+				gatherIncludes(classInfo, includesInfo);
 
 			// Needed for all .h files
 			if (!fileInfo.second.inEditor)
@@ -918,7 +930,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
-				fileInfo.second.forwardDeclarations.insert(classInfo.name);
+				fileInfo.second.forwardDeclarations.insert({ classInfo.name, false });
 
 				if (typeInfo.type == ParsedType::Resource)
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptResource.h");
@@ -942,13 +954,16 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
 
-				fileInfo.second.forwardDeclarations.insert(structInfo.name);
+				fileInfo.second.forwardDeclarations.insert({ structInfo.name, true });
 
 				fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
 				fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
 			}
 
-			for (auto& entry : includes)
+			if(includesInfo.requiresResourceManager)
+				fileInfo.second.referencedSourceIncludes.push_back("BsScriptResourceManager.h");
+
+			for (auto& entry : includesInfo.includes)
 			{
 				if (entry.second.sourceInclude)
 				{
@@ -957,7 +972,7 @@ void postProcessFileInfos()
 					if (entry.second.declOnly)
 					{
 						fileInfo.second.referencedSourceIncludes.push_back(include);
-						fileInfo.second.forwardDeclarations.insert(entry.second.typeName);
+						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, false });
 					}
 					else
 						fileInfo.second.referencedHeaderIncludes.push_back(include);
@@ -1059,20 +1074,21 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 {
 	std::stringstream output;
 
-	output << indent << scriptType << "* " << scriptName << ";" << std::endl;
-
 	if (type == ParsedType::Resource)
 	{
-		output << indent << "ScriptResourceManager::instance().getScriptResource(" << argName << ", &" <<
-			scriptName << ", true);" << std::endl;
+		output << indent << "ScriptResourceBase* " << scriptName << ";" << std::endl;
+		output << indent << scriptName << " = ScriptResourceManager::instance().getScriptResource(" << argName << ", true);"
+			<< std::endl;
 	}
 	else if (type == ParsedType::Component)
 	{
+		output << indent << scriptType << "* " << scriptName << ";" << std::endl;
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
 			argName << ");" << std::endl;
 	}
 	else if (type == ParsedType::SceneObject)
 	{
+		output << indent << scriptType << "* " << scriptName << ";" << std::endl;
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getOrCreateScriptSceneObject(" <<
 			argName << ");" << std::endl;
 	}
@@ -1248,7 +1264,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << "\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
 			preCallActions << "\t\t" << argType << " " << argName << "(" << arrayName << ".size());" << std::endl;
 
-			preCallActions << "\t\tfor(int i = 0; i < " << arrayName << ".size(); i++)" << std::endl;
+			preCallActions << "\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
 			preCallActions << "\t\t{" << std::endl;
 
 			switch (paramTypeInfo.type)
@@ -1421,6 +1437,7 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 			if (classType == ParsedType::Class)
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = bs_shared_ptr_new<" << sourceClassName << ">(" << methodArgs.str() << ");" << std::endl;
+				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 				isValid = true;
 			}
 		}
@@ -1431,18 +1448,18 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 			if (classType == ParsedType::Class)
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
+				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 				isValid = true;
 			}
 			else if (classType == ParsedType::Resource)
 			{
 				output << "\t\tResourceHandle<" << sourceClassName << "> instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
+				output << "\t\tScriptResourceBase* scriptInstance = ScriptResourceManager::instance().createBuiltinScriptResource(instance, managedInstance);" << std::endl;
 				isValid = true;
 			}
 		}
 
-		if (isValid)
-			output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
-		else
+		if (!isValid)
 			outs() << "Error: Cannot generate a constructor for \"" << sourceClassName << "\". Unsupported class type. \n";
 	}
 	else
@@ -2127,6 +2144,13 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		properties << generateXMLComments(entry.documentation, "\t\t");
 
+		// Expose public properties on components to the inspector
+		if(typeInfo.type == ParsedType::Component)
+		{
+			if(entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private)
+				properties << "\t\t[ShowInInspector]" << std::endl;
+		}
+
 		if (entry.visibility == CSVisibility::Internal)
 			properties << "\t\tinternal ";
 		else if (entry.visibility == CSVisibility::Private)
@@ -2165,6 +2189,9 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 			if (!entry.isStatic)
 				properties << "mCachedPtr, ";
+
+			if(isPlainStruct(propTypeInfo.type, entry.typeFlags))
+				properties << "ref " << std::endl;
 
 			properties << "value); }" << std::endl;
 		}
@@ -2217,6 +2244,8 @@ std::string generateCSStruct(StructInfo& input)
 	std::stringstream output;
 
 	output << generateXMLComments(input.documentation, "\t");
+
+	output << "[StructLayout(LayoutKind.Sequential), SerializeObject]";
 
 	if (input.visibility == CSVisibility::Internal)
 		output << "\tinternal ";
@@ -2491,7 +2520,12 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 		// Output forward declarations
 		for (auto& decl : fileInfo.second.forwardDeclarations)
-			output << "\tclass " << decl << ";" << std::endl;
+		{
+			if(decl.isStruct)
+				output << "\tstruct " << decl.name << ";" << std::endl;
+			else
+				output << "\tclass " << decl.name << ";" << std::endl;
+		}
 
 		if (!fileInfo.second.forwardDeclarations.empty())
 			output << std::endl;
@@ -2623,8 +2657,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 			if (classInfos.empty())
 				continue;
 
-			includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
-
+			bool hasAComponent = false;
 			for (auto& classInfo : classInfos)
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
@@ -2635,7 +2668,12 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 				std::string interopClassName = getScriptInteropType(classInfo.name);
 				body << "\t\tADD_ENTRY(" << classInfo.name << ", " << interopClassName << ")" << std::endl;
+
+				hasAComponent = true;
 			}
+
+			if(hasAComponent)
+				includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
 		}
 
 		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppOutputFolder);
@@ -2644,6 +2682,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		output << std::endl;
 
 		output << "#include \"BsBuiltinComponentLookup.h\"" << std::endl;
+		output << "#include \"BsRTTIType.h\"" << std::endl;
 		output << includes.str();
 
 		output << std::endl;

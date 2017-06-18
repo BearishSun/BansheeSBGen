@@ -55,7 +55,8 @@ enum class TypeFlags
 	SrcGHandle = 1 << 7,
 	String = 1 << 8,
 	WString = 1 << 9,
-	ScriptObject = 1 << 10
+	ScriptObject = 1 << 10,
+	Function = 1 << 11
 };
 
 enum class MethodFlags
@@ -176,11 +177,12 @@ struct ClassInfo
 	std::vector<MethodInfo> ctorInfos;
 	std::vector<PropertyInfo> propertyInfos;
 	std::vector<MethodInfo> methodInfos;
+	std::vector<MethodInfo> eventInfos;
 	std::string baseClass;
 	CommentEntry documentation;
 };
 
-struct ExternalMethodInfos
+struct ExternalClassInfos
 {
 	std::vector<MethodInfo> methods;
 };
@@ -224,13 +226,34 @@ struct EnumInfo
 	CommentEntry documentation;
 };
 
+struct ForwardDeclInfo
+{
+	std::string name;
+	bool isStruct;
+
+	bool operator==(const ForwardDeclInfo& rhs) const
+	{
+		return name == rhs.name;
+	}
+};
+
+template<>
+struct std::hash<ForwardDeclInfo>
+{
+	std::size_t operator()(const ForwardDeclInfo& value) const
+	{
+		std::hash<std::string> hasher;
+		return hasher(value.name);
+	}
+};
+
 struct FileInfo
 {
 	std::vector<ClassInfo> classInfos;
 	std::vector<StructInfo> structInfos;
 	std::vector<EnumInfo> enumInfos;
 
-	std::unordered_set<std::string> forwardDeclarations;
+	std::unordered_set<ForwardDeclInfo> forwardDeclarations;
 	std::vector<std::string> referencedHeaderIncludes;
 	std::vector<std::string> referencedSourceIncludes;
 	bool inEditor;
@@ -247,6 +270,12 @@ struct IncludeInfo
 	UserTypeInfo typeInfo;
 	bool sourceInclude;
 	bool declOnly;
+};
+
+struct IncludesInfo
+{
+	bool requiresResourceManager = false;
+	std::unordered_map<std::string, IncludeInfo> includes;
 };
 
 struct CommentMethodInfo
@@ -282,7 +311,7 @@ extern std::array<std::string, FT_COUNT> fileTypeFolders;
 
 extern std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 extern std::unordered_map<std::string, FileInfo> outputFileInfos;
-extern std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
+extern std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
 extern std::vector<CommentInfo> commentInfos;
 extern std::unordered_map<std::string, int> commentFullLookup;
 extern std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;

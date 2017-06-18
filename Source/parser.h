@@ -11,6 +11,7 @@ public:
 
 private:
 	bool evaluateExpression(Expr* expr, std::string& evalValue);
+	bool parseEvent(ValueDecl* decl, const std::string& className, MethodInfo& eventInfo);
 	bool parseJavadocComments(const Decl* decl, CommentEntry& entry);
 	void parseCommentInfo(const NamedDecl* decl, CommentInfo& commentInfo);
 	void parseCommentInfo(const FunctionDecl* decl, CommentInfo& commentInfo);

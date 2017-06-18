@@ -17,7 +17,7 @@ std::array<std::string, FT_COUNT> fileTypeFolders =
 
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
-std::unordered_map<std::string, ExternalMethodInfos> externalMethodInfos;
+std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
 
 std::vector<CommentInfo> commentInfos;
 std::unordered_map<std::string, int> commentFullLookup;
@@ -109,7 +109,7 @@ int main(int argc, const char** argv)
 
 	generateAll(cppOutputFolder, csEngineOutputFolder, csEditorOutputFolder);
 
-	system("pause");
+	//system("pause");
 	return output;
 }
 
