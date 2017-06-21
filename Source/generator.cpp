@@ -2361,6 +2361,42 @@ std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 	return output.str();
 }
 
+std::string generateCSEventSignature(const MethodInfo& methodInfo)
+{
+	std::stringstream output;
+	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+	{
+		const VarInfo& paramInfo = *I;
+		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		std::string type = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, false, true, false);
+
+		output << type;
+
+		if ((I + 1) != methodInfo.paramInfos.end())
+			output << ", ";
+	}
+
+	return output.str();
+}
+
+std::string generateCSEventArgs(const MethodInfo& methodInfo)
+{
+	std::stringstream output;
+
+	int idx = 0;
+	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+	{
+		output << "p" << idx;
+
+		if ((I + 1) != methodInfo.paramInfos.end())
+			output << ", ";
+
+		idx++;
+	}
+
+	return output.str();
+}
+
 std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const std::string& csClassName, bool isModule)
 {
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
@@ -2429,6 +2465,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 	std::stringstream ctors;
 	std::stringstream properties;
+	std::stringstream events;
 	std::stringstream methods;
 	std::stringstream interops;
 
@@ -2648,6 +2685,32 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		properties << std::endl;
 	}
 
+	// Events
+	for(auto& entry : input.eventInfos)
+	{
+		bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
+
+		events << generateXMLComments(entry.documentation, "\t\t");
+
+		if (entry.visibility == CSVisibility::Internal)
+			events << "\t\tinternal ";
+		else if (entry.visibility == CSVisibility::Private)
+			events << "\t\tprivate ";
+		else
+			events << "\t\tpublic ";
+
+		if (isStatic || isModule)
+			events << "static ";
+
+		events << "event Action<" << generateCSEventSignature(entry) << "> " << entry.scriptName << ";" << std::endl;
+
+		// Event interop
+		interops << "private void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
+		interops << "\t\t{" << std::endl;
+		interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");" << std::endl;
+		interops << "\t\t}" << std::endl;
+	}
+
 	std::stringstream output;
 	output << generateXMLComments(input.documentation, "\t");
 
@@ -2680,6 +2743,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 	output << ctors.str();
 	output << properties.str();
+	output << events.str();
 	output << methods.str();
 	output << interops.str();
 
