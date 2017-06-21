@@ -991,6 +991,8 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 
 		eventInfo.paramInfos.push_back(paramInfo);
 	}
+
+	return true;
 }
 
 void parseNamespace(NamedDecl* decl, SmallVector<std::string, 4>& output)

@@ -70,7 +70,7 @@ std::string getCSVarType(const std::string& typeName, ParsedType type, int flags
 	return output.str();
 }
 
-std::string getAsCppArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
+std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
 {
 	auto getArgumentPlain = [&](bool isPtr)
 	{
@@ -139,6 +139,49 @@ std::string getAsCppArgument(const std::string& name, ParsedType type, int flags
 		}
 
 	}
+	default: // Some object type
+		assert(false);
+		return "";
+	}
+}
+
+std::string getAsCppToManagedArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
+{
+	switch (type)
+	{
+	case ParsedType::Builtin:
+	case ParsedType::Enum: // Always passed as value type, input can be either pointer or ref/value type
+	{
+		if (isSrcPointer(flags))
+			return "*" + name;
+		else if (isSrcReference(flags) || isSrcValue(flags))
+			return name;
+		else
+		{
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+			return name;
+		}
+	}
+	case ParsedType::Struct: // Always passed as a pointer, input can be either pointer or ref/value type
+	{
+		if (isSrcPointer(flags))
+			return name;
+		else if (isSrcReference(flags) || isSrcValue(flags))
+			return "&" + name;
+		else
+		{
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+			return name;
+		}
+	}
+	case ParsedType::ScriptObject: // Always passed as a pointer, input must always be a pointer
+	case ParsedType::String:
+	case ParsedType::WString:
+	case ParsedType::Component:
+	case ParsedType::SceneObject:
+	case ParsedType::Resource:
+	case ParsedType::Class:
+			return name;
 	default: // Some object type
 		assert(false);
 		return "";
@@ -1069,6 +1112,61 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 	return output.str();
 }
 
+std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const std::string& nestedName)
+{
+	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+
+	std::stringstream output;
+
+	if (isStatic && nestedName.empty())
+		output << "static ";
+
+	output << "void ";
+	
+	if (!nestedName.empty())
+		output << nestedName << "::";
+	
+	output << eventInfo.interopName << "(";
+
+	int idx = 0;
+	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
+	{
+		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+
+		output << I->type << " p" << idx;
+
+		if ((I + 1) != eventInfo.paramInfos.end())
+			output << ", ";
+
+		idx++;
+	}
+
+	output << ")";
+	return output.str();
+}
+
+std::string generateCppEventThunk(const MethodInfo& eventInfo)
+{
+	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+
+	std::stringstream output;
+	output << "\t\ttypedef void(__stdcall *" << eventInfo.sourceName << "ThunkDef) (";
+	
+	if (!isStatic)
+		output << "MonoObject*, ";
+
+	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
+	{
+		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+		output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name << ", ";
+	}
+
+	output << "MonoException**);" << std::endl;
+	output << "\t\tstatic " << eventInfo.sourceName << "ThunkDef " << eventInfo.sourceName << "Thunk;" << std::endl;
+
+	return output.str();
+}
+
 std::string generateNativeToScriptObjectLine(ParsedType type, const std::string& scriptType, const std::string& scriptName,
 	const std::string& argName, const std::string& indent = "\t\t")
 {
@@ -1364,6 +1462,136 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 	}
 }
 
+std::string generateEventCallbackBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, std::stringstream& preCallActions)
+{
+	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+
+	if (!isArray(flags))
+	{
+		std::string argName;
+
+		switch (paramTypeInfo.type)
+		{
+		case ParsedType::Builtin:
+		case ParsedType::Enum:
+		case ParsedType::Struct:
+			argName = name;
+			break;
+		case ParsedType::String:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoString* " << argName << ";" << std::endl;
+			preCallActions << "\t\t" << argName << " = MonoUtil::stringToMono(" << name << ");" << std::endl;
+		}
+		break;
+		case ParsedType::WString:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoString* " << argName << ";" << std::endl;
+			preCallActions << "\t\t" << argName << " = MonoUtil::wstringToMono(" << name << ");" << std::endl;
+		}
+		break;
+		case ParsedType::ScriptObject:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoObject* " << argName << " = ";
+			preCallActions << name << "->getManagedInstance();" << std::endl;
+		}
+		break;
+		case ParsedType::Class:
+		{
+			argName = "tmp" + name;
+			std::string scriptType = getScriptInteropType(typeName);
+
+			preCallActions << "\t\tMonoObject* " << argName << " = ";
+			preCallActions << scriptType << "::create(" << name << ");" << std::endl;
+		}
+			break;
+		default: // Some resource or game object type
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
+
+			std::string scriptName = "script" + name;
+			std::string scriptType = getScriptInteropType(typeName);
+
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+			preCallActions << "\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+		}
+		break;
+		}
+
+		return argName;
+	}
+	else
+	{
+		std::string entryType;
+		switch (paramTypeInfo.type)
+		{
+		case ParsedType::Builtin:
+		case ParsedType::String:
+		case ParsedType::WString:
+		case ParsedType::Enum:
+			entryType = typeName;
+			break;
+		case ParsedType::ScriptObject:
+			entryType = "MonoObject*";
+			break;
+		default: // Some object or struct type
+			entryType = getScriptInteropType(typeName);
+			break;
+		}
+
+		std::string argName = "vec" + name;
+		preCallActions << "\t\tMonoArray* " << argName << ";" << std::endl;
+
+		std::string arrayName = "array" + name;
+		preCallActions << "\t\tScriptArray " << arrayName;
+		preCallActions << " = " << "ScriptArray::create<" << entryType << ">((int)" << name << ".size());" << std::endl;
+		preCallActions << "\t\tfor(int i = 0; i < (int)" << name << ".size(); i++)" << std::endl;
+		preCallActions << "\t\t{" << std::endl;
+
+		switch (paramTypeInfo.type)
+		{
+		case ParsedType::Builtin:
+		case ParsedType::String:
+		case ParsedType::WString:
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << name << "[i]);" << std::endl;
+			break;
+		case ParsedType::Enum:
+		{
+			std::string enumType;
+			mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
+
+			preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << name << "[i]);" << std::endl;
+			break;
+		}
+		case ParsedType::Struct:
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::box(" << name << "[i]));" << std::endl;
+			break;
+		case ParsedType::ScriptObject:
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << name << "[i]->getManagedInstance());" << std::endl;
+			break;
+		case ParsedType::Class:
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << name << "[i]));" << std::endl;
+		break;
+		default: // Some resource or game object type
+		{
+			std::string scriptName = "script" + name;
+
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, name + "[i]", "\t\t\t");
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+		}
+		break;
+		}
+
+		preCallActions << "\t\t}" << std::endl;
+		preCallActions << "\t\t" << argName << " = " << arrayName << ".getInternal();" << std::endl;
+
+		return argName;
+	}
+}
+
 std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::string& sourceClassName,
 	const std::string& interopClassName, ParsedType classType)
 {
@@ -1408,10 +1636,10 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 		{
 			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
-			methodArgs << getAsCppArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
+			methodArgs << getAsManagedToCppArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
 		}
 		else
-			methodArgs << getAsCppArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
+			methodArgs << getAsManagedToCppArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
 
 		if (!isLast)
 			methodArgs << ", ";
@@ -1529,11 +1757,65 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 	return output.str();
 }
 
+std::string generateCppEventCallbackBody(const MethodInfo& eventInfo)
+{
+	std::stringstream preCallActions;
+	std::stringstream methodArgs;
+
+	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+
+	int idx = 0;
+	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
+	{
+		bool isLast = (I + 1) == eventInfo.paramInfos.end();
+
+		std::string name = "p" + std::to_string(idx);
+		std::string argName = generateEventCallbackBodyBlockForParam(name, I->type, I->flags, preCallActions);
+
+		if (!isArray(I->flags))
+		{
+			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+
+			methodArgs << getAsCppToManagedArgument(argName, paramTypeInfo.type, I->flags, eventInfo.sourceName);
+		}
+		else
+			methodArgs << getAsCppToManagedArgument(argName, ParsedType::Class, I->flags, eventInfo.sourceName);
+
+		if (!isLast)
+			methodArgs << ", ";
+
+		idx++;
+	}
+
+	std::stringstream output;
+	output << "\t{" << std::endl;
+	output << preCallActions.str();
+
+	if (isStatic)
+		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, " << methodArgs.str() << ");" << std::endl;
+	else
+		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, getManagedInstance(), " << methodArgs.str() << ");" << std::endl;
+
+	output << "\t}" << std::endl;
+	return output.str();
+}
+
 std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 {
 	bool inEditor = (classInfo.flags & (int)ClassFlags::Editor) != 0;
 	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
 	bool isRootBase = classInfo.baseClass.empty();
+
+	bool hasStaticEvents = false;
+	for(auto& eventInfo : classInfo.eventInfos)
+	{
+		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+		if(isStatic)
+		{
+			hasStaticEvents = true;
+			break;
+		}
+	}
 
 	std::string exportAttr;
 	if (!inEditor)
@@ -1645,7 +1927,22 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << std::endl;
 	}
 
+	// Static start-up and shut-down methods, if required
+	if(hasStaticEvents)
+	{
+		output << "\t\tstatic void startUp();" << std::endl;
+		output << "\t\tstatic void shutDown();" << std::endl;
+		output << std::endl;
+	}
+
 	output << "\tprivate:" << std::endl;
+
+	// Event callback methods
+	for (auto& eventInfo : classInfo.eventInfos)
+		output << "\t\t" << generateCppEventCallbackSignature(eventInfo, "") << ";" << std::endl;
+
+	if(!classInfo.eventInfos.empty())
+		output << std::endl;
 
 	// Data member
 	if (typeInfo.type == ParsedType::Class)
@@ -1653,6 +1950,24 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
 		output << std::endl;
 	}
+
+	// Event thunks
+	for (auto& eventInfo : classInfo.eventInfos)
+		output << generateCppEventThunk(eventInfo);
+
+	if(!classInfo.eventInfos.empty())
+		output << std::endl;
+
+	// Event handles
+	for (auto& eventInfo : classInfo.eventInfos)
+	{
+		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+		if(isStatic)
+			output << "\t\tstatic HEvent " << eventInfo.sourceName << "Conn;" << std::endl;
+	}
+
+	if(hasStaticEvents)
+		output << std::endl;
 
 	// CLR hooks
 	std::string interopClassThisPtrType;
@@ -1674,6 +1989,17 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 {
 	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+
+	bool hasStaticEvents = false;
+	for(auto& eventInfo : classInfo.eventInfos)
+	{
+		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+		if(isStatic)
+		{
+			hasStaticEvents = true;
+			break;
+		}
+	}
 
 	std::string interopClassName = getScriptInteropType(classInfo.name);
 	std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
@@ -1698,7 +2024,24 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "ScriptObject(managedInstance), mInternal(value)";
 
 	output << std::endl;
-	output << "\t{ }" << std::endl;
+	output << "\t{" << std::endl;
+
+	// Register any non-static events
+	for(auto& eventInfo : classInfo.eventInfos)
+	{
+		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+		if(!isStatic)
+		{
+			output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", getManagedInstance()";
+			
+			for (int i = 0; i < (int)eventInfo.paramInfos.size(); i++)
+				output << ", _" << (i + 1);
+
+			output << ")); " << std::endl;
+		}
+	}
+
+	output << "\t}" << std::endl;
 	output << std::endl;
 
 	// CLR hook registration
@@ -1715,6 +2058,29 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
+	}
+
+	output << std::endl;
+
+	for(auto& eventInfo : classInfo.eventInfos)
+	{
+		output << "\t\t" << eventInfo.sourceName << "Thunk = ";
+		output << "(" << eventInfo.sourceName << "ThunkDef)metaData.scriptClass->getMethodExact(";
+		output << "\"Internal_" << eventInfo.interopName << "\", \"";
+
+		for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
+		{
+			const VarInfo& paramInfo = *I;
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, false, true, false);
+
+			output << csType;
+
+			if ((I + 1) != eventInfo.paramInfos.end())
+				output << ", ";
+		}
+
+		output << "\")->getThunk();" << std::endl;
 	}
 
 	output << "\t}" << std::endl;
@@ -1768,6 +2134,50 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 			output << "\t}" << std::endl;
 		}
+	}
+
+	// Static start-up and shut-down methods, if required
+	if(hasStaticEvents)
+	{
+		output << "\tvoid " << interopClassName << "::startUp()" << std::endl;
+		output << "\t{" << std::endl;
+
+		for(auto& eventInfo : classInfo.eventInfos)
+		{
+			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+			if(isStatic)
+			{
+				output << "\t\t" << eventInfo.sourceName << "Conn = ";
+				output << classInfo.name << "::" << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+			}
+		}
+
+		output << "\t}" << std::endl;
+
+		output << "\tvoid " << interopClassName << "::shutDown()" << std::endl;
+		output << "\t{" << std::endl;
+
+		for(auto& eventInfo : classInfo.eventInfos)
+		{
+			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+			if(isStatic)
+				output << "\t\t" << eventInfo.sourceName << "Conn.disconnect();" << std::endl;
+		}
+
+		output << "\t}" << std::endl;
+		output << std::endl;
+	}
+
+	// Event callback method implementations
+	for (auto I = classInfo.eventInfos.begin(); I != classInfo.eventInfos.end(); ++I)
+	{
+		const MethodInfo& eventInfo = *I;
+
+		output << "\t" << generateCppEventCallbackSignature(eventInfo, interopClassName) << std::endl;
+		output << generateCppEventCallbackBody(eventInfo);
+
+		if ((I + 1) != classInfo.eventInfos.end())
+			output << std::endl;
 	}
 
 	// CLR hook method implementations
