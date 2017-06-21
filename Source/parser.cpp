@@ -485,6 +485,34 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 	return "";
 }
 
+bool isModule(const CXXRecordDecl* decl)
+{
+	std::stack<const CXXRecordDecl*> todo;
+	todo.push(decl);
+
+	while (!todo.empty())
+	{
+		const CXXRecordDecl* curDecl = todo.top();
+		todo.pop();
+
+		auto iter = curDecl->bases_begin();
+		while (iter != curDecl->bases_end())
+		{
+			const CXXBaseSpecifier* baseSpec = iter;
+			CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+
+			std::string className = baseDecl->getName();
+			if (className == "Module")
+				return true;
+
+			todo.push(baseDecl);
+			iter++;
+		}
+	}
+
+	return false;
+}
+
 ScriptExportParser::ScriptExportParser(CompilerInstance* CI)
 	:astContext(&(CI->getASTContext()))
 { }
@@ -1350,69 +1378,77 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
 			classInfo.flags |= (int)ClassFlags::Editor;
 
+		bool clsIsModule = isModule(decl);
+		if (clsIsModule)
+			classInfo.flags |= (int)ClassFlags::IsModule;
+
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
 		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, parsedClassInfo.exportFile);
 
-		for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
+		// Parse constructors for non-module (singleton) classes
+		if (!clsIsModule)
 		{
-			CXXConstructorDecl* ctorDecl = *I;
-
-			AnnotateAttr* methodAttr = ctorDecl->getAttr<AnnotateAttr>();
-			if (methodAttr == nullptr)
-				continue;
-
-			StringRef dummy;
-			ParsedDeclInfo parsedMethodInfo;
-			if (!parseExportAttribute(methodAttr, dummy, parsedMethodInfo))
-				continue;
-
-			MethodInfo methodInfo;
-			methodInfo.sourceName = sourceClassName;
-			methodInfo.scriptName = parsedClassInfo.exportName;
-			methodInfo.flags = (int)MethodFlags::Constructor;
-			methodInfo.visibility = parsedMethodInfo.visibility;
-			parseJavadocComments(ctorDecl, methodInfo.documentation);
-
-			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
-				methodInfo.flags |= (int)MethodFlags::InteropOnly;
-
-			bool invalidParam = false;
-			bool skippedDefaultArg = false;
-			for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
+			for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
 			{
-				ParmVarDecl* paramDecl = *J;
-				QualType paramType = paramDecl->getType();
+				CXXConstructorDecl* ctorDecl = *I;
 
-				VarInfo paramInfo;
-				paramInfo.name = paramDecl->getName();
-
-				if (!parseType(paramType, paramInfo.type, paramInfo.flags))
-				{
-					outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
-					invalidParam = true;
+				AnnotateAttr* methodAttr = ctorDecl->getAttr<AnnotateAttr>();
+				if (methodAttr == nullptr)
 					continue;
-				}
 
-				if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+				StringRef dummy;
+				ParsedDeclInfo parsedMethodInfo;
+				if (!parseExportAttribute(methodAttr, dummy, parsedMethodInfo))
+					continue;
+
+				MethodInfo methodInfo;
+				methodInfo.sourceName = sourceClassName;
+				methodInfo.scriptName = parsedClassInfo.exportName;
+				methodInfo.flags = (int)MethodFlags::Constructor;
+				methodInfo.visibility = parsedMethodInfo.visibility;
+				parseJavadocComments(ctorDecl, methodInfo.documentation);
+
+				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
+					methodInfo.flags |= (int)MethodFlags::InteropOnly;
+
+				bool invalidParam = false;
+				bool skippedDefaultArg = false;
+				for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
 				{
-					if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+					ParmVarDecl* paramDecl = *J;
+					QualType paramType = paramDecl->getType();
+
+					VarInfo paramInfo;
+					paramInfo.name = paramDecl->getName();
+
+					if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 					{
-						outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
-							<< "argument that cannot be constantly evaluated, ignoring it.\n";
-						skippedDefaultArg = true;
+						outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
+						invalidParam = true;
+						continue;
 					}
+
+					if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+					{
+						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+						{
+							outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+								<< "argument that cannot be constantly evaluated, ignoring it.\n";
+							skippedDefaultArg = true;
+						}
+					}
+
+					methodInfo.paramInfos.push_back(paramInfo);
 				}
 
-				methodInfo.paramInfos.push_back(paramInfo);
+				if (invalidParam)
+					continue;
+
+				classInfo.ctorInfos.push_back(methodInfo);
 			}
-
-			if (invalidParam)
-				continue;
-
-			classInfo.ctorInfos.push_back(methodInfo);
 		}
 
 		for (auto I = decl->method_begin(); I != decl->method_end(); ++I)

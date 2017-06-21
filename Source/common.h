@@ -92,6 +92,7 @@ enum class ClassFlags
 {
 	Editor = 1 << 0,
 	IsBase = 1 << 1,
+	IsModule = 1 << 2
 };
 
 struct UserTypeInfo

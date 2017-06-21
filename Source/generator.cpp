@@ -1044,7 +1044,7 @@ void postProcessFileInfos()
 	}
 }
 
-std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& thisPtrType, const std::string& nestedName)
+std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& thisPtrType, const std::string& nestedName, bool isModule)
 {
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
 	bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
@@ -1082,7 +1082,7 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 		if (methodInfo.paramInfos.size() > 0)
 			output << ", ";
 	}
-	else if (!isStatic)
+	else if (!isStatic && !isModule)
 	{
 		output << thisPtrType << "* thisPtr";
 
@@ -1112,13 +1112,13 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 	return output.str();
 }
 
-std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const std::string& nestedName)
+std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const std::string& nestedName, bool isModule)
 {
 	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
 
 	std::stringstream output;
 
-	if (isStatic && nestedName.empty())
+	if ((isStatic || isModule) && nestedName.empty())
 		output << "static ";
 
 	output << "void ";
@@ -1145,14 +1145,14 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 	return output.str();
 }
 
-std::string generateCppEventThunk(const MethodInfo& eventInfo)
+std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 {
 	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
 
 	std::stringstream output;
 	output << "\t\ttypedef void(__stdcall *" << eventInfo.sourceName << "ThunkDef) (";
 	
-	if (!isStatic)
+	if (!isStatic && !isModule)
 		output << "MonoObject*, ";
 
 	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
@@ -1593,7 +1593,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 }
 
 std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::string& sourceClassName,
-	const std::string& interopClassName, ParsedType classType)
+	const std::string& interopClassName, ParsedType classType, bool isModule)
 {
 	std::string returnAssignment;
 	std::string returnStmt;
@@ -1698,6 +1698,10 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 			{
 				output << "\t\t" << returnAssignment << sourceClassName << "::" << methodInfo.sourceName << "(" << methodArgs.str() << ");" << std::endl;
 			}
+			else if(isModule)
+			{
+				output << "\t\t" << returnAssignment << sourceClassName << "::instance()." << methodInfo.sourceName << "(" << methodArgs.str() << ");" << std::endl;
+			}
 			else
 			{
 				if (classType == ParsedType::Class)
@@ -1757,7 +1761,7 @@ std::string generateCppMethodBody(const MethodInfo& methodInfo, const std::strin
 	return output.str();
 }
 
-std::string generateCppEventCallbackBody(const MethodInfo& eventInfo)
+std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isModule)
 {
 	std::stringstream preCallActions;
 	std::stringstream methodArgs;
@@ -1791,7 +1795,7 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo)
 	output << "\t{" << std::endl;
 	output << preCallActions.str();
 
-	if (isStatic)
+	if (isStatic || isModule)
 		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, " << methodArgs.str() << ");" << std::endl;
 	else
 		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, getManagedInstance(), " << methodArgs.str() << ");" << std::endl;
@@ -1804,16 +1808,20 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 {
 	bool inEditor = (classInfo.flags & (int)ClassFlags::Editor) != 0;
 	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+	bool isModule = (classInfo.flags & (int)ClassFlags::IsModule) != 0;
 	bool isRootBase = classInfo.baseClass.empty();
 
-	bool hasStaticEvents = false;
-	for(auto& eventInfo : classInfo.eventInfos)
+	bool hasStaticEvents = isModule && !classInfo.eventInfos.empty();
+	if (!hasStaticEvents)
 	{
-		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-		if(isStatic)
+		for (auto& eventInfo : classInfo.eventInfos)
 		{
-			hasStaticEvents = true;
-			break;
+			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+			if (isStatic)
+			{
+				hasStaticEvents = true;
+				break;
+			}
 		}
 	}
 
@@ -1857,7 +1865,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << interopBaseClassName << "(MonoObject* instance);" << std::endl;
 		output << "virtual ~" << interopBaseClassName << "() {}" << std::endl;
 
-		if (typeInfo.type == ParsedType::Class)
+		if (typeInfo.type == ParsedType::Class && !isModule)
 		{
 			output << std::endl;
 			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
@@ -1908,10 +1916,14 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << std::endl;
 
 	// Constructor
-	output << "\t\t" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value);" << std::endl;
+	if(!isModule)
+		output << "\t\t" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value);" << std::endl;
+	else
+		output << "\t\t" << interopClassName << "(MonoObject* managedInstance);" << std::endl;
+
 	output << std::endl;
 
-	if (typeInfo.type == ParsedType::Class)
+	if (typeInfo.type == ParsedType::Class && !isModule)
 	{
 		// getInternal() method (handle types have getHandle() implemented by their base type)
 		output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
@@ -1939,13 +1951,13 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	// Event callback methods
 	for (auto& eventInfo : classInfo.eventInfos)
-		output << "\t\t" << generateCppEventCallbackSignature(eventInfo, "") << ";" << std::endl;
+		output << "\t\t" << generateCppEventCallbackSignature(eventInfo, "", isModule) << ";" << std::endl;
 
 	if(!classInfo.eventInfos.empty())
 		output << std::endl;
 
 	// Data member
-	if (typeInfo.type == ParsedType::Class)
+	if (typeInfo.type == ParsedType::Class && !isModule)
 	{
 		output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
 		output << std::endl;
@@ -1953,7 +1965,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	// Event thunks
 	for (auto& eventInfo : classInfo.eventInfos)
-		output << generateCppEventThunk(eventInfo);
+		output << generateCppEventThunk(eventInfo, isModule);
 
 	if(!classInfo.eventInfos.empty())
 		output << std::endl;
@@ -1962,7 +1974,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	for (auto& eventInfo : classInfo.eventInfos)
 	{
 		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-		if(isStatic)
+		if(isStatic || isModule)
 			output << "\t\tstatic HEvent " << eventInfo.sourceName << "Conn;" << std::endl;
 	}
 
@@ -1977,10 +1989,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		interopClassThisPtrType = interopClassName;
 
 	for (auto& methodInfo : classInfo.ctorInfos)
-		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "") << ";" << std::endl;
+		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
 
 	for (auto& methodInfo : classInfo.methodInfos)
-		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "") << ";" << std::endl;
+		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
 
 	output << "\t};" << std::endl;
 	return output.str();
@@ -1989,8 +2001,9 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 {
 	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+	bool isModule = (classInfo.flags & (int)ClassFlags::IsModule) != 0;
 
-	bool hasStaticEvents = false;
+	bool hasStaticEvents = isModule && !classInfo.eventInfos.empty();
 	for(auto& eventInfo : classInfo.eventInfos)
 	{
 		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
@@ -2013,7 +2026,11 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	std::stringstream output;
 
 	// Constructor
-	output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value)" << std::endl;
+	if(!isModule)
+		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value)" << std::endl;
+	else
+		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance)" << std::endl;
+
 	output << "\t\t:";
 
 	if (typeInfo.type == ParsedType::Resource)
@@ -2021,23 +2038,30 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	else if (typeInfo.type == ParsedType::Component)
 		output << "TScriptComponent(managedInstance, value)";
 	else // Class
-		output << "ScriptObject(managedInstance), mInternal(value)";
-
+	{
+		if(!isModule)
+			output << "ScriptObject(managedInstance), mInternal(value)";
+		else
+			output << "ScriptObject(managedInstance)";
+	}
 	output << std::endl;
 	output << "\t{" << std::endl;
 
 	// Register any non-static events
-	for(auto& eventInfo : classInfo.eventInfos)
+	if (!isModule)
 	{
-		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-		if(!isStatic)
+		for (auto& eventInfo : classInfo.eventInfos)
 		{
-			output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", getManagedInstance()";
-			
-			for (int i = 0; i < (int)eventInfo.paramInfos.size(); i++)
-				output << ", _" << (i + 1);
+			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+			if (!isStatic)
+			{
+				output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", getManagedInstance()";
 
-			output << ")); " << std::endl;
+				for (int i = 0; i < (int)eventInfo.paramInfos.size(); i++)
+					output << ", _" << (i + 1);
+
+				output << ")); " << std::endl;
+			}
 		}
 	}
 
@@ -2087,7 +2111,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << std::endl;
 
 	// create() or createInstance() methods
-	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Resource)
+	if ((typeInfo.type == ParsedType::Class && !isModule) || typeInfo.type == ParsedType::Resource)
 	{
 		std::stringstream ctorSignature;
 		std::stringstream ctorParamsInit;
@@ -2150,6 +2174,12 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 				output << "\t\t" << eventInfo.sourceName << "Conn = ";
 				output << classInfo.name << "::" << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
 			}
+			else if(isModule)
+			{
+				
+				output << "\t\t" << eventInfo.sourceName << "Conn = ";
+				output << classInfo.name << "::instance()." << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+			}
 		}
 
 		output << "\t}" << std::endl;
@@ -2160,7 +2190,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for(auto& eventInfo : classInfo.eventInfos)
 		{
 			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-			if(isStatic)
+			if(isStatic || isModule)
 				output << "\t\t" << eventInfo.sourceName << "Conn.disconnect();" << std::endl;
 		}
 
@@ -2173,8 +2203,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		const MethodInfo& eventInfo = *I;
 
-		output << "\t" << generateCppEventCallbackSignature(eventInfo, interopClassName) << std::endl;
-		output << generateCppEventCallbackBody(eventInfo);
+		output << "\t" << generateCppEventCallbackSignature(eventInfo, interopClassName, isModule) << std::endl;
+		output << generateCppEventCallbackBody(eventInfo, isModule);
 
 		if ((I + 1) != classInfo.eventInfos.end())
 			output << std::endl;
@@ -2191,8 +2221,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		const MethodInfo& methodInfo = *I;
 
-		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName) << std::endl;
-		output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type);
+		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
+		output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
 
 		if ((I + 1) != classInfo.methodInfos.end())
 			output << std::endl;
@@ -2202,8 +2232,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		const MethodInfo& methodInfo = *I;
 
-		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName) << std::endl;
-		output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type);
+		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
+		output << generateCppMethodBody(methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
 
 		if ((I + 1) != classInfo.methodInfos.end())
 			output << std::endl;
@@ -2331,7 +2361,7 @@ std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 	return output.str();
 }
 
-std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const std::string& csClassName)
+std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const std::string& csClassName, bool isModule)
 {
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
 	bool isCtor = (methodInfo.flags & (int)MethodFlags::Constructor) != 0;
@@ -2368,7 +2398,7 @@ std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const
 		if (methodInfo.paramInfos.size() > 0)
 			output << ", ";
 	}
-	else if (!isStatic)
+	else if (!isStatic && !isModule)
 	{
 		output << "IntPtr thisPtr";
 
@@ -2395,6 +2425,8 @@ std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const
 
 std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 {
+	bool isModule = (input.flags & (int)ClassFlags::IsModule) != 0;
+
 	std::stringstream ctors;
 	std::stringstream properties;
 	std::stringstream methods;
@@ -2445,7 +2477,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	{
 		// Generate interop
 		interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-		interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName) << ";";
+		interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName, isModule) << ";";
 		interops << std::endl;
 
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
@@ -2501,6 +2533,9 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				else
 					methods << "\t\tpublic ";
 
+				if (isStatic || isModule)
+					methods << "static ";
+
 				methods << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				methods << "\t\t{" << std::endl;
 
@@ -2519,7 +2554,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				else
 					methods << "\t\t\tInternal_" << entry.interopName << "(";
 
-				if (!isStatic)
+				if (!isStatic && !isModule)
 					methods << "mCachedPtr";
 
 				if (entry.paramInfos.size() > 0 || returnByParam)
@@ -2568,6 +2603,9 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		else
 			properties << "\t\tpublic ";
 
+		if (entry.isStatic || isModule)
+			properties << "static ";
+
 		properties << propTypeName << " " << entry.name << std::endl;
 		properties << "\t\t{" << std::endl;
 
@@ -2583,7 +2621,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 				properties << "\t\t\t\tInternal_" << entry.getter << "(";
 
-				if (!entry.isStatic)
+				if (!entry.isStatic && !isModule)
 					properties << "mCachedPtr, ";
 
 				properties << "out temp);" << std::endl;
@@ -2597,7 +2635,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		{
 			properties << "\t\t\tset { Internal_" << entry.setter << "(";
 
-			if (!entry.isStatic)
+			if (!entry.isStatic && !isModule)
 				properties << "mCachedPtr, ";
 
 			if(isPlainStruct(propTypeInfo.type, entry.typeFlags))
