@@ -425,6 +425,10 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 					sourceName << "\".\n";
 			}
 		}
+		else if(annotParam.first == "m")
+		{
+			// Ignore for now. Later use this value to add the class to proper documentation group and potentially namespace
+		}
 		else
 			outs() << "Warning: Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
 			sourceName << "\".\n";
@@ -1170,6 +1174,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.name = sourceClassName;
 		structInfo.visibility = parsedClassInfo.visibility;
 		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
+		structInfo.requiresInterop = false;
+
 		parseJavadocComments(decl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
 

@@ -56,7 +56,8 @@ enum class TypeFlags
 	String = 1 << 8,
 	WString = 1 << 9,
 	ScriptObject = 1 << 10,
-	Function = 1 << 11
+	Function = 1 << 11,
+	ComplexStruct = 1 << 12
 };
 
 enum class MethodFlags
@@ -197,12 +198,14 @@ struct SimpleConstructorInfo
 struct StructInfo
 {
 	std::string name;
+	std::string interopName;
 	CSVisibility visibility;
 	SmallVector<std::string, 4> ns;
 
 	std::vector<SimpleConstructorInfo> ctors;
 	std::vector<VarInfo> fields;
-	bool inEditor;
+	bool inEditor : 1;
+	bool requiresInterop : 1;
 
 	CommentEntry documentation;
 };
@@ -580,6 +583,11 @@ inline bool isSrcRHandle(int flags)
 inline bool isSrcGHandle(int flags)
 {
 	return (flags & (int)TypeFlags::SrcGHandle) != 0;
+}
+
+inline bool isComplexStruct(int flags)
+{
+	return (flags & (int)TypeFlags::ComplexStruct) != 0;
 }
 
 inline bool isHandleType(ParsedType type)
