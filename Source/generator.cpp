@@ -61,6 +61,10 @@ std::string getCppVarType(const std::string& typeName, ParsedType type)
 		return "GameObjectHandle<" + typeName + ">";
 	else if (type == ParsedType::Class)
 		return "SPtr<" + typeName + ">";
+	else if (type == ParsedType::String)
+		return "String";
+	else if (type == ParsedType::WString)
+		return "WString";
 	else
 		return typeName;
 }
@@ -111,7 +115,10 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 	case ParsedType::Enum: // Input type is either value or pointer depending if output or not
 		return getArgumentPlain(isOutput(flags));
 	case ParsedType::Struct: // Input type is always a pointer
-		return getArgumentPlain(true);
+		if (isComplexStruct(flags))
+			return getArgumentPlain(false);
+		else
+			return getArgumentPlain(true);
 	case ParsedType::ScriptObject: // Input type is either a pointer or a pointer to pointer, depending if output or not
 		{
 			if (isOutput(flags))
@@ -1070,8 +1077,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
 
-				if(isArray(fieldInfo.flags) || typeInfo.type == ParsedType::Builtin || 
-					typeInfo.type == ParsedType::Enum || typeInfo.type == ParsedType::Struct)
+				if(isArray(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
 				{
 					structInfo.requiresInterop = true;
 					break;
@@ -1102,35 +1108,20 @@ void postProcessFileInfos()
 
 	for (auto& fileInfo : outputFileInfos)
 	{
-		for (auto& structInfo : fileInfo.second.structInfos)
+		auto markComplexType = [&findStructInfo](const std::string& type, int& flags)
 		{
-			for(auto& fieldInfo : structInfo.fields)
-			{
-				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
-
-				if(isArray(fieldInfo.flags) || typeInfo.type == ParsedType::Builtin || 
-					typeInfo.type == ParsedType::Enum || typeInfo.type == ParsedType::Struct)
-				{
-					structInfo.requiresInterop = true;
-					break;
-				}
-			}
-
-			if (structInfo.requiresInterop)
-				structInfo.interopName = "__" + structInfo.name + "Interop";
-			else
-				structInfo.interopName = structInfo.name;
-		}
-
-		auto markComplexParam = [&findStructInfo](VarInfo& paramInfo)
-		{
-			UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			UserTypeInfo typeInfo = getTypeInfo(type, flags);
 			if (typeInfo.type != ParsedType::Struct)
 				return;
 
-			StructInfo* structInfo = findStructInfo(paramInfo.type);
+			StructInfo* structInfo = findStructInfo(type);
 			if (structInfo != nullptr && structInfo->requiresInterop)
-				paramInfo.flags |= (int)TypeFlags::ComplexStruct;
+				flags |= (int)TypeFlags::ComplexStruct;
+		};
+
+		auto markComplexParam = [&markComplexType](VarInfo& paramInfo)
+		{
+			markComplexType(paramInfo.type, paramInfo.flags);
 		};
 
 		for (auto& classInfo : fileInfo.second.classInfos)
@@ -1139,11 +1130,14 @@ void postProcessFileInfos()
 			{
 				for (auto& paramInfo : methodInfo.paramInfos)
 					markComplexParam(paramInfo);
+
+				if (methodInfo.returnInfo.type.size() != 0)
+					markComplexType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
 			}
 
-			for (auto& ctorInfo : classInfo.ctorInfos)
+			for (auto& eventInfo : classInfo.eventInfos)
 			{
-				for (auto& paramInfo : ctorInfo.paramInfos)
+				for (auto& paramInfo : eventInfo.paramInfos)
 					markComplexParam(paramInfo);
 			}
 
@@ -1152,6 +1146,12 @@ void postProcessFileInfos()
 				for (auto& paramInfo : ctorInfo.paramInfos)
 					markComplexParam(paramInfo);
 			}
+		}
+
+		for(auto& structInfo : fileInfo.second.structInfos)
+		{
+			for(auto& fieldInfo : structInfo.fields)
+				markComplexParam(fieldInfo);
 		}
 	}
 }
@@ -1245,7 +1245,26 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 	{
 		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
-		output << I->type << " p" << idx;
+		if (!isSrcValue(I->flags) && !isOutput(I->flags))
+			output << "const ";
+
+		if (isArray(I->flags))
+			output << "std::vector<";
+
+		output << getCppVarType(I->type, paramTypeInfo.type);
+
+		if (isArray(I->flags))
+			output << ">";
+
+		if(!isSrcValue(I->flags))
+		{
+			if (isSrcPointer(I->flags))
+				output << "*";
+			else if (isSrcReference(I->flags))
+				output << "&";
+		}
+
+		output << " p" << idx;
 
 		if ((I + 1) != eventInfo.paramInfos.end())
 			output << ", ";
@@ -1332,7 +1351,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					if(isComplexStruct(flags))
 					{
 						std::string scriptType = getScriptInteropType(typeName);
-						postCallActions << "\t\t*" << name << " = " << scriptType << "::fromInterop(" << argName << ");" << std::endl;
+						postCallActions << "\t\t*" << name << " = " << scriptType << "::toInterop(" << argName << ");" << std::endl;
 					}
 					else
 						postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
@@ -1348,7 +1367,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(flags))
 				{
 					std::string scriptType = getScriptInteropType(typeName);
-					postCallActions << "\t\t*" << name << " = " << scriptType << "::fromInterop(" << argName << ");" << std::endl;
+					postCallActions << "\t\t*" << name << " = " << scriptType << "::toInterop(" << argName << ");" << std::endl;
 				}
 				else
 				{
@@ -1359,13 +1378,11 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(flags))
 				{
-					std::string structInteropType = getStructInteropType(typeName);
-
 					argName = "tmp" + name;
-					preCallActions << "\t\t" << structInteropType << " " << argName << ";" << std::endl;
+					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
 
 					std::string scriptType = getScriptInteropType(typeName);
-					postCallActions << "\t\t*" << argName << " = " << scriptType << "::toInterop(" << name << ");" << std::endl;
+					preCallActions << "\t\t" << argName << " = " << scriptType << "::fromInterop(*" << name << ");" << std::endl;
 				}
 				else
 					argName = name;
@@ -1535,7 +1552,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << entryType << "::unbox(" << arrayName << ".get<MonoObject*>(i))";
 
 				if (isComplexStruct(flags))
-					preCallActions << entryType << ")";
+					preCallActions << ")";
 
 				preCallActions << ";\n";
 
@@ -2696,10 +2713,10 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 
 			output << "\t\t";
 			output << getInteropCppVarType(fieldInfo.type, fieldTypeInfo.type, fieldInfo.flags, true);
-			output << " " << fieldInfo.name << "\n";
+			output << " " << fieldInfo.name << ";\n";
 		}
 
-		output << "\t}\n\n";
+		output << "\t};\n\n";
 	}
 
 	output << "\tclass ";

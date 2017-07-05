@@ -1,3 +1,7 @@
+#include <string>
+#include <vector>
+#include <memory>
+
 template<class Type>
 class vector
 {
@@ -100,6 +104,7 @@ struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
+	public:
 	/**
 	 * Creates a new mesh from an existing mesh data. Created mesh will match the vertex and index buffers described
 	 * by the mesh data exactly. Mesh will have no sub-meshes.
@@ -117,4 +122,43 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	
 	BS_SCRIPT_EXPORT()
 	static bs::Event<void(int)> myStaticEvent;
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct2
+{
+	MyStruct2 a;
+	std::shared_ptr<MyClass> b;
+	float c;
+	std::vector<int> d;
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct
+{
+	MyStruct a;
+	int b;
+	std::string c;
+	ComplexStruct2 d;
+};
+
+class BS_SCRIPT_EXPORT(f:TestOutput2) MyClass2
+{
+	public:
+	BS_SCRIPT_EXPORT()
+	ComplexStruct getStruct();
+	
+	BS_SCRIPT_EXPORT()
+	void setStruct(const ComplexStruct& value);
+	
+	BS_SCRIPT_EXPORT()
+	std::vector<ComplexStruct> getStructArr();
+	
+	BS_SCRIPT_EXPORT()
+	void setStructArr(const std::vector<ComplexStruct>& value);
+	
+	BS_SCRIPT_EXPORT()
+	bs::Event<void(ComplexStruct)> myEvent;
+	
+	BS_SCRIPT_EXPORT()
+	bs::Event<void(std::vector<ComplexStruct>)> myEvent2;
+	
 };
