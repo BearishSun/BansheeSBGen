@@ -3216,6 +3216,14 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	}
 
 	std::stringstream output;
+	if(!input.module.empty())
+	{
+		output << "\t/** @addtogroup " << input.module << "\n";
+		output << "\t *  @{\n";
+		output << "\t */\n";
+		output << "\n";
+	}
+
 	output << generateXMLComments(input.documentation, "\t");
 
 	if (input.visibility == CSVisibility::Internal)
@@ -3252,12 +3260,27 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	output << interops.str();
 
 	output << "\t}" << std::endl;
+
+	if(!input.module.empty())
+	{
+		output << "\n";
+		output << "\t/** @} */\n";
+	}
+
 	return output.str();
 }
 
 std::string generateCSStruct(StructInfo& input)
 {
 	std::stringstream output;
+
+	if(!input.module.empty())
+	{
+		output << "\t/** @addtogroup " << input.module << "\n";
+		output << "\t *  @{\n";
+		output << "\t */\n";
+		output << "\n";
+	}
 
 	output << generateXMLComments(input.documentation, "\t");
 
@@ -3384,12 +3407,27 @@ std::string generateCSStruct(StructInfo& input)
 	}
 
 	output << "\t}" << std::endl;
+
+	if(!input.module.empty())
+	{
+		output << "\n";
+		output << "\t/** @} */\n";
+	}
+
 	return output.str();
 }
 
 std::string generateCSEnum(EnumInfo& input)
 {
 	std::stringstream output;
+
+	if(!input.module.empty())
+	{
+		output << "\t/** @addtogroup " << input.module << "\n";
+		output << "\t *  @{\n";
+		output << "\t */\n";
+		output << "\n";
+	}
 
 	output << generateXMLComments(input.documentation, "\t");
 	if (input.visibility == CSVisibility::Internal)
@@ -3422,6 +3460,12 @@ std::string generateCSEnum(EnumInfo& input)
 	}
 	
 	output << "\t}" << std::endl;
+
+	if(!input.module.empty())
+	{
+		output << "\n";
+		output << "\t/** @} */\n";
+	}
 
 	return output.str();
 }

@@ -316,6 +316,7 @@ struct ParsedDeclInfo
 	StringRef externalClass;
 	CSVisibility visibility;
 	int exportFlags;
+	StringRef moduleName;
 };
 
 
@@ -426,9 +427,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 			}
 		}
 		else if(annotParam.first == "m")
-		{
-			// Ignore for now. Later use this value to add the class to proper documentation group and potentially namespace
-		}
+			output.moduleName = annotParam.second;
 		else
 			outs() << "Warning: Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
 			sourceName << "\".\n";
@@ -1087,6 +1086,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	enumEntry.name = sourceClassName;
 	enumEntry.scriptName = parsedEnumInfo.exportName;
 	enumEntry.visibility = parsedEnumInfo.visibility;
+	enumEntry.module = parsedEnumInfo.moduleName;
 	parseJavadocComments(decl, enumEntry.documentation);
 	parseNamespace(decl, enumEntry.ns);
 
@@ -1175,6 +1175,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.visibility = parsedClassInfo.visibility;
 		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 		structInfo.requiresInterop = false;
+		structInfo.module = parsedClassInfo.moduleName;
 
 		parseJavadocComments(decl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
@@ -1378,6 +1379,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		classInfo.visibility = parsedClassInfo.visibility;
 		classInfo.flags = 0;
 		classInfo.baseClass = parseExportableBaseClass(decl);
+		classInfo.module = parsedClassInfo.moduleName;
 		parseJavadocComments(decl, classInfo.documentation);
 		parseNamespace(decl, classInfo.ns);
 

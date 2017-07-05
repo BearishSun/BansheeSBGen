@@ -140,7 +140,7 @@ struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct
 	ComplexStruct2 d;
 };
 
-class BS_SCRIPT_EXPORT(f:TestOutput2) MyClass2
+class BS_SCRIPT_EXPORT(f:TestOutput2,m:TestModule) MyClass2
 {
 	public:
 	BS_SCRIPT_EXPORT()

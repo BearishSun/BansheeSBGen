@@ -181,7 +181,9 @@ struct ClassInfo
 	std::vector<MethodInfo> methodInfos;
 	std::vector<MethodInfo> eventInfos;
 	std::string baseClass;
+
 	CommentEntry documentation;
+	std::string module;
 };
 
 struct ExternalClassInfos
@@ -208,6 +210,7 @@ struct StructInfo
 	bool requiresInterop : 1;
 
 	CommentEntry documentation;
+	std::string module;
 };
 
 struct EnumEntryInfo
@@ -227,7 +230,9 @@ struct EnumInfo
 
 	std::string explicitType;
 	std::unordered_map<int, EnumEntryInfo> entries;
+
 	CommentEntry documentation;
+	std::string module;
 };
 
 struct ForwardDeclInfo
