@@ -325,6 +325,9 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 		}
 	}
 
+	if (typeInfo.type == ParsedType::Struct && isComplexStruct(flags))
+		output.fwdDecls[typeName] = { getStructInteropType(typeName), true };
+
 	if (typeInfo.type == ParsedType::Resource)
 		output.requiresResourceManager = true;
 }
@@ -975,6 +978,93 @@ void postProcessFileInfos()
 		}
 	}
 
+	// Find structs requiring special conversion
+	for (auto& fileInfo : outputFileInfos)
+	{
+		for (auto& structInfo : fileInfo.second.structInfos)
+		{
+			for(auto& fieldInfo : structInfo.fields)
+			{
+				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+
+				if(isArray(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
+				{
+					structInfo.requiresInterop = true;
+					break;
+				}
+			}
+
+			if (structInfo.requiresInterop)
+				structInfo.interopName = getStructInteropType(structInfo.name);
+			else
+				structInfo.interopName = structInfo.name;
+		}
+	}
+
+	// Mark parameters referencing complex structs
+	auto findStructInfo = [](const std::string& name) -> StructInfo*
+	{
+		for (auto& fileInfo : outputFileInfos)
+		{
+			for (auto& structInfo : fileInfo.second.structInfos)
+			{
+				if (structInfo.name == name)
+					return &structInfo;
+			}
+		}
+
+		return nullptr;
+	};
+
+	for (auto& fileInfo : outputFileInfos)
+	{
+		auto markComplexType = [&findStructInfo](const std::string& type, int& flags)
+		{
+			UserTypeInfo typeInfo = getTypeInfo(type, flags);
+			if (typeInfo.type != ParsedType::Struct)
+				return;
+
+			StructInfo* structInfo = findStructInfo(type);
+			if (structInfo != nullptr && structInfo->requiresInterop)
+				flags |= (int)TypeFlags::ComplexStruct;
+		};
+
+		auto markComplexParam = [&markComplexType](VarInfo& paramInfo)
+		{
+			markComplexType(paramInfo.type, paramInfo.flags);
+		};
+
+		for (auto& classInfo : fileInfo.second.classInfos)
+		{
+			for(auto& methodInfo : classInfo.methodInfos)
+			{
+				for (auto& paramInfo : methodInfo.paramInfos)
+					markComplexParam(paramInfo);
+
+				if (methodInfo.returnInfo.type.size() != 0)
+					markComplexType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+			}
+
+			for (auto& eventInfo : classInfo.eventInfos)
+			{
+				for (auto& paramInfo : eventInfo.paramInfos)
+					markComplexParam(paramInfo);
+			}
+
+			for (auto& ctorInfo : classInfo.ctorInfos)
+			{
+				for (auto& paramInfo : ctorInfo.paramInfos)
+					markComplexParam(paramInfo);
+			}
+		}
+
+		for(auto& structInfo : fileInfo.second.structInfos)
+		{
+			for(auto& fieldInfo : structInfo.fields)
+				markComplexParam(fieldInfo);
+		}
+	}
+
 	// Generate referenced includes
 	{
 		for (auto& fileInfo : outputFileInfos)
@@ -1065,93 +1155,9 @@ void postProcessFileInfos()
 					}
 				}
 			}
-		}
-	}
 
-	// Find structs requiring special conversion
-	for (auto& fileInfo : outputFileInfos)
-	{
-		for (auto& structInfo : fileInfo.second.structInfos)
-		{
-			for(auto& fieldInfo : structInfo.fields)
-			{
-				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
-
-				if(isArray(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
-				{
-					structInfo.requiresInterop = true;
-					break;
-				}
-			}
-
-			if (structInfo.requiresInterop)
-				structInfo.interopName = getStructInteropType(structInfo.name);
-			else
-				structInfo.interopName = structInfo.name;
-		}
-	}
-
-	// Mark parameters referencing complex structs
-	auto findStructInfo = [](const std::string& name) -> StructInfo*
-	{
-		for (auto& fileInfo : outputFileInfos)
-		{
-			for (auto& structInfo : fileInfo.second.structInfos)
-			{
-				if (structInfo.name == name)
-					return &structInfo;
-			}
-		}
-
-		return nullptr;
-	};
-
-	for (auto& fileInfo : outputFileInfos)
-	{
-		auto markComplexType = [&findStructInfo](const std::string& type, int& flags)
-		{
-			UserTypeInfo typeInfo = getTypeInfo(type, flags);
-			if (typeInfo.type != ParsedType::Struct)
-				return;
-
-			StructInfo* structInfo = findStructInfo(type);
-			if (structInfo != nullptr && structInfo->requiresInterop)
-				flags |= (int)TypeFlags::ComplexStruct;
-		};
-
-		auto markComplexParam = [&markComplexType](VarInfo& paramInfo)
-		{
-			markComplexType(paramInfo.type, paramInfo.flags);
-		};
-
-		for (auto& classInfo : fileInfo.second.classInfos)
-		{
-			for(auto& methodInfo : classInfo.methodInfos)
-			{
-				for (auto& paramInfo : methodInfo.paramInfos)
-					markComplexParam(paramInfo);
-
-				if (methodInfo.returnInfo.type.size() != 0)
-					markComplexType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
-			}
-
-			for (auto& eventInfo : classInfo.eventInfos)
-			{
-				for (auto& paramInfo : eventInfo.paramInfos)
-					markComplexParam(paramInfo);
-			}
-
-			for (auto& ctorInfo : classInfo.ctorInfos)
-			{
-				for (auto& paramInfo : ctorInfo.paramInfos)
-					markComplexParam(paramInfo);
-			}
-		}
-
-		for(auto& structInfo : fileInfo.second.structInfos)
-		{
-			for(auto& fieldInfo : structInfo.fields)
-				markComplexParam(fieldInfo);
+			for (auto& entry : includesInfo.fwdDecls)
+				fileInfo.second.forwardDeclarations.insert(entry.second);
 		}
 	}
 }
@@ -1361,18 +1367,16 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else if (isOutput(flags))
 			{
-				argName = "tmp" + name;
-				preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
-
 				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(flags))
 				{
+					argName = "tmp" + name;
+					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
+
 					std::string scriptType = getScriptInteropType(typeName);
 					postCallActions << "\t\t*" << name << " = " << scriptType << "::toInterop(" << argName << ");" << std::endl;
 				}
 				else
-				{
-					postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
-				}
+					argName = name;
 			}
 			else
 			{
@@ -1512,7 +1516,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			break;
 		}
 
-		std::string argType = "Vector<" + typeName + ">";
+		std::string argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type) + ">";
 		std::string argName = "vec" + name;
 
 		if (!isOutput(flags) && !returnValue)
@@ -3284,7 +3288,7 @@ std::string generateCSStruct(StructInfo& input)
 
 	output << generateXMLComments(input.documentation, "\t");
 
-	output << "[StructLayout(LayoutKind.Sequential), SerializeObject]";
+	output << "\t[StructLayout(LayoutKind.Sequential), SerializeObject]\n";
 
 	if (input.visibility == CSVisibility::Internal)
 		output << "\tinternal ";
@@ -3448,7 +3452,7 @@ std::string generateCSEnum(EnumInfo& input)
 	for (auto I = input.entries.begin(); I != input.entries.end(); ++I)
 	{
 		if (I != input.entries.begin())
-			output << ",";
+			output << ",\n";
 
 		const EnumEntryInfo& entryInfo = I->second;
 
@@ -3456,9 +3460,9 @@ std::string generateCSEnum(EnumInfo& input)
 		output << "\t\t" << entryInfo.scriptName;
 		output << " = ";
 		output << entryInfo.value;
-		output << std::endl;
 	}
 	
+	output << "\n";
 	output << "\t}" << std::endl;
 
 	if(!input.module.empty())

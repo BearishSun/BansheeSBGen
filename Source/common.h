@@ -285,6 +285,7 @@ struct IncludesInfo
 {
 	bool requiresResourceManager = false;
 	std::unordered_map<std::string, IncludeInfo> includes;
+	std::unordered_map<std::string, ForwardDeclInfo> fwdDecls;
 };
 
 struct CommentMethodInfo
