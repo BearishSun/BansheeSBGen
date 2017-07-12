@@ -610,7 +610,7 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 
 	comments::BlockCommandComment* brief = nullptr;
 	comments::BlockCommandComment* returns = nullptr;
-	comments::ParagraphComment* firstParagraph = nullptr;
+	std::vector<comments::ParagraphComment*> headerParagraphs;
 	SmallVector<comments::ParamCommandComment*, 5> params;
 
 	auto commentIter = comment->child_begin();
@@ -641,10 +641,8 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 			comments::ParagraphComment* paragraphComment = cast<comments::ParagraphComment>(childComment);
 
 			if (!paragraphComment->isWhitespace())
-			{
-				if (firstParagraph == nullptr)
-					firstParagraph = paragraphComment;
-			}
+				headerParagraphs.push_back(paragraphComment);
+
 			break;
 		}
 		case comments::Comment::CommentKind::ParamCommandCommentKind:
@@ -662,7 +660,7 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 	}
 
 	bool hasAnyData = false;
-	auto parseParagraphComment = [&traits, &hasAnyData, this](comments::ParagraphComment* paragraph, SmallVector<std::string, 2>& output)
+	auto parseParagraphComments = [&traits, &hasAnyData, this](const std::vector<comments::ParagraphComment*>& paragraphs, SmallVector<std::string, 2>& output)
 	{
 		auto getTrimmedText = [](const StringRef& input, std::stringstream& output)
 		{
@@ -693,62 +691,74 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 			}
 		};
 
-		auto childIter = paragraph->child_begin();
-
-		bool isCopydoc = false;
-		std::stringstream paragraphText;
-		std::stringstream copydocArg;
-		while (childIter != paragraph->child_end())
+		int nativeDoc = 0;
+		for (auto& paragraph : paragraphs)
 		{
-			comments::Comment* childComment = *childIter;
-			int kind = childComment->getCommentKind();
+			std::stringstream paragraphText;
+			std::stringstream copydocArg;
+			auto childIter = paragraph->child_begin();
 
-			if (kind == comments::Comment::CommentKind::TextCommentKind)
+			bool isCopydoc = false;
+			while (childIter != paragraph->child_end())
 			{
-				comments::TextComment* textCommand = cast<comments::TextComment>(childComment);
+				comments::Comment* childComment = *childIter;
+				int kind = childComment->getCommentKind();
 
-				StringRef text = textCommand->getText();
-				if (text.empty())
+				if (kind == comments::Comment::CommentKind::TextCommentKind)
 				{
-					++childIter;
-					continue;
+					if (nativeDoc <= 0)
+					{
+						comments::TextComment* textCommand = cast<comments::TextComment>(childComment);
+
+						StringRef text = textCommand->getText();
+						if (text.empty())
+						{
+							++childIter;
+							continue;
+						}
+
+						if (isCopydoc)
+							getTrimmedText(text, copydocArg);
+						else
+							getTrimmedText(text, paragraphText);
+
+						hasAnyData = true;
+					}
+				}
+				else if (kind == comments::Comment::CommentKind::InlineCommandCommentKind)
+				{
+					comments::InlineCommandComment* inlineCommand = cast<comments::InlineCommandComment>(childComment);
+
+					std::string name = inlineCommand->getCommandName(traits);
+					if (name == "copydoc")
+						isCopydoc = true;
+					else if (name == "native")
+						nativeDoc++;
+					else if (name == "endnative")
+						nativeDoc--;
 				}
 
-				if (isCopydoc)
-					getTrimmedText(text, copydocArg);
-				else
-					getTrimmedText(text, paragraphText);
-
-				hasAnyData = true;
+				++childIter;
 			}
-			else if (kind == comments::Comment::CommentKind::InlineCommandCommentKind)
+
+			if (isCopydoc)
+				output.push_back("@copydoc " + copydocArg.str());
+			else
 			{
-				comments::InlineCommandComment* inlineCommand = cast<comments::InlineCommandComment>(childComment);
+				std::string paragraphStr = paragraphText.str();
+				StringRef trimmedText(paragraphStr.data(), paragraphStr.length());
+				trimmedText = trimmedText.trim();
 
-				std::string name = inlineCommand->getCommandName(traits);
-				if (name == "copydoc")
-					isCopydoc = true;
+				if(!trimmedText.empty())
+					output.push_back(trimmedText);
 			}
-
-			++childIter;
-		}
-
-		if (isCopydoc)
-			output.push_back("@copydoc " + copydocArg.str());
-		else
-		{
-			std::string paragraphStr = paragraphText.str();
-			StringRef trimmedText(paragraphStr.data(), paragraphStr.length());
-			trimmedText = trimmedText.trim();
-
-			output.push_back(trimmedText);
 		}
 	};
 
 	if (brief != nullptr)
-		parseParagraphComment(brief->getParagraph(), output.brief);
-	else if (firstParagraph != nullptr)
-		parseParagraphComment(firstParagraph, output.brief);
+		parseParagraphComments({ brief->getParagraph() }, output.brief);
+
+	parseParagraphComments(headerParagraphs, output.brief);
 
 	for (auto& entry : params)
 	{
@@ -759,13 +769,13 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 		else
 			paramEntry.name = entry->getParamNameAsWritten().str();
 
-		parseParagraphComment(entry->getParagraph(), paramEntry.comments);
+		parseParagraphComments({ entry->getParagraph() }, paramEntry.comments);
 
 		output.params.push_back(paramEntry);
 	}
 
 	if (returns != nullptr)
-		parseParagraphComment(returns->getParagraph(), output.returns);
+		parseParagraphComments({ returns->getParagraph() }, output.returns);
 
 	return hasAnyData;
 }

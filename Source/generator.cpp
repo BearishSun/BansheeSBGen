@@ -646,26 +646,42 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 		return wordWrapped.str();
 	};
 
-	auto printParagraphs = [&output, &indent, &wordWrap](const SmallVector<std::string, 2>& input)
+	auto printParagraphs = [&output, &indent, &wordWrap](const std::string& head, const std::string& tail, const SmallVector<std::string, 2>& input)
 	{
-		for(auto I = input.begin(); I != input.end(); ++I)
+		bool multiline = false;
+		if(input.size() > 1)
+			multiline = true;
+		else
 		{
-			if (I != input.begin())
-				output << std::endl;
+			int lineLength = head.length() + tail.length() + indent.size() + 4 + input[0].size();
+			if (lineLength >= 124)
+				multiline = true;
+		}
 
-			output << wordWrap(*I, indent + "/// ");
+		if (multiline)
+		{
+			output << indent << "/// " << head << "\n";
+			for (auto I = input.begin(); I != input.end(); ++I)
+			{
+				if (I != input.begin())
+					output << indent << "///\n";
+
+				output << wordWrap(*I, indent + "/// ");
+			}
+			output << indent << "/// " << tail << "\n";
+		}
+		else
+		{
+			output << indent << "/// " << head << input[0] << tail << "\n";
 		}
 	};
 
 	if (!commentEntry.brief.empty())
-	{
-		output << indent << "/// <summary>" << std::endl;
-		printParagraphs(commentEntry.brief);
-		output << indent << "/// </summary>" << std::endl;
-	}
+		printParagraphs("<summary>", "</summary>", commentEntry.brief);
 	else
 	{
-		output << indent << "/// <summary></summary>" << std::endl;
+		if(!commentEntry.params.empty() || !commentEntry.returns.empty())
+			output << indent << "/// <summary></summary>" << std::endl;
 	}
 
 	for(auto& entry : commentEntry.params)
@@ -673,17 +689,11 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 		if (entry.comments.empty())
 			continue;
 
-		output << indent << "/// <param name=\"" << entry.name << "\">" << std::endl;
-		printParagraphs(entry.comments);
-		output << indent << "/// </param>" << std::endl;
+		printParagraphs("<param name=\"" + entry.name + "\">", "</param>", entry.comments);
 	}
 
 	if(!commentEntry.returns.empty())
-	{
-		output << indent << "/// <returns>" << std::endl;
-		printParagraphs(commentEntry.returns);
-		output << indent << "/// </returns>" << std::endl;
-	}
+		printParagraphs("<returns>", "</returns>", commentEntry.returns);
 
 	return output.str();
 }

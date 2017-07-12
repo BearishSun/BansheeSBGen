@@ -106,8 +106,17 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
 	public:
 	/**
+	 * @native
+	 * Testing native docs!!
+	 *
+	 * Multiparagaph!
+	 * @endnative
+	 * @script
 	 * Creates a new mesh from an existing mesh data. Created mesh will match the vertex and index buffers described
 	 * by the mesh data exactly. Mesh will have no sub-meshes.
+	 * @endscript
+	 *
+	 * Use in both documentations
 	 *
 	 * @param[in]	initialData		Vertex and index data to initialize the mesh with.
 	 * @param[in]	desc			Descriptor containing the properties of the mesh to create. Vertex and index count,
@@ -115,7 +124,7 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 *								mesh data instead.
 	 * @returns						Mesh.
 	 */
-	static int create(const int& initialData, const int& desc);
+	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc);
 	
 	BS_SCRIPT_EXPORT()
 	bs::Event<void(int)> myEvent;
