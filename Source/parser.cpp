@@ -63,7 +63,7 @@ std::string getNamespace(const RecordDecl* decl)
 	return nsName;
 }
 
-bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnValue = false)
+bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, bool returnValue)
 {
 	typeFlags = 0;
 
@@ -159,55 +159,65 @@ bool parseType(QualType type, std::string& outType, int& typeFlags, bool returnV
 					return true;
 				}
 
+				// Handle special template specializations
 				bool isValid = false;
-				if (argType->isBuiltinType())
+				if (sourceTypeName == "shared_ptr" && nsName == "std")
 				{
-					const BuiltinType* builtinType = argType->getAs<BuiltinType>();
-					isValid = mapBuiltinTypeToCppType(builtinType->getKind(), outType);
+					typeFlags |= (int)TypeFlags::SrcSPtr;
 
-					typeFlags |= (int)TypeFlags::Builtin;
+					if (!isGameObjectOrResource(argType))
+						isValid = true;
+					else
+					{
+						outs() << "Error: Game object and resource types are only allowed to be referenced through handles"
+							<< " for scripting purposes\n";
+					}
 				}
-				else if (argType->isStructureOrClassType())
+				else if (sourceTypeName == "TResourceHandle")
 				{
-					const RecordType* argRecordType = argType->getAs<RecordType>();
-					const RecordDecl* argRecordDecl = argRecordType->getDecl();
+					// Note: Not supporting weak resource handles
 
-					outType = argRecordDecl->getName();
+					typeFlags |= (int)TypeFlags::SrcRHandle;
 					isValid = true;
 				}
-
-				// Note: Template specializations are only supported for specific builtin types
+				else if (sourceTypeName == "GameObjectHandle")
+				{
+					typeFlags |= (int)TypeFlags::SrcGHandle;
+					isValid = true;
+				}
+				
 				if (isValid)
 				{
 					isValid = false;
-					if (sourceTypeName == "shared_ptr" && nsName == "std")
+					if (argType->isBuiltinType())
 					{
-						typeFlags |= (int)TypeFlags::SrcSPtr;
+						const BuiltinType* builtinType = argType->getAs<BuiltinType>();
+						isValid = mapBuiltinTypeToCppType(builtinType->getKind(), outType);
 
-						if (!isGameObjectOrResource(argType))
-							isValid = true;
-						else
-						{
-							outs() << "Error: Game object and resource types are only allowed to be referenced through handles"
-								<< " for scripting purposes\n";
-						}
+						typeFlags |= (int)TypeFlags::Builtin;
 					}
-					else if (sourceTypeName == "TResourceHandle")
+					else if (argType->isStructureOrClassType())
 					{
-						// Note: Not supporting weak resource handles
+						const RecordType* argRecordType = argType->getAs<RecordType>();
+						const RecordDecl* argRecordDecl = argRecordType->getDecl();
 
-						typeFlags |= (int)TypeFlags::SrcRHandle;
+						outType = argRecordDecl->getName();
 						isValid = true;
 					}
-					else if (sourceTypeName == "GameObjectHandle")
-					{
-						typeFlags |= (int)TypeFlags::SrcGHandle;
-						isValid = true;
-					}
+
+					if (isValid)
+						return true;
+				}
+				else
+				{
+					// Handle generic template specializations
+					sourceTypeName += parseTemplArguments(sourceTypeName, specType->getArgs(), specType->getNumArgs(), nullptr);
+
+					isValid = true;
 				}
 
-				if (isValid)
-					return true;
+				if (!isValid)
+					return false;
 			}
 		}
 		else
@@ -258,7 +268,7 @@ struct FunctionTypeInfo
 	ParsedTypeInfo returnType;
 };
 
-bool parseEventSignature(QualType type, FunctionTypeInfo& typeInfo)
+bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& typeInfo)
 {
 	if (type->isStructureOrClassType())
 	{
@@ -438,6 +448,9 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 
 std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 {
+	if (!decl->hasDefinition())
+		return "";
+
 	std::stack<const CXXRecordDecl*> todo;
 	todo.push(decl);
 
@@ -490,6 +503,9 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 
 bool isModule(const CXXRecordDecl* decl)
 {
+	if (!decl->hasDefinition())
+		return false;
+
 	std::stack<const CXXRecordDecl*> todo;
 	todo.push(decl);
 
@@ -1152,6 +1168,61 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	return true;
 }
 
+std::string ScriptExportParser::parseTemplArguments(const std::string& className, const TemplateArgument* tmplArgs, unsigned numArgs, SmallVector<TemplateParamInfo, 0>* templParams)
+{
+	std::stringstream tmplArgsStream;
+	tmplArgsStream << "<";
+	for(unsigned i = 0; i < numArgs; i++)
+	{
+		if (i != 0)
+			tmplArgsStream << ", ";
+
+		auto& tmplArg = tmplArgs[i];
+		if(tmplArg.getKind() == TemplateArgument::Type)
+		{
+			std::string tmplArgTypeName;
+			int dummy;
+			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, false);
+
+			tmplArgsStream << tmplArgTypeName;
+
+			if(templParams != nullptr)
+				templParams->push_back({ "class" });
+		}
+		else if(tmplArg.getKind() == TemplateArgument::Expression)
+		{
+			std::string tmplArgExprValue;
+			if (!evaluateExpression(tmplArg.getAsExpr(), tmplArgExprValue))
+			{
+				outs() << "Error: Template argument for type \"" << className << "\" cannot be constantly evaluated, ignoring it.\n";
+				tmplArgsStream << "unknown";
+			}
+			else
+				tmplArgsStream << tmplArgExprValue;
+
+			tmplArg.getAsExpr()->getType();
+
+			std::string tmplArgTypeName;
+			int dummy;
+			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, false);
+
+			if(templParams != nullptr)
+				templParams->push_back({ tmplArgTypeName });
+		}
+		else
+		{
+			outs() << "Error: Cannot parse template argument for type: \"" << className << "\". \n";
+			tmplArgsStream << "unknown";
+
+			if(templParams != nullptr)
+				templParams->push_back({ "unknown" });
+		}
+	}
+
+	tmplArgsStream << ">";
+	return tmplArgsStream.str();
+}
+
 bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 {
 	parseComments(decl);
@@ -1160,34 +1231,50 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 	if (attr == nullptr)
 		return true;
 
-	StringRef sourceClassName = decl->getName();
+	StringRef declName = decl->getName();
 
 	ParsedDeclInfo parsedClassInfo;
-	parsedClassInfo.exportName = sourceClassName;
+	parsedClassInfo.exportName = declName;
 
-	if (!parseExportAttribute(attr, sourceClassName, parsedClassInfo))
+	if (!parseExportAttribute(attr, declName, parsedClassInfo))
 		return true;
+
+	std::string srcClassName = declName;
+
+	// If a template specialization append template params to its name
+	ClassTemplateSpecializationDecl* specDecl = dyn_cast<ClassTemplateSpecializationDecl>(decl);
+	CXXRecordDecl* templatedDecl = decl;
+	SmallVector<TemplateParamInfo, 0> templParams;
+	if(specDecl != nullptr)
+	{
+		auto& tmplArgs = specDecl->getTemplateInstantiationArgs();
+		srcClassName += parseTemplArguments(srcClassName, tmplArgs.data(), tmplArgs.size(), &templParams);
+		templatedDecl = specDecl->getSpecializedTemplate()->getTemplatedDecl();
+	}
 
 	FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile.str()];
 	if ((parsedClassInfo.exportFlags & (int)ExportFlags::Plain) != 0)
 	{
 		auto iterFind = std::find_if(fileInfo.structInfos.begin(), fileInfo.structInfos.end(), 
-			[&sourceClassName](const StructInfo& si)
+			[&srcClassName](const StructInfo& si)
 		{
-			return si.name == sourceClassName;
+			return si.name == srcClassName;
 		});
 
 		if (iterFind != fileInfo.structInfos.end())
 			return true; // Already parsed
 
 		StructInfo structInfo;
-		structInfo.name = sourceClassName;
+		structInfo.name = srcClassName;
+		structInfo.cleanName = declName;
 		structInfo.visibility = parsedClassInfo.visibility;
 		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 		structInfo.requiresInterop = false;
 		structInfo.module = parsedClassInfo.moduleName;
+		structInfo.isTemplateInst = specDecl != nullptr;
+		structInfo.templParams = templParams;
 
-		parseJavadocComments(decl, structInfo.documentation);
+		parseJavadocComments(templatedDecl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
 
 		std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
@@ -1310,7 +1397,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						if (parmVarDecl == nullptr)
 						{
 							outs() << "Warning: Found a non-trivial field assignment for field \"" << fieldDecl->getName() << "\" in"
-								<< " constructor of \"" << sourceClassName << "\". Ignoring assignment.\n";
+								<< " constructor of \"" << srcClassName << "\". Ignoring assignment.\n";
 							continue;
 						}
 
@@ -1338,7 +1425,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		for (auto I = decl->field_begin(); I != decl->field_end(); ++I)
 		{
 			FieldDecl* fieldDecl = *I;
-			VarInfo fieldInfo;
+			FieldInfo fieldInfo;
 			fieldInfo.name = fieldDecl->getName();
 
 			auto iterFind = defaultFieldValues.find(fieldDecl);
@@ -1358,15 +1445,16 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags))
 			{
 				outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
-					<< sourceClassName << "\". Skipping field.\n";
+					<< srcClassName << "\". Skipping field.\n";
 				continue;
 			}
 
+			parseJavadocComments(fieldDecl, fieldInfo.documentation);
 			structInfo.fields.push_back(fieldInfo);
 		}
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
+		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
 
 		fileInfo.structInfos.push_back(structInfo);
 
@@ -1376,25 +1464,30 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 	else
 	{
 		auto iterFind = std::find_if(fileInfo.classInfos.begin(), fileInfo.classInfos.end(), 
-			[&sourceClassName](const ClassInfo& ci)
+			[&srcClassName](const ClassInfo& ci)
 		{
-			return ci.name == sourceClassName;
+			return ci.name == srcClassName;
 		});
 
 		if (iterFind != fileInfo.classInfos.end())
 			return true; // Already parsed
 
 		ClassInfo classInfo;
-		classInfo.name = sourceClassName;
+		classInfo.name = srcClassName;
+		classInfo.cleanName = declName;
 		classInfo.visibility = parsedClassInfo.visibility;
 		classInfo.flags = 0;
 		classInfo.baseClass = parseExportableBaseClass(decl);
 		classInfo.module = parsedClassInfo.moduleName;
-		parseJavadocComments(decl, classInfo.documentation);
+		classInfo.templParams = templParams;
+		parseJavadocComments(templatedDecl, classInfo.documentation);
 		parseNamespace(decl, classInfo.ns);
 
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
 			classInfo.flags |= (int)ClassFlags::Editor;
+
+		if (specDecl != nullptr)
+			classInfo.flags |= (int)ClassFlags::IsTemplateInst;
 
 		bool clsIsModule = isModule(decl);
 		if (clsIsModule)
@@ -1404,7 +1497,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
 
-		cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, parsedClassInfo.exportFile);
+		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, parsedClassInfo.exportFile);
 
 		// Parse constructors for non-module (singleton) classes
 		if (!clsIsModule)
@@ -1423,7 +1516,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					continue;
 
 				MethodInfo methodInfo;
-				methodInfo.sourceName = sourceClassName;
+				methodInfo.sourceName = declName;
 				methodInfo.scriptName = parsedClassInfo.exportName;
 				methodInfo.flags = (int)MethodFlags::Constructor;
 				methodInfo.visibility = parsedMethodInfo.visibility;
@@ -1444,7 +1537,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					if (!parseType(paramType, paramInfo.type, paramInfo.flags))
 					{
-						outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << sourceClassName << "\"'s constructor.\n";
+						outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << srcClassName << "\"'s constructor.\n";
 						invalidParam = true;
 						continue;
 					}
@@ -1529,7 +1622,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			methodInfo.sourceName = sourceMethodName;
 			methodInfo.scriptName = parsedMethodInfo.exportName;
 			methodInfo.flags = methodFlags;
-			methodInfo.externalClass = sourceClassName;
+			methodInfo.externalClass = srcClassName;
 			methodInfo.visibility = parsedMethodInfo.visibility;
 			parseJavadocComments(methodDecl, methodInfo.documentation);
 
@@ -1625,7 +1718,13 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
 				{
-					if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+					Expr* defaultArg;
+					if (paramDecl->hasUninstantiatedDefaultArg())
+						defaultArg = paramDecl->getUninstantiatedDefaultArg();
+					else
+						defaultArg = paramDecl->getDefaultArg();
+
+					if (!evaluateExpression(defaultArg, paramInfo.defaultValue))
 					{
 						outs() << "Error: Method parameter \"" << paramDecl->getName().str() << "\" has a default "
 							<< "argument that cannot be constantly evaluated, ignoring it.\n";
@@ -1654,7 +1753,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			FieldDecl* fieldDecl = *I;
 
 			MethodInfo eventInfo;
-			if (!parseEvent(fieldDecl, sourceClassName, eventInfo))
+			if (!parseEvent(fieldDecl, srcClassName, eventInfo))
 				continue;
 
 			classInfo.eventInfos.push_back(eventInfo);
@@ -1670,7 +1769,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					continue;
 
 				MethodInfo eventInfo;
-				if (!parseEvent(varDecl, sourceClassName, eventInfo))
+				if (!parseEvent(varDecl, srcClassName, eventInfo))
 					continue;
 
 				eventInfo.flags |= (int)MethodFlags::Static;

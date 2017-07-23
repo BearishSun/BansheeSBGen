@@ -228,7 +228,14 @@ std::string getScriptInteropType(const std::string& name)
 	if (!isValidInteropType)
 		outs() << "Error: Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
 
-	return "Script" + name;
+	std::string cleanName;
+	int lBracket = name.find_first_of('<');
+	if (lBracket != -1)
+		cleanName = name.substr(0, lBracket);
+	else
+		cleanName = name;
+
+	return "Script" + cleanName;
 }
 
 bool isValidStructType(UserTypeInfo& typeInfo, int flags)
@@ -290,8 +297,8 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 	}
 
 	MethodInfo output;
-	output.sourceName = classInfo.name;
-	output.scriptName = classInfo.name;
+	output.sourceName = classInfo.cleanName;
+	output.scriptName = classInfo.cleanName;
 	output.flags = (int)MethodFlags::Constructor;
 	output.visibility = CSVisibility::Private;
 
@@ -364,7 +371,7 @@ void gatherIncludes(const ClassInfo& classInfo, IncludesInfo& output)
 		gatherIncludes(eventInfo, output);
 }
 
-bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4>& curNS, CommentEntry& outputComment)
+bool parseCopydocString(const std::string& str, const std::string& parentType, const SmallVector<std::string, 4>& curNS, CommentEntry& outputComment)
 {
 	StringRef inputStr(str.data(), str.length());
 	inputStr = inputStr.trim();
@@ -426,8 +433,17 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 		auto iterFind = commentSimpleLookup.find(simpleTypeName);
 		if (iterFind == commentSimpleLookup.end())
 		{
-			outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
-			return false;
+			// Try appending the parent type
+			simpleTypeName = parentType + "::" + simpleTypeName;
+
+			iterFind = commentSimpleLookup.find(simpleTypeName);
+			if (iterFind == commentSimpleLookup.end())
+			{
+				outs() << "Warning: Cannot find identifier referenced by the @copydoc command: \"" << str << "\".\n";
+				return false;
+			}
+			else
+				lookup = iterFind->second;
 		}
 		else
 			lookup = iterFind->second;
@@ -567,7 +583,7 @@ bool parseCopydocString(const std::string& str, const SmallVector<std::string, 4
 	return true;
 }
 
-void resolveCopydocComment(CommentEntry& comment, const SmallVector<std::string, 4>& curNS)
+void resolveCopydocComment(CommentEntry& comment, const std::string& parentType, const SmallVector<std::string, 4>& curNS)
 {
 	StringRef copydocArg;
 	for(auto& entry : comment.brief)
@@ -585,7 +601,7 @@ void resolveCopydocComment(CommentEntry& comment, const SmallVector<std::string,
 		return;
 
 	CommentEntry outComment;
-	if (!parseCopydocString(copydocArg, curNS, outComment))
+	if (!parseCopydocString(copydocArg, parentType, curNS, outComment))
 	{
 		comment = CommentEntry();
 		return;
@@ -593,7 +609,7 @@ void resolveCopydocComment(CommentEntry& comment, const SmallVector<std::string,
 	else
 		comment = outComment;
 
-	resolveCopydocComment(comment, curNS);
+	resolveCopydocComment(comment, parentType, curNS);
 }
 
 std::string generateXMLComments(const CommentEntry& commentEntry, const std::string& indent)
@@ -778,27 +794,27 @@ void postProcessFileInfos()
 	{
 		for (auto& classInfo : fileInfo.second.classInfos)
 		{
-			resolveCopydocComment(classInfo.documentation, classInfo.ns);
+			resolveCopydocComment(classInfo.documentation, classInfo.name, classInfo.ns);
 
 			for (auto& methodInfo : classInfo.methodInfos)
-				resolveCopydocComment(methodInfo.documentation, classInfo.ns);
+				resolveCopydocComment(methodInfo.documentation, classInfo.name, classInfo.ns);
 
 			for (auto& ctorInfo : classInfo.ctorInfos)
-				resolveCopydocComment(ctorInfo.documentation, classInfo.ns);
+				resolveCopydocComment(ctorInfo.documentation, classInfo.name, classInfo.ns);
 
 			for (auto& eventInfo : classInfo.eventInfos)
-				resolveCopydocComment(eventInfo.documentation, classInfo.ns);
+				resolveCopydocComment(eventInfo.documentation, classInfo.name, classInfo.ns);
 		}
 
 		for (auto& structInfo : fileInfo.second.structInfos)
-			resolveCopydocComment(structInfo.documentation, structInfo.ns);
+			resolveCopydocComment(structInfo.documentation, structInfo.name, structInfo.ns);
 
 		for(auto& enumInfo : fileInfo.second.enumInfos)
 		{
-			resolveCopydocComment(enumInfo.documentation, enumInfo.ns);
+			resolveCopydocComment(enumInfo.documentation, enumInfo.name, enumInfo.ns);
 
 			for (auto& enumEntryInfo : enumInfo.entries)
-				resolveCopydocComment(enumEntryInfo.second.documentation, enumInfo.ns);
+				resolveCopydocComment(enumEntryInfo.second.documentation, enumInfo.name, enumInfo.ns);
 		}
 	}
 
@@ -1098,7 +1114,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
-				fileInfo.second.forwardDeclarations.insert({ classInfo.name, false });
+				fileInfo.second.forwardDeclarations.insert({ classInfo.cleanName, false, classInfo.templParams });
 
 				if (typeInfo.type == ParsedType::Resource)
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptResource.h");
@@ -1122,7 +1138,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[structInfo.name];
 
-				fileInfo.second.forwardDeclarations.insert({ structInfo.name, true });
+				fileInfo.second.forwardDeclarations.insert({ structInfo.cleanName, true, structInfo.templParams });
 
 				fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
 				fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
@@ -3403,7 +3419,7 @@ std::string generateCSStruct(StructInfo& input)
 
 	for (auto I = input.fields.begin(); I != input.fields.end(); ++I)
 	{
-		const VarInfo& fieldInfo = *I;
+		const FieldInfo& fieldInfo = *I;
 
 		UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
 
@@ -3413,6 +3429,7 @@ std::string generateCSStruct(StructInfo& input)
 			continue;
 		}
 
+		output << generateXMLComments(fieldInfo.documentation, "\t\t");
 		output << "\t\tpublic ";
 		output << typeInfo.scriptName << " ";
 		output << fieldInfo.name;
@@ -3595,10 +3612,27 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		// Output forward declarations
 		for (auto& decl : fileInfo.second.forwardDeclarations)
 		{
-			if(decl.isStruct)
-				output << "\tstruct " << decl.name << ";" << std::endl;
+			if (decl.templParams.size() > 0)
+			{
+				output << "\ttemplate<";
+
+				for(int i = 0; i < (int)decl.templParams.size(); ++i)
+				{
+					if (i != 0)
+						output << ", ";
+
+					output << decl.templParams[i].type << " T" << std::to_string(i);
+				}
+
+				output << "> ";
+			}
 			else
-				output << "\tclass " << decl.name << ";" << std::endl;
+				output << "\t";
+
+			if(decl.isStruct)
+				output << "struct " << decl.name << ";" << std::endl;
+			else
+				output << "class " << decl.name << ";" << std::endl;
 		}
 
 		if (!fileInfo.second.forwardDeclarations.empty())

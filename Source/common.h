@@ -57,7 +57,7 @@ enum class TypeFlags
 	WString = 1 << 9,
 	ScriptObject = 1 << 10,
 	Function = 1 << 11,
-	ComplexStruct = 1 << 12
+	ComplexStruct = 1 << 12,
 };
 
 enum class MethodFlags
@@ -93,7 +93,8 @@ enum class ClassFlags
 {
 	Editor = 1 << 0,
 	IsBase = 1 << 1,
-	IsModule = 1 << 2
+	IsModule = 1 << 2,
+	IsTemplateInst = 1 << 3,
 };
 
 struct UserTypeInfo
@@ -140,6 +141,16 @@ struct CommentEntry
 	SmallVector<std::string, 2> returns;
 };
 
+struct FieldInfo : VarInfo
+{
+	CommentEntry documentation;
+};
+
+struct TemplateParamInfo
+{
+	std::string type;
+};
+
 struct MethodInfo
 {
 	std::string sourceName;
@@ -172,9 +183,11 @@ struct PropertyInfo
 struct ClassInfo
 {
 	std::string name;
+	std::string cleanName;
 	CSVisibility visibility;
 	int flags;
 	SmallVector<std::string, 4> ns;
+	SmallVector<TemplateParamInfo, 0> templParams;
 
 	std::vector<MethodInfo> ctorInfos;
 	std::vector<PropertyInfo> propertyInfos;
@@ -200,14 +213,17 @@ struct SimpleConstructorInfo
 struct StructInfo
 {
 	std::string name;
+	std::string cleanName;
 	std::string interopName;
 	CSVisibility visibility;
 	SmallVector<std::string, 4> ns;
+	SmallVector<TemplateParamInfo, 0> templParams;
 
 	std::vector<SimpleConstructorInfo> ctors;
-	std::vector<VarInfo> fields;
+	std::vector<FieldInfo> fields;
 	bool inEditor : 1;
 	bool requiresInterop : 1;
+	bool isTemplateInst : 1;
 
 	CommentEntry documentation;
 	std::string module;
@@ -239,6 +255,7 @@ struct ForwardDeclInfo
 {
 	std::string name;
 	bool isStruct;
+	SmallVector<TemplateParamInfo, 0> templParams;
 
 	bool operator==(const ForwardDeclInfo& rhs) const
 	{

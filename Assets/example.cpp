@@ -102,6 +102,35 @@ struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 
 #define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
 
+/** Animation keyframe, represented as an endpoint of a cubic hermite spline. */
+template <class T>
+struct TKeyframe
+{
+	T value; /**< Value of the key. */
+	T inTangent; /**< Input tangent (going from the previous key to this one) of the key. */
+	T outTangent; /**< Output tangent (going from this key to next one) of the key. */
+	float time; /**< Position of the key along the animation spline. */
+};
+
+template class BS_SCRIPT_EXPORT(n:Keyframe,pl:true) TKeyframe<float>;
+
+struct BS_SCRIPT_EXPORT(pl:true) KeyframeContainer
+{
+	TKeyframe<float> keyframe;
+};
+
+template <class T>
+class TAnimationCurve
+{
+	BS_SCRIPT_EXPORT(n:Evaluate)
+	T evaluate(float time, bool loop = true) const;
+	
+	BS_SCRIPT_EXPORT(n:KeyFrame,p:getter)
+	const std::vector<TKeyframe<T>>& getKeyFrames() const;
+};
+
+template class BS_SCRIPT_EXPORT(n:AnimationCurve) TAnimationCurve<float>;
+
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
 	public:
@@ -125,6 +154,14 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc);
+	
+	/** Some docs. */
+	BS_SCRIPT_EXPORT()
+	void setSomething(float t);
+	
+	/** @copydoc setSomething() */
+	BS_SCRIPT_EXPORT()
+	float getSomething() const;
 	
 	BS_SCRIPT_EXPORT()
 	bs::Event<void(int)> myEvent;
