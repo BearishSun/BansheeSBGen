@@ -113,6 +113,100 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 		}
 	}
 
+	// Check for non-array template types
+	if (realType->isStructureOrClassType())
+	{
+		// Check for arrays & flags
+		// Note: Not supporting nested arrays
+		const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
+		int numArgs = 0;
+
+		if (specType != nullptr)
+			numArgs = specType->getNumArgs();
+
+		if (numArgs > 0)
+		{
+			const RecordType* recordType = realType->getAs<RecordType>();
+			const RecordDecl* recordDecl = recordType->getDecl();
+
+			std::string sourceTypeName = recordDecl->getName();
+			std::string nsName = getNamespace(recordDecl);
+
+			if (sourceTypeName == "vector" && nsName == "std")
+			{
+				realType = specType->getArg(0).getAsType();
+				typeFlags |= (int)TypeFlags::Array;
+			}
+			
+			if(sourceTypeName == "Flags")
+			{
+				realType = specType->getArg(0).getAsType();
+				typeFlags |= (int)TypeFlags::FlagsEnum;
+
+				if(numArgs > 1)
+				{
+					QualType storageType = specType->getArg(1).getAsType();
+					bool validStorageType = false;
+					if (storageType->isBuiltinType())
+					{
+						const BuiltinType* builtinType = realType->getAs<BuiltinType>();
+						std::string storageTypeStr;
+						if (mapBuiltinTypeToCppType(builtinType->getKind(), storageTypeStr))
+						{
+							if (storageTypeStr == "UINT32")
+								validStorageType = true;
+						}
+
+						if(!validStorageType)
+						{
+							outs() << "Error: Invalid storage type used for Flags.\n";
+							return false;
+						}
+					}
+				}
+			}
+			else if (sourceTypeName == "basic_string" && nsName == "std")
+			{
+				realType = specType->getArg(0).getAsType();
+
+				const BuiltinType* builtinType = realType->getAs<BuiltinType>();
+				if (builtinType->getKind() == BuiltinType::Kind::WChar_U)
+					typeFlags |= (int)TypeFlags::WString;
+				else
+					typeFlags |= (int)TypeFlags::String;
+
+				outType = "string";
+
+				return true;
+			}
+			else if (sourceTypeName == "shared_ptr" && nsName == "std")
+			{
+				typeFlags |= (int)TypeFlags::SrcSPtr;
+
+				realType = specType->getArg(0).getAsType();
+				if (isGameObjectOrResource(realType))
+				{
+					outs() << "Error: Game object and resource types are only allowed to be referenced through handles"
+						<< " for scripting purposes\n";
+
+					return false;
+				}
+			}
+			else if (sourceTypeName == "TResourceHandle")
+			{
+				// Note: Not supporting weak resource handles
+
+				realType = specType->getArg(0).getAsType();
+				typeFlags |= (int)TypeFlags::SrcRHandle;
+			}
+			else if (sourceTypeName == "GameObjectHandle")
+			{
+				realType = specType->getArg(0).getAsType();
+				typeFlags |= (int)TypeFlags::SrcGHandle;
+			}
+		}
+	}
+
 	if (realType->isPointerType())
 	{
 		outs() << "Error: Only normal pointers are supported for parameter types.\n";
@@ -143,81 +237,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			int numArgs = specType->getNumArgs();
 			if (numArgs > 0)
 			{
-				QualType argType = specType->getArg(0).getAsType();
-
-				// Check for string types
-				if (sourceTypeName == "basic_string" && nsName == "std")
-				{
-					const BuiltinType* builtinType = argType->getAs<BuiltinType>();
-					if (builtinType->getKind() == BuiltinType::Kind::WChar_U)
-						typeFlags |= (int)TypeFlags::WString;
-					else
-						typeFlags |= (int)TypeFlags::String;
-
-					outType = "string";
-
-					return true;
-				}
-
-				// Handle special template specializations
-				bool isValid = false;
-				if (sourceTypeName == "shared_ptr" && nsName == "std")
-				{
-					typeFlags |= (int)TypeFlags::SrcSPtr;
-
-					if (!isGameObjectOrResource(argType))
-						isValid = true;
-					else
-					{
-						outs() << "Error: Game object and resource types are only allowed to be referenced through handles"
-							<< " for scripting purposes\n";
-					}
-				}
-				else if (sourceTypeName == "TResourceHandle")
-				{
-					// Note: Not supporting weak resource handles
-
-					typeFlags |= (int)TypeFlags::SrcRHandle;
-					isValid = true;
-				}
-				else if (sourceTypeName == "GameObjectHandle")
-				{
-					typeFlags |= (int)TypeFlags::SrcGHandle;
-					isValid = true;
-				}
-				
-				if (isValid)
-				{
-					isValid = false;
-					if (argType->isBuiltinType())
-					{
-						const BuiltinType* builtinType = argType->getAs<BuiltinType>();
-						isValid = mapBuiltinTypeToCppType(builtinType->getKind(), outType);
-
-						typeFlags |= (int)TypeFlags::Builtin;
-					}
-					else if (argType->isStructureOrClassType())
-					{
-						const RecordType* argRecordType = argType->getAs<RecordType>();
-						const RecordDecl* argRecordDecl = argRecordType->getDecl();
-
-						outType = argRecordDecl->getName();
-						isValid = true;
-					}
-
-					if (isValid)
-						return true;
-				}
-				else
-				{
-					// Handle generic template specializations
-					sourceTypeName += parseTemplArguments(sourceTypeName, specType->getArgs(), specType->getNumArgs(), nullptr);
-
-					isValid = true;
-				}
-
-				if (!isValid)
-					return false;
+				// Handle generic template specializations
+				sourceTypeName += parseTemplArguments(sourceTypeName, specType->getArgs(), specType->getNumArgs(), nullptr);
 			}
 		}
 		else
@@ -539,7 +560,40 @@ ScriptExportParser::ScriptExportParser(CompilerInstance* CI)
 bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 {
 	if (!expr->isEvaluatable(*astContext))
+	{
+		// Check for nullptr
+		do {
+			// Skip through reference binding to temporary.
+			if (MaterializeTemporaryExpr* materialize = dyn_cast<MaterializeTemporaryExpr>(expr))
+				expr = materialize->GetTemporaryExpr();
+
+			// Skip any temporary bindings; they're implicit.
+			if (CXXBindTemporaryExpr* binder = dyn_cast<CXXBindTemporaryExpr>(expr))
+				expr = binder->getSubExpr();
+
+			expr = expr->IgnoreParenCasts();
+
+			if (CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr))
+				expr = ctorExp->getArg(0);
+			else
+				break;
+
+			QualType type = expr->getType();
+			if(type->isBuiltinType())
+			{
+				const BuiltinType* builtinType = type->getAs<BuiltinType>();
+				if (builtinType->getKind() == BuiltinType::NullPtr)
+				{
+					evalValue = "null";
+					return true;
+				}
+
+				return false;
+			}
+		} while (expr);  
+
 		return false;
+	}
 
 	QualType type = expr->getType();
 	if (type->isBuiltinType())
@@ -592,6 +646,11 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 			result.toString(valueStr);
 			evalValue = valueStr.str().str();
 
+			return true;
+		}
+		case BuiltinType::NullPtr:
+		{
+			evalValue = "null";
 			return true;
 		}
 		default:
@@ -1123,8 +1182,9 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		mapBuiltinTypeToCSType(builtinType->getKind(), enumEntry.explicitType);
 
 	std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
+	std::string destFile = "BsScript" + parsedEnumInfo.exportFile.str() + ".generated.h";
 
-	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, parsedEnumInfo.exportFile);
+	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, destFile);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
 	
 	auto iter = decl->enumerator_begin();
@@ -1294,6 +1354,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					continue;
 				}
 
+				parseJavadocComments(ctorDecl, ctorInfo.documentation);
+
 				bool skippedDefaultArgument = false;
 				for (auto I = ctorDecl->param_begin(); I != ctorDecl->param_end(); ++I)
 				{
@@ -1335,17 +1397,47 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						FieldDecl* field = init->getMember();
 						Expr* initExpr = init->getInit();
 
-						// Check for constant value first
-						std::string evalValue;
-						if (evaluateExpression(initExpr, evalValue))
-							defaultFieldValues[field] = evalValue;
-						else // Check for initializers referencing parameters
+						bool isValid = true;
+						while(CXXConstructExpr* constructExpr = dyn_cast<CXXConstructExpr>(initExpr))
 						{
-							Decl* varDecl = initExpr->getReferencedDeclOfCallee();
+							isValid = false;
+							if(constructExpr->getNumArgs() == 0)
+							{
+								// Don't care about default constructors
+								break;
+							}
+							else if (constructExpr->getNumArgs() == 1)
+							{
+								initExpr = constructExpr->getArg(0);
+								isValid = true;
+							}
+							else
+							{
+								outs() << "Error: Invalid number of parameters in constructor initializer. Only one parameter "
+									"constructors are supported. In struct \"" + srcClassName + "\".\n";
+								break;
+							}
+						}
+						
+						if (isValid)
+						{
+							// Check for constant value first
+							std::string evalValue;
+							if (evaluateExpression(initExpr, evalValue))
+								defaultFieldValues[field] = evalValue;
+							else // Check for initializers referencing parameters
+							{
+								Decl* varDecl = initExpr->getReferencedDeclOfCallee();
 
-							ParmVarDecl* parmVarDecl = dyn_cast<ParmVarDecl>(varDecl);
-							if (parmVarDecl != nullptr)
-								assignments[field] = parmVarDecl;
+								if (varDecl != nullptr)
+								{
+									ParmVarDecl* parmVarDecl = dyn_cast<ParmVarDecl>(varDecl);
+									if (parmVarDecl != nullptr)
+										assignments[field] = parmVarDecl;
+								}
+								else
+									outs() << "Error: Unrecognized initializer format in struct \"" + srcClassName + "\".\n";
+							}
 						}
 					}
 				}
@@ -1454,7 +1546,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		}
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
-		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, parsedClassInfo.exportFile);
+		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
+		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, destFile);
 
 		fileInfo.structInfos.push_back(structInfo);
 
@@ -1493,11 +1586,15 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		if (clsIsModule)
 			classInfo.flags |= (int)ClassFlags::IsModule;
 
+		if (decl->isStruct())
+			classInfo.flags |= (int)ClassFlags::IsStruct;
+
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
+		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
 
-		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, parsedClassInfo.exportFile);
+		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, destFile);
 
 		// Parse constructors for non-module (singleton) classes
 		if (!clsIsModule)

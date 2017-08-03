@@ -83,7 +83,7 @@ int main(int argc, const char** argv)
 	cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "BsVector4.h", "BsScriptVector.h");
 	cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "BsMatrix3.h", "");
 	cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "BsMatrix4.h", "");
-	cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h", "");
+	cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h", "BsScriptQuaternion.h");
 	cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "BsRadian.h", "");
 	cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "BsDegree.h", "");
 	cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "BsColor.h", "BsScriptColor.h");

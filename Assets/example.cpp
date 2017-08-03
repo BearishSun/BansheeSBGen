@@ -9,6 +9,12 @@ class vector
 	Type a;
 };
 
+template<class T, class S = unsigned int>
+class Flags
+{
+	S v;
+};
+
 typedef int INT32;
 
 template<class Elem> class basic_string
@@ -102,6 +108,13 @@ struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 
 #define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
 
+enum BS_SCRIPT_EXPORT() FlgEnum
+{
+	a, b, c
+};
+
+typedef Flags<FlgEnum> FlgEnums;
+
 /** Animation keyframe, represented as an endpoint of a cubic hermite spline. */
 template <class T>
 struct TKeyframe
@@ -130,6 +143,21 @@ class TAnimationCurve
 };
 
 template class BS_SCRIPT_EXPORT(n:AnimationCurve) TAnimationCurve<float>;
+
+struct BS_SCRIPT_EXPORT(m:Animation,pl:true) RootMotion
+{
+	RootMotion() { }
+	RootMotion(const TAnimationCurve<float>& position, const TAnimationCurve<float>& rotation)
+		:position(position), rotation(rotation)
+	{ }
+
+	/** Animation curve representing the movement of the root bone. */
+	TAnimationCurve<float> position;
+
+	/** Animation curve representing the rotation of the root bone. */
+	TAnimationCurve<float> rotation;
+};
+
 
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
@@ -164,10 +192,65 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	float getSomething() const;
 	
 	BS_SCRIPT_EXPORT()
+	FlgEnums getEnum() const;	
+	
+	BS_SCRIPT_EXPORT()
+	void setEnum(FlgEnums e) const;		
+	
+	BS_SCRIPT_EXPORT()
 	bs::Event<void(int)> myEvent;
 	
 	BS_SCRIPT_EXPORT()
+	bs::Event<void(FlgEnums)> myEnumEvent;
+	
+	BS_SCRIPT_EXPORT()
 	static bs::Event<void(int)> myStaticEvent;
+};
+
+class BS_SCRIPT_EXPORT() StaticClass
+{
+	BS_SCRIPT_EXPORT()
+	static StaticClass get();
+	
+	BS_SCRIPT_EXPORT()
+	static void set(const StaticClass& v);
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) MyStruct3
+{
+	float a;
+	FlgEnums b;
+	int c;
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) MyStruct4
+{
+	MyStruct4() {}
+	
+	MyStruct4(MyStruct b)
+		:a(b)
+	{ }
+	
+	MyStruct a;
+	std::string c;
+};
+
+template <class T>
+struct TNamedAnimationCurve
+{
+	std::string name;
+	T value;
+};
+
+template class BS_SCRIPT_EXPORT(m:Animation,n:NamedFloatCurve) TNamedAnimationCurve<float>;
+
+struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct3
+{
+	MyStruct2 a;
+	std::shared_ptr<MyClass> b;
+	float c;
+	FlgEnums d;
+	std::vector<int> e;
 };
 
 struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct2
@@ -189,6 +272,9 @@ struct BS_SCRIPT_EXPORT(pl:true) ComplexStruct
 class BS_SCRIPT_EXPORT(f:TestOutput2,m:TestModule) MyClass2
 {
 	public:
+	BS_SCRIPT_EXPORT()
+	MyClass2(bool a, const std::shared_ptr<MyClass>& b = nullptr);
+	
 	BS_SCRIPT_EXPORT()
 	ComplexStruct getStruct();
 	

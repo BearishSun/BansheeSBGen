@@ -58,6 +58,7 @@ enum class TypeFlags
 	ScriptObject = 1 << 10,
 	Function = 1 << 11,
 	ComplexStruct = 1 << 12,
+	FlagsEnum = 1 << 13
 };
 
 enum class MethodFlags
@@ -95,6 +96,7 @@ enum class ClassFlags
 	IsBase = 1 << 1,
 	IsModule = 1 << 2,
 	IsTemplateInst = 1 << 3,
+	IsStruct = 1 << 4
 };
 
 struct UserTypeInfo
@@ -208,6 +210,7 @@ struct SimpleConstructorInfo
 {
 	std::vector<VarInfo> params;
 	std::unordered_map<std::string, std::string> fieldAssignments;
+	CommentEntry documentation;
 };
 
 struct StructInfo
@@ -575,6 +578,11 @@ inline bool isArray(int flags)
 	return (flags & (int)TypeFlags::Array) != 0;
 }
 
+inline bool isFlagsEnum(int flags)
+{
+	return (flags & (int)TypeFlags::FlagsEnum) != 0;
+}
+
 inline bool isSrcPointer(int flags)
 {
 	return (flags & (int)TypeFlags::SrcPtr) != 0;
@@ -611,6 +619,11 @@ inline bool isSrcGHandle(int flags)
 inline bool isComplexStruct(int flags)
 {
 	return (flags & (int)TypeFlags::ComplexStruct) != 0;
+}
+
+inline bool isStruct(int flags)
+{
+	return (flags & (int)ClassFlags::IsStruct) != 0;
 }
 
 inline bool isHandleType(ParsedType type)
