@@ -1,30 +1,6 @@
 #include "common.h"
 #include <chrono>
 
-std::string cleanTemplParams(const std::string& name)
-{
-	std::string cleanName;
-	int lBracket = name.find_first_of('<');
-	if (lBracket != -1)
-	{
-		cleanName = name.substr(0, lBracket);
-
-		int rBracket = name.find_last_of('>');
-		if (rBracket != -1 && rBracket > lBracket)
-			cleanName += name.substr(lBracket + 1, rBracket - lBracket - 1);
-		else
-			cleanName += name.substr(lBracket + 1, name.size() - rBracket - 1);
-	}
-	else
-		cleanName = name;
-
-	return cleanName;
-}
-std::string getStructInteropType(const std::string& name)
-{
-	return "__" + cleanTemplParams(name) + "Interop";
-}
-
 std::string getInteropCppVarType(const std::string& typeName, ParsedType type, int flags, bool forStruct = false)
 {
 	if (isArray(flags))
@@ -97,11 +73,6 @@ std::string getCppVarType(const std::string& typeName, ParsedType type, int flag
 		return "Flags<" + typeName + ">";
 	else
 		return typeName;
-}
-
-bool isPlainStruct(ParsedType type, int flags)
-{
-	return type == ParsedType::Struct && !isArray(flags);
 }
 
 std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes,
@@ -315,34 +286,6 @@ std::string getScriptInteropType(const std::string& name)
 
 	std::string cleanName = cleanTemplParams(name);
 	return "Script" + cleanName;
-}
-
-bool isValidStructType(UserTypeInfo& typeInfo, int flags)
-{
-	if (isOutput(flags))
-		return false;
-
-	if (typeInfo.type == ParsedType::ScriptObject)
-		return false;
-
-	return true;
-}
-
-std::string getDefaultValue(const std::string& typeName, const UserTypeInfo& typeInfo)
-{
-	if (typeInfo.type == ParsedType::Builtin)
-		return "0";
-	else if (typeInfo.type == ParsedType::Enum)
-		return "(" + typeInfo.scriptName + ")0";
-	else if (typeInfo.type == ParsedType::Struct)
-		return "new " + typeInfo.scriptName + "()";
-	else if (typeInfo.type == ParsedType::String || typeInfo.type == ParsedType::WString)
-		return "\"\"";
-	else // Some class type
-		return "null";
-
-	assert(false);
-	return ""; // Shouldn't be reached
 }
 
 MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
@@ -1265,7 +1208,14 @@ void postProcessFileInfos()
 					fileInfo.second.referencedHeaderIncludes.push_back(baseTypeInfo.destFile);
 				}
 
-				fileInfo.second.referencedSourceIncludes.push_back(typeInfo.declFile);
+				if (classInfo.templParams.empty())
+					fileInfo.second.referencedSourceIncludes.push_back(typeInfo.declFile);
+				else
+				{
+					// Templated classes need to be included in header, so the linker doesn't instantiate them multiple times for different libraries
+					// (in case template is exported).
+					fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
+				}
 			}
 
 			for(auto& structInfo : fileInfo.second.structInfos)
@@ -1609,7 +1559,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
 
 			if (returnValue)
-				postCallActions << "\t\t" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
+				postCallActions << "\t\t\t" << name << " = " << scriptType << "::create(" << argName << ");\n";
 			else if (isOutput(flags))
 				postCallActions << "\t\t*" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
 			else
@@ -1635,22 +1585,30 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 			{
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-				postCallActions << "\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				postCallActions << "\t\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				postCallActions << "\t\telse" << std::endl;
+				postCallActions << "\t\t\t" << name << " = nullptr;" << std::endl;
 			}
 			else if (isOutput(flags))
 			{
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-				postCallActions << "\t\t*" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				postCallActions << "\t\t\t*" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				postCallActions << "\t\telse" << std::endl;
+				postCallActions << "\t\t\t*" << name << " = nullptr;" << std::endl;
+
 			}
 			else
 			{
 				preCallActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
 				preCallActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
 
+				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				if (isHandleType(paramTypeInfo.type))
-					preCallActions << "\t\t" << argName << " = " << scriptName << "->getHandle();" << std::endl;
+					preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getHandle();" << std::endl;
 				else
-					preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
+					preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
 			}
 		}
 		break;
@@ -1683,18 +1641,23 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		if (!isOutput(flags) && !returnValue)
 		{
 			std::string arrayName = "array" + name;
-			preCallActions << "\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
-			preCallActions << "\t\t" << argType << " " << argName << "(" << arrayName << ".size());" << std::endl;
 
-			preCallActions << "\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
-			preCallActions << "\t\t{" << std::endl;
+			preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
+			preCallActions << "\t\tif(" << name << " != nullptr)\n";
+			preCallActions << "\t\t{\n";
+
+			preCallActions << "\t\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
+			preCallActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
+
+			preCallActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
+			preCallActions << "\t\t\t{" << std::endl;
 
 			switch (paramTypeInfo.type)
 			{
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
-				preCallActions << "\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
+				preCallActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
 				break;
 			case ParsedType::ScriptObject:
 				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
@@ -1704,12 +1667,12 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string enumType;
 				mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
-				preCallActions << "\t\t\t" << argName << "[i] = (" << entryType << ")" << arrayName << ".get<" << enumType << ">(i);" << std::endl;
+				preCallActions << "\t\t\t\t" << argName << "[i] = (" << entryType << ")" << arrayName << ".get<" << enumType << ">(i);" << std::endl;
 				break;
 			}
 			case ParsedType::Struct:
 
-				preCallActions << "\t\t\t" << argName << "[i] = ";
+				preCallActions << "\t\t\t\t" << argName << "[i] = ";
 
 				if (isComplexStruct(flags))
 				{
@@ -1726,22 +1689,24 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			default: // Some object type
 			{
 				std::string scriptName = "script" + name;
-				preCallActions << "\t\t\t" << entryType << "* " << scriptName << ";" << std::endl;
-				preCallActions << "\t\t\t" << scriptName << " = " << entryType << "::toNative(" << arrayName << ".get<MonoObject*>(i));" << std::endl;
-				preCallActions << "\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				preCallActions << "\t\t\t\t" << entryType << "* " << scriptName << ";" << std::endl;
+				preCallActions << "\t\t\t\t" << scriptName << " = " << entryType << "::toNative(" << arrayName << ".get<MonoObject*>(i));" << std::endl;
+				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 
 				if (isHandleType(paramTypeInfo.type))
-					preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();" << std::endl;
+					preCallActions << "\t\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();" << std::endl;
 				else
-					preCallActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();" << std::endl;
+					preCallActions << "\t\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();" << std::endl;
 			}
 			break;
 			}
 
-			preCallActions << "\t\t}" << std::endl;
+			preCallActions << "\t\t\t}" << std::endl;
 
 			if (!isLast)
 				preCallActions << std::endl;
+
+			preCallActions << "\t\t}\n";
 		}
 		else
 		{
@@ -1796,7 +1761,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string scriptName = "script" + name;
 
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, argName + "[i]", "\t\t\t");
-				postCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+				postCallActions << "\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				postCallActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+				postCallActions << "\t\t\telse" << std::endl;
+				postCallActions << "\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
 			}
 			break;
 			}
@@ -1898,10 +1866,17 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				if(isSrcValue(flags) || isSrcPointer(flags))
 				{
 					std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
-					preActions << "\t\t" << tmpType << " " << arg << "copy ";
+					preActions << "\t\t" << tmpType << " " << arg << "copy;\n";
 
 					// Note: Assuming a copy constructor exists
-					preActions << " = bs_shared_ptr_new<" << typeName << ">(value." << name << ");\n";
+					if (isSrcPointer(flags))
+					{
+						preActions << "\t\tif(value." << name << " != nullptr)\n";
+						preActions << "\t\t\t" << arg << "copy = bs_shared_ptr_new<" << typeName << ">(*value." << name << ");\n";
+					}
+					else
+						preActions << "\t\t" << arg << "copy = bs_shared_ptr_new<" << typeName << ">(value." << name << ");\n";
+
 					preActions << "\t\t" << arg << " = " << scriptType << "::create(" << arg << "copy);" << std::endl;
 				}
 				else if(isSrcSPtr(flags))
@@ -1917,7 +1892,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				std::string scriptName = "script" + name;
 				preActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
 				preActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(value." << name << ");" << std::endl;
-				preActions << "\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
+
+				preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				preActions << "\t\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
 
 				// Cast to the source type from SPtr
 				if (isSrcValue(flags))
@@ -1940,7 +1917,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, "value." + name);
 
 				preActions << "\t\tMonoObject* " << arg << ";\n";
-				preActions << "\t\t" << arg << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
+				preActions << "\t\t\t" << arg << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				preActions << "\t\telse\n";
+				preActions << "\t\t\t" << arg << " = nullptr;\n";
 			}
 			else
 			{
@@ -1949,11 +1929,12 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				
 				preActions << "\t\t" << scriptType << "* " << scriptName << ";" << std::endl;
 				preActions << "\t\t" << scriptName << " = " << scriptType << "::toNative(value." << name << ");" << std::endl;
+				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
 
 				if (isHandleType(paramTypeInfo.type))
-					preActions << "\t\t" << arg << " = " << scriptName << "->getHandle();" << std::endl;
+					preActions << "\t\t\t" << arg << " = " << scriptName << "->getHandle();" << std::endl;
 				else
-					preActions << "\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
+					preActions << "\t\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
 			}
 
 			if(!isSrcGHandle(flags) && !isSrcRHandle(flags))
@@ -1989,18 +1970,22 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		if (!toInterop)
 		{
 			std::string arrayName = "array" + name;
-			preActions << "\t\tScriptArray " << arrayName << "(value." << name << ");" << std::endl;
-			preActions << "\t\t" << argType << " " << argName << "(" << arrayName << ".size());" << std::endl;
+			preActions << "\t\t" << argType << " " << argName << ";" << std::endl;
 
-			preActions << "\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
-			preActions << "\t\t{" << std::endl;
+			preActions << "\t\tif(value." << name << " != nullptr)\n";
+			preActions << "\t\t{\n";
+			preActions << "\t\t\tScriptArray " << arrayName << "(value." << name << ");" << std::endl;
+			preActions << "\t\t\t" << argName << "resize(" << arrayName << ".size());" << std::endl;
+
+			preActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
+			preActions << "\t\t\t{" << std::endl;
 
 			switch (paramTypeInfo.type)
 			{
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
-				preActions << "\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
+				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
 				break;
 			case ParsedType::ScriptObject:
 				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
@@ -2010,28 +1995,29 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				std::string enumType;
 				mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
-				preActions << "\t\t\t" << argName << "[i] = (" << entryType << ")" << arrayName << ".get<" << enumType << ">(i);" << std::endl;
+				preActions << "\t\t\t\t" << argName << "[i] = (" << entryType << ")" << arrayName << ".get<" << enumType << ">(i);" << std::endl;
 				break;
 			}
 			case ParsedType::Struct:
-				preActions << "\t\t\t" << argName << "[i] = " << arrayName << ".get<" << typeName << ">(i);" << std::endl;
+				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << typeName << ">(i);" << std::endl;
 				break;
 			default: // Some object type
 			{
 				std::string scriptName = "script" + name;
-				preActions << "\t\t\t" << entryType << "* " << scriptName << ";" << std::endl;
-				preActions << "\t\t\t" << scriptName << " = " << entryType << "::toNative(" << arrayName << ".get<MonoObject*>(i));" << std::endl;
-				preActions << "\t\t\tif(scriptName != nullptr)" << std::endl;
+				preActions << "\t\t\t\t" << entryType << "* " << scriptName << ";" << std::endl;
+				preActions << "\t\t\t\t" << scriptName << " = " << entryType << "::toNative(" << arrayName << ".get<MonoObject*>(i));" << std::endl;
+				preActions << "\t\t\t\tif(scriptName != nullptr)" << std::endl;
 
 				if (isHandleType(paramTypeInfo.type))
-					preActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();" << std::endl;
+					preActions << "\t\t\t\t\t" << argName << "[i] = " << scriptName << "->getHandle();" << std::endl;
 				else
-					preActions << "\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();" << std::endl;
+					preActions << "\t\t\t\t\t" << argName << "[i] = " << scriptName << "->getInternal();" << std::endl;
 			}
 			break;
 			}
 
-			preActions << "\t\t}" << std::endl;
+			preActions << "\t\t\t}" << std::endl;
+			preActions << "\t\t}\n";
 		}
 		else
 		{
@@ -2072,7 +2058,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				std::string scriptName = "script" + name;
 
 				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, "value." + name + "[i]", "\t\t\t");
-				preActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
+				preActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+				preActions << "\t\t\telse\n";
+				preActions << "\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
 			}
 			break;
 			}
@@ -2164,7 +2153,8 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			std::string scriptType = getScriptInteropType(typeName);
 
 			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
-			preCallActions << "\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+			preCallActions << "\t\tif(" << scriptName << " != nullptr)\n";
+			preCallActions << "\t\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
 		}
 		break;
 		}
@@ -2231,7 +2221,10 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << ");\n";
 			break;
 		case ParsedType::ScriptObject:
-			preCallActions << "\t\t\t" << arrayName << ".set(i, " << name << "[i]->getManagedInstance());" << std::endl;
+			preCallActions << "\t\t\tif(" << name << "[i] != nullptr)\n";
+			preCallActions << "\t\t\t\t" << arrayName << ".set(i, " << name << "[i]->getManagedInstance());" << std::endl;
+			preCallActions << "\t\t\telse\n";
+			preCallActions << "\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
 			break;
 		case ParsedType::Class:
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << name << "[i]));" << std::endl;
@@ -2241,7 +2234,10 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			std::string scriptName = "script" + name;
 
 			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, name + "[i]", "\t\t\t");
+			preCallActions << "\t\t\tif(" << scriptName << "[i] != nullptr)\n";
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+			preCallActions << "\t\t\telse\n";
+			preCallActions << "\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
 		}
 		break;
 		}
@@ -2809,6 +2805,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		{
 			output << "\tMonoObject* " << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
 			output << "\t{" << std::endl;
+			output << "\t\tif(value == nullptr) return nullptr; " << std::endl;
+			output << std::endl;
 
 			output << ctorParamsInit.str();
 			output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(\"" << ctorSignature.str() << "\", ctorParams);" << std::endl;
@@ -3372,7 +3370,14 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (!entry.getter.empty())
 		{
 			if (canBeReturned(propTypeInfo.type, entry.typeFlags))
-				properties << "\t\t\tget { return Internal_" << entry.getter << "(mCachedPtr); }" << std::endl;
+			{
+				properties << "\t\t\tget { return Internal_" << entry.getter << "(";
+
+				if (!entry.isStatic && !isModule)
+					properties << "mCachedPtr";
+
+				properties << "); }" << std::endl;
+			}
 			else
 			{
 				properties << "\t\t\tget" << std::endl;
@@ -3399,7 +3404,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				properties << "mCachedPtr, ";
 
 			if(isPlainStruct(propTypeInfo.type, entry.typeFlags))
-				properties << "ref " << std::endl;
+				properties << "ref ";
 
 			properties << "value); }" << std::endl;
 		}

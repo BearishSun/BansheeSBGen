@@ -631,6 +631,11 @@ inline bool isHandleType(ParsedType type)
 	return type == ParsedType::Resource || type == ParsedType::SceneObject || type == ParsedType::Component;
 }
 
+inline bool isPlainStruct(ParsedType type, int flags)
+{
+	return type == ParsedType::Struct && !isArray(flags);
+}
+
 inline bool canBeReturned(ParsedType type, int flags)
 {
 	if (isOutput(flags))
@@ -651,6 +656,59 @@ inline bool endsWith(const std::string& str, const std::string& end)
 		return (0 == str.compare(str.length() - end.length(), end.length(), end));
 
 	return false;
+}
+
+inline std::string cleanTemplParams(const std::string& name)
+{
+	std::string cleanName;
+	int lBracket = name.find_first_of('<');
+	if (lBracket != -1)
+	{
+		cleanName = name.substr(0, lBracket);
+
+		int rBracket = name.find_last_of('>');
+		if (rBracket != -1 && rBracket > lBracket)
+			cleanName += name.substr(lBracket + 1, rBracket - lBracket - 1);
+		else
+			cleanName += name.substr(lBracket + 1, name.size() - rBracket - 1);
+	}
+	else
+		cleanName = name;
+
+	return cleanName;
+}
+
+inline std::string getStructInteropType(const std::string& name)
+{
+	return "__" + cleanTemplParams(name) + "Interop";
+}
+
+inline bool isValidStructType(UserTypeInfo& typeInfo, int flags)
+{
+	if (isOutput(flags))
+		return false;
+
+	if (typeInfo.type == ParsedType::ScriptObject)
+		return false;
+
+	return true;
+}
+
+inline std::string getDefaultValue(const std::string& typeName, const UserTypeInfo& typeInfo)
+{
+	if (typeInfo.type == ParsedType::Builtin)
+		return "0";
+	else if (typeInfo.type == ParsedType::Enum)
+		return "(" + typeInfo.scriptName + ")0";
+	else if (typeInfo.type == ParsedType::Struct)
+		return "new " + typeInfo.scriptName + "()";
+	else if (typeInfo.type == ParsedType::String || typeInfo.type == ParsedType::WString)
+		return "\"\"";
+	else // Some class type
+		return "null";
+
+	assert(false);
+	return ""; // Shouldn't be reached
 }
 
 void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder);
