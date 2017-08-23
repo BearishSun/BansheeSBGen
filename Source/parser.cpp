@@ -1181,7 +1181,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	if (builtinType->getKind() != BuiltinType::Kind::Int)
 		mapBuiltinTypeToCSType(builtinType->getKind(), enumEntry.explicitType);
 
-	std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
+	std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
 	std::string destFile = "BsScript" + parsedEnumInfo.exportFile.str() + ".generated.h";
 
 	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, destFile);
@@ -1545,7 +1545,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			structInfo.fields.push_back(fieldInfo);
 		}
 
-		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
+		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
 		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
 		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, destFile);
 
@@ -1591,7 +1591,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		ParsedType classType = getObjectType(decl);
 
-		std::string declFile = sys::path::filename(astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin()));
+		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
 		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
 
 		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, destFile);

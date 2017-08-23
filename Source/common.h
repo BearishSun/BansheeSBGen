@@ -58,7 +58,8 @@ enum class TypeFlags
 	ScriptObject = 1 << 10,
 	Function = 1 << 11,
 	ComplexStruct = 1 << 12,
-	FlagsEnum = 1 << 13
+	FlagsEnum = 1 << 13,
+	ReferencesBase = 1 << 14
 };
 
 enum class MethodFlags
@@ -619,6 +620,11 @@ inline bool isSrcGHandle(int flags)
 inline bool isComplexStruct(int flags)
 {
 	return (flags & (int)TypeFlags::ComplexStruct) != 0;
+}
+
+inline bool isBaseParam(int flags)
+{
+	return (flags & (int)TypeFlags::ReferencesBase) != 0;
 }
 
 inline bool isStruct(int flags)

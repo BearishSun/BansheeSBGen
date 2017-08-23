@@ -78,22 +78,22 @@ public:
 int main(int argc, const char** argv)
 {
 	// Note: I could auto-generate C++ wrappers for these types
-	cppToCsTypeMap["Vector2"] = UserTypeInfo("Vector2", ParsedType::Struct, "BsVector2.h", "BsScriptVector.h");
-	cppToCsTypeMap["Vector3"] = UserTypeInfo("Vector3", ParsedType::Struct, "BsVector3.h", "BsScriptVector.h");
-	cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "BsVector4.h", "BsScriptVector.h");
-	cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "BsMatrix3.h", "");
-	cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "BsMatrix4.h", "");
-	cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "BsQuaternion.h", "BsScriptQuaternion.h");
-	cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "BsRadian.h", "");
-	cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "BsDegree.h", "");
-	cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "BsColor.h", "BsScriptColor.h");
-	cppToCsTypeMap["AABox"] = UserTypeInfo("AABox", ParsedType::Struct, "BsAABox.h", "");
-	cppToCsTypeMap["Sphere"] = UserTypeInfo("Sphere", ParsedType::Struct, "BsSphere.h", "");
-	cppToCsTypeMap["Capsule"] = UserTypeInfo("Capsule", ParsedType::Struct, "BsCapsule.h", "");
-	cppToCsTypeMap["Ray"] = UserTypeInfo("Ray", ParsedType::Struct, "BsRay.h", "");
-	cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "BsVector2I.h", "BsScriptVector2I.h");
-	cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "BsRect2.h", "");
-	cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "BsRect2I.h", "");
+	cppToCsTypeMap["Vector2"] = UserTypeInfo("Vector2", ParsedType::Struct, "Math/BsVector2.h", "Wrappers/BsScriptVector.h");
+	cppToCsTypeMap["Vector3"] = UserTypeInfo("Vector3", ParsedType::Struct, "Math/BsVector3.h", "Wrappers/BsScriptVector.h");
+	cppToCsTypeMap["Vector4"] = UserTypeInfo("Vector4", ParsedType::Struct, "Math/BsVector4.h", "Wrappers/BsScriptVector.h");
+	cppToCsTypeMap["Matrix3"] = UserTypeInfo("Matrix3", ParsedType::Struct, "Math/BsMatrix3.h", "");
+	cppToCsTypeMap["Matrix4"] = UserTypeInfo("Matrix4", ParsedType::Struct, "Math/BsMatrix4.h", "");
+	cppToCsTypeMap["Quaternion"] = UserTypeInfo("Quaternion", ParsedType::Struct, "Math/BsQuaternion.h", "Wrappers/BsScriptQuaternion.h");
+	cppToCsTypeMap["Radian"] = UserTypeInfo("Radian", ParsedType::Struct, "Math/BsRadian.h", "");
+	cppToCsTypeMap["Degree"] = UserTypeInfo("Degree", ParsedType::Struct, "Math/BsDegree.h", "");
+	cppToCsTypeMap["Color"] = UserTypeInfo("Color", ParsedType::Struct, "Image/BsColor.h", "Wrappers/BsScriptColor.h");
+	cppToCsTypeMap["AABox"] = UserTypeInfo("AABox", ParsedType::Struct, "Math/BsAABox.h", "");
+	cppToCsTypeMap["Sphere"] = UserTypeInfo("Sphere", ParsedType::Struct, "Math/BsSphere.h", "");
+	cppToCsTypeMap["Capsule"] = UserTypeInfo("Capsule", ParsedType::Struct, "Math/BsCapsule.h", "");
+	cppToCsTypeMap["Ray"] = UserTypeInfo("Ray", ParsedType::Struct, "Math/BsRay.h", "");
+	cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "Math/BsVector2I.h", "Wrappers/BsScriptVector2I.h");
+	cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "Math/BsRect2.h", "");
+	cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "Math/BsRect2I.h", "");
 
 	CommonOptionsParser op(argc, argv, OptCategory);
 	ClangTool Tool(op.getCompilations(), op.getSourcePathList());
