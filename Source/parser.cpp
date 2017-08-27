@@ -1052,6 +1052,20 @@ void ScriptExportParser::parseComments(const CXXRecordDecl* decl)
 			}
 		}
 
+		for (auto I = curDecl->field_begin(); I != curDecl->field_end(); ++I)
+		{
+			if (const auto* fd = dyn_cast<FieldDecl>(*I))
+			{
+				CommentInfo fieldCommentInfo;
+				fieldCommentInfo.isFunction = false;
+				fieldCommentInfo.namespaces = commentInfo.namespaces;
+				fieldCommentInfo.name = commentInfo.name + "::" + I->getDeclName().getAsString();
+				fieldCommentInfo.fullName = commentInfo.fullName + "::" + I->getDeclName().getAsString();
+
+				parseComments(fd, fieldCommentInfo);
+			}
+		}
+
 		auto iter = curDecl->bases_begin();
 		while (iter != curDecl->bases_end())
 		{
