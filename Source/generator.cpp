@@ -3,7 +3,7 @@
 
 std::string getInteropCppVarType(const std::string& typeName, ParsedType type, int flags, bool forStruct = false)
 {
-	if (isArray(flags))
+	if (isArrayOrVector(flags))
 	{
 		if (isOutput(flags) && !forStruct)
 			return "MonoArray**";
@@ -87,7 +87,7 @@ std::string getCSVarType(const std::string& typeName, ParsedType type, int flags
 
 	output << typeName;
 
-	if (arraySuffixes && isArray(flags))
+	if (arraySuffixes && isArrayOrVector(flags))
 		output << "[]";
 
 	return output.str();
@@ -505,6 +505,11 @@ void gatherIncludes(const StructInfo& structInfo, IncludesInfo& output)
 					std::string name = "__" + fieldInfo.type;
 					output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, false);
 				}
+
+				if (fieldTypeInfo.type == ParsedType::Resource)
+					output.requiresResourceManager = true;
+				else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
+					output.requiresGameObjectManager = true;
 			}
 		}
 	}
@@ -1152,7 +1157,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
 
-				if(isArray(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
+				if(isArrayOrVector(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
 				{
 					structInfo.requiresInterop = true;
 					break;
@@ -1311,6 +1316,9 @@ void postProcessFileInfos()
 			if(includesInfo.requiresResourceManager)
 				fileInfo.second.referencedSourceIncludes.push_back("BsScriptResourceManager.h");
 
+			if(includesInfo.requiresGameObjectManager)
+				fileInfo.second.referencedSourceIncludes.push_back("BsScriptGameObjectManager.h");
+
 			for (auto& entry : includesInfo.includes)
 			{
 				if (entry.second.sourceInclude)
@@ -1434,13 +1442,10 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 		if (!isSrcValue(I->flags) && !isOutput(I->flags))
 			output << "const ";
 
-		if (isArray(I->flags))
+		if (isVector(I->flags))
 			output << "std::vector<";
 
 		output << getCppVarType(I->type, paramTypeInfo.type, I->flags);
-
-		if (isArray(I->flags))
-			output << ">";
 
 		if(!isSrcValue(I->flags))
 		{
@@ -1450,7 +1455,13 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 				output << "&";
 		}
 
+		if (isVector(I->flags))
+			output << ">";
+
 		output << " p" << idx;
+
+		if (isArray(I->flags))
+			output << "[" << I->arraySize << "]";
 
 		if ((I + 1) != eventInfo.paramInfos.end())
 			output << ", ";
@@ -1497,13 +1508,13 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 	}
 	else if (type == ParsedType::Component)
 	{
-		output << indent << scriptType << "* " << scriptName << ";" << std::endl;
+		output << indent << "ScriptComponentBase* " << scriptName << ";" << std::endl;
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
 			argName << ");" << std::endl;
 	}
 	else if (type == ParsedType::SceneObject)
 	{
-		output << indent << scriptType << "* " << scriptName << ";" << std::endl;
+		output << indent << "ScriptComponentBase* " << scriptName << ";" << std::endl;
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getOrCreateScriptSceneObject(" <<
 			argName << ");" << std::endl;
 	}
@@ -1513,12 +1524,12 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 	return output.str();
 }
 
-std::string generateMethodBodyBlockForParam(const std::string& name, const std::string& typeName, int flags,
+std::string generateMethodBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, unsigned arraySize,
 	bool isLast, bool returnValue, std::stringstream& preCallActions, std::stringstream& postCallActions)
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
 
-	if (!isArray(flags))
+	if (!isArrayOrVector(flags))
 	{
 		std::string argName;
 
@@ -1710,19 +1721,31 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			break;
 		}
 
-		std::string argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags) + ">";
+		std::string argType;
+		
+		if (isVector(flags))
+			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags) + ">";
+		else
+			argType = getCppVarType(typeName, paramTypeInfo.type, flags);
+
 		std::string argName = "vec" + name;
+
+		preCallActions << "\t\t" << argType << " " << argName;
+		if (isArray(flags))
+			preCallActions << "[" << arraySize << "]";
+		preCallActions << ";" << std::endl;
 
 		if (!isOutput(flags) && !returnValue)
 		{
 			std::string arrayName = "array" + name;
 
-			preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
 			preCallActions << "\t\tif(" << name << " != nullptr)\n";
 			preCallActions << "\t\t{\n";
 
 			preCallActions << "\t\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
-			preCallActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
+
+			if(isVector(flags))
+				preCallActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
 
 			preCallActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
 			preCallActions << "\t\t\t{" << std::endl;
@@ -1781,12 +1804,18 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		}
 		else
 		{
-			preCallActions << "\t\t" << argType << " " << argName << ";" << std::endl;
-
 			std::string arrayName = "array" + name;
+
+			postCallActions << "\t\tint arraySize" << name << " = ";
+			if (isVector(flags))
+				postCallActions << "(int)" << argName << ".size()";
+			else
+				postCallActions << arraySize;
+			postCallActions << ";\n";
+
 			postCallActions << "\t\tScriptArray " << arrayName;
-			postCallActions << " = " << "ScriptArray::create<" << entryType << ">((int)" << argName << ".size());" << std::endl;
-			postCallActions << "\t\tfor(int i = 0; i < (int)" << argName << ".size(); i++)" << std::endl;
+			postCallActions << " = " << "ScriptArray::create<" << entryType << ">(arraySize" << name << ");" << std::endl;
+			postCallActions << "\t\tfor(int i = 0; i < arraySize" << name << "; i++)" << std::endl;
 			postCallActions << "\t\t{" << std::endl;
 
 			switch (paramTypeInfo.type)
@@ -1852,11 +1881,11 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 	}
 }
 
-std::string generateFieldConvertBlock(const std::string& name, const std::string& typeName, int flags, bool toInterop, std::stringstream& preActions)
+std::string generateFieldConvertBlock(const std::string& name, const std::string& typeName, int flags, unsigned arraySize, bool toInterop, std::stringstream& preActions)
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
 
-	if (!isArray(flags))
+	if (!isArrayOrVector(flags))
 	{
 		std::string arg;
 
@@ -2028,18 +2057,28 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			break;
 		}
 
-		std::string argType = "Vector<" + typeName + ">";
+		std::string argType;
+		if(isVector(flags))
+			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags) + ">";
+		else
+			argType = getCppVarType(typeName, paramTypeInfo.type, flags);
+
 		std::string argName = "vec" + name;
 
 		if (!toInterop)
 		{
 			std::string arrayName = "array" + name;
-			preActions << "\t\t" << argType << " " << argName << ";" << std::endl;
+			preActions << "\t\t" << argType << " " << argName;
+			if (isArray(flags))
+				preActions << "[" << arraySize << "]";
+			preActions << ";" << std::endl;
 
 			preActions << "\t\tif(value." << name << " != nullptr)\n";
 			preActions << "\t\t{\n";
 			preActions << "\t\t\tScriptArray " << arrayName << "(value." << name << ");" << std::endl;
-			preActions << "\t\t\t" << argName << "resize(" << arrayName << ".size());" << std::endl;
+
+			if(isVector(flags))
+				preActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
 
 			preActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
 			preActions << "\t\t\t{" << std::endl;
@@ -2080,12 +2119,19 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		}
 		else
 		{
+			preActions << "\t\tint arraySize" << name << " = ";
+			if (isVector(flags))
+				preActions << "(int)value." << name << ".size()";
+			else
+				preActions << arraySize;
+			preActions << ";\n";
+
 			preActions << "\t\tMonoArray* " << argName << ";" << std::endl;
 
 			std::string arrayName = "array" + name;
 			preActions << "\t\tScriptArray " << arrayName;
-			preActions << " = " << "ScriptArray::create<" << entryType << ">((int)value." << name << ".size());" << std::endl;
-			preActions << "\t\tfor(int i = 0; i < (int)value." << name << ".size(); i++)" << std::endl;
+			preActions << " = " << "ScriptArray::create<" << entryType << ">(arraySize" << name << ");" << std::endl;
+			preActions << "\t\tfor(int i = 0; i < arraySize" << name << "; i++)" << std::endl;
 			preActions << "\t\t{" << std::endl;
 
 			switch (paramTypeInfo.type)
@@ -2133,11 +2179,11 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 	}
 }
 
-std::string generateEventCallbackBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, std::stringstream& preCallActions)
+std::string generateEventCallbackBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, unsigned arraySize, std::stringstream& preCallActions)
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
 
-	if (!isArray(flags))
+	if (!isArrayOrVector(flags))
 	{
 		std::string argName;
 
@@ -2242,10 +2288,17 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		std::string argName = "vec" + name;
 		preCallActions << "\t\tMonoArray* " << argName << ";" << std::endl;
 
+		preCallActions << "\t\tint arraySize" << name << " = ";
+		if (isVector(flags))
+			preCallActions << "(int)value." << name << ".size()";
+		else
+			preCallActions << arraySize;
+		preCallActions << ";\n";
+
 		std::string arrayName = "array" + name;
 		preCallActions << "\t\tScriptArray " << arrayName;
-		preCallActions << " = " << "ScriptArray::create<" << entryType << ">((int)" << name << ".size());" << std::endl;
-		preCallActions << "\t\tfor(int i = 0; i < (int)" << name << ".size(); i++)" << std::endl;
+		preCallActions << " = " << "ScriptArray::create<" << entryType << ">(arraySize" << name << ");" << std::endl;
+		preCallActions << "\t\tfor(int i = 0; i < arraySize" << name << "; i++)" << std::endl;
 		preCallActions << "\t\t{" << std::endl;
 
 		switch (paramTypeInfo.type)
@@ -2336,7 +2389,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 			postCallActions << "\t\t" << returnType << " __output;" << std::endl;
 
 			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-				methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
+				methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
 
 			returnAssignment = argName + " = ";
 			returnStmt = "\t\treturn __output;";
@@ -2347,10 +2400,10 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 	{
 		bool isLast = (I + 1) == methodInfo.paramInfos.end();
 
-		std::string argName = generateMethodBodyBlockForParam(I->name, I->type, I->flags, isLast, false,
+		std::string argName = generateMethodBodyBlockForParam(I->name, I->type, I->flags, I->arraySize, isLast, false,
 			preCallActions, postCallActions);
 
-		if (!isArray(I->flags))
+		if (!isArrayOrVector(I->flags))
 		{
 			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
@@ -2366,7 +2419,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 	if (returnAsParameter)
 	{
 		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-			methodInfo.returnInfo.flags, true, true, preCallActions, postCallActions);
+			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
 
 		returnAssignment = argName + " = ";
 	}
@@ -2444,7 +2497,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		if (!methodInfo.returnInfo.type.empty())
 		{
 			// Dereference input if needed
-			if (returnTypeInfo.type == ParsedType::Class && !isArray(methodInfo.returnInfo.flags))
+			if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
 			{
 				if (isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || isSrcValue(methodInfo.returnInfo.flags))
 					returnAssignment = "*" + returnAssignment;
@@ -2487,9 +2540,9 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 		bool isLast = (I + 1) == eventInfo.paramInfos.end();
 
 		std::string name = "p" + std::to_string(idx);
-		std::string argName = generateEventCallbackBodyBlockForParam(name, I->type, I->flags, preCallActions);
+		std::string argName = generateEventCallbackBodyBlockForParam(name, I->type, I->flags, I->arraySize, preCallActions);
 
-		if (!isArray(I->flags))
+		if (!isArrayOrVector(I->flags))
 		{
 			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
@@ -3086,8 +3139,18 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 		output << "\t{\n";
 
 		output << "\t\t" << structInfo.name << " output;\n";
-		for(auto& fieldInfo : structInfo.fields)
-			output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, false, output) << ";\n";
+		for (auto& fieldInfo : structInfo.fields)
+		{
+			// Arrays can be assigned, so copy them entry by entry
+			if(isArray(fieldInfo.flags))
+			{
+				output << "\t\tauto tmp" << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, false, output) << ";\n";
+				output << "\t\tfor(int i = 0; i < " << fieldInfo.arraySize << "; ++i)\n";
+				output << "\t\t\toutput." << fieldInfo.name << "[i] = tmp" << fieldInfo.name << "[i];\n";
+			}
+			else
+				output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, false, output) << ";\n";
+		}
 
 		output << "\n";
 		output << "\t\treturn output;\n";
@@ -3099,7 +3162,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 
 		output << "\t\t" << structInfo.interopName << " output;\n";
 		for(auto& fieldInfo : structInfo.fields)
-			output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, true, output) << ";\n";
+			output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, true, output) << ";\n";
 
 		output << "\n";
 		output << "\t\treturn output;\n";
@@ -3709,7 +3772,7 @@ std::string generateCSStruct(StructInfo& input)
 		output << "\t\tpublic ";
 
 		output << typeInfo.scriptName;
-		if (isArray(fieldInfo.flags))
+		if (isArrayOrVector(fieldInfo.flags))
 			output << "[]";
 
 		output << " ";

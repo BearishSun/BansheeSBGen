@@ -47,7 +47,7 @@ enum class TypeFlags
 {
 	Builtin = 1 << 0,
 	Output = 1 << 1,
-	Array = 1 << 2,
+	Vector = 1 << 2,
 	SrcPtr = 1 << 3,
 	SrcSPtr = 1 << 4,
 	SrcRef = 1 << 5,
@@ -59,7 +59,8 @@ enum class TypeFlags
 	Function = 1 << 11,
 	ComplexStruct = 1 << 12,
 	FlagsEnum = 1 << 13,
-	ReferencesBase = 1 << 14
+	ReferencesBase = 1 << 14,
+	Array = 1 << 15
 };
 
 enum class MethodFlags
@@ -119,6 +120,7 @@ struct VarInfo
 {
 	std::string name;
 	std::string type;
+	unsigned arraySize;
 
 	std::string defaultValue;
 	int flags;
@@ -127,6 +129,7 @@ struct VarInfo
 struct ReturnInfo
 {
 	std::string type;
+	unsigned arraySize;
 	int flags;
 };
 
@@ -305,6 +308,7 @@ struct IncludeInfo
 struct IncludesInfo
 {
 	bool requiresResourceManager = false;
+	bool requiresGameObjectManager = false;
 	std::unordered_map<std::string, IncludeInfo> includes;
 	std::unordered_map<std::string, ForwardDeclInfo> fwdDecls;
 };
@@ -579,6 +583,16 @@ inline bool isArray(int flags)
 	return (flags & (int)TypeFlags::Array) != 0;
 }
 
+inline bool isVector(int flags)
+{
+	return (flags & (int)TypeFlags::Vector) != 0;
+}
+
+inline bool isArrayOrVector(int flags)
+{
+	return (flags & ((int)TypeFlags::Vector | (int)TypeFlags::Array)) != 0;
+}
+
 inline bool isFlagsEnum(int flags)
 {
 	return (flags & (int)TypeFlags::FlagsEnum) != 0;
@@ -639,7 +653,7 @@ inline bool isHandleType(ParsedType type)
 
 inline bool isPlainStruct(ParsedType type, int flags)
 {
-	return type == ParsedType::Struct && !isArray(flags);
+	return type == ParsedType::Struct && !isArrayOrVector(flags);
 }
 
 inline bool canBeReturned(ParsedType type, int flags)
@@ -647,7 +661,7 @@ inline bool canBeReturned(ParsedType type, int flags)
 	if (isOutput(flags))
 		return false;
 
-	if (isArray(flags))
+	if (isArrayOrVector(flags))
 		return true;
 
 	if (type == ParsedType::Struct)

@@ -63,9 +63,10 @@ std::string getNamespace(const RecordDecl* decl)
 	return nsName;
 }
 
-bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, bool returnValue)
+bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue)
 {
 	typeFlags = 0;
+	arraySize = 0;
 
 	QualType realType;
 	if (type->isPointerType())
@@ -87,9 +88,9 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 	else
 		realType = type;
 
+	// Check for arrays
 	if (realType->isStructureOrClassType())
 	{
-		// Check for arrays
 		// Note: Not supporting nested arrays
 		const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
 		int numArgs = 0;
@@ -108,8 +109,19 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			if (sourceTypeName == "vector" && nsName == "std")
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::Array;
+				typeFlags |= (int)TypeFlags::Vector;
 			}
+		}
+	}
+	else if(realType->isArrayType())
+	{
+		const ConstantArrayType* arrayType = dyn_cast<ConstantArrayType>(astContext->getAsArrayType(realType));
+		if (arrayType)
+		{
+			realType = arrayType->getElementType();
+			arraySize = (unsigned)arrayType->getSize().getZExtValue();
+
+			typeFlags |= (int)TypeFlags::Array;
 		}
 	}
 
@@ -135,7 +147,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			if (sourceTypeName == "vector" && nsName == "std")
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::Array;
+				typeFlags |= (int)TypeFlags::Vector;
 			}
 			
 			if(sourceTypeName == "Flags")
@@ -279,6 +291,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 struct ParsedTypeInfo
 {
 	std::string name;
+	unsigned arraySize;
 	int flags;
 };
 
@@ -322,12 +335,12 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 					for(unsigned int i = 0; i < numParams; i++)
 					{
 						QualType paramType = funcType->getParamType(i);
-						parseType(paramType, typeInfo.paramTypes[i].name, typeInfo.paramTypes[i].flags, false);
+						parseType(paramType, typeInfo.paramTypes[i].name, typeInfo.paramTypes[i].flags, typeInfo.paramTypes[i].arraySize, false);
 					}
 
 					QualType returnType = funcType->getReturnType();
 					if (!returnType->isVoidType())
-						parseType(returnType, typeInfo.returnType.name, typeInfo.returnType.flags, true);
+						parseType(returnType, typeInfo.returnType.name, typeInfo.returnType.flags, typeInfo.returnType.arraySize, true);
 					else
 						typeInfo.returnType.flags = 0;
 				}
@@ -1242,7 +1255,8 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 		{
 			std::string tmplArgTypeName;
 			int dummy;
-			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, false);
+			unsigned dummy2;
+			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, dummy2, false);
 
 			tmplArgsStream << tmplArgTypeName;
 
@@ -1264,7 +1278,8 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 
 			std::string tmplArgTypeName;
 			int dummy;
-			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, false);
+			unsigned dummy2;
+			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, dummy2, false);
 
 			if(templParams != nullptr)
 				templParams->push_back({ tmplArgTypeName });
@@ -1365,7 +1380,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					paramInfo.name = paramDecl->getName();
 
 					std::string typeName;
-					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
+					unsigned arraySize;
+					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
 					{
 						outs() << "Error: Unable to detect type for constructor parameter \"" << paramDecl->getName().str()
 							<< "\". Skipping.\n";
@@ -1534,7 +1550,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			}
 
 			std::string typeName;
-			if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags))
+			if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
 			{
 				outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
 					<< srcClassName << "\". Skipping field.\n";
@@ -1632,7 +1648,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					VarInfo paramInfo;
 					paramInfo.name = paramDecl->getName();
 
-					if (!parseType(paramType, paramInfo.type, paramInfo.flags))
+					if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
 					{
 						outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << srcClassName << "\"'s constructor.\n";
 						invalidParam = true;
@@ -1731,7 +1747,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				if (!returnType->isVoidType())
 				{
 					ReturnInfo returnInfo;
-					if (!parseType(returnType, returnInfo.type, returnInfo.flags, true))
+					if (!parseType(returnType, returnInfo.type, returnInfo.flags, returnInfo.arraySize, true))
 					{
 						outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 						continue;
@@ -1760,7 +1776,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						continue;
 					}
 
-					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, true))
+					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true))
 					{
 						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
@@ -1788,7 +1804,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					VarInfo paramInfo;
 					paramInfo.name = paramDecl->getName();
 
-					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags))
+					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
 					{
 						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 						continue;
@@ -1806,7 +1822,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				VarInfo paramInfo;
 				paramInfo.name = paramDecl->getName();
 
-				if (!parseType(paramType, paramInfo.type, paramInfo.flags))
+				if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
 				{
 					outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 					invalidParam = true;
