@@ -1544,35 +1544,67 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			}
 		}
 
-		for (auto I = decl->field_begin(); I != decl->field_end(); ++I)
+		std::stack<const CXXRecordDecl*> todo;
+		todo.push(decl);
+
+		while (!todo.empty())
 		{
-			FieldDecl* fieldDecl = *I;
-			FieldInfo fieldInfo;
-			fieldInfo.name = fieldDecl->getName();
+			const CXXRecordDecl* curDecl = todo.top();
+			todo.pop();
 
-			auto iterFind = defaultFieldValues.find(fieldDecl);
-			if (iterFind != defaultFieldValues.end())
-				fieldInfo.defaultValue = iterFind->second;
-
-			if (fieldDecl->hasInClassInitializer())
+			for (auto I = curDecl->field_begin(); I != curDecl->field_end(); ++I)
 			{
-				Expr* initExpr = fieldDecl->getInClassInitializer();
+				FieldDecl* fieldDecl = *I;
+				FieldInfo fieldInfo;
+				fieldInfo.name = fieldDecl->getName();
 
-				std::string inClassInitValue;
-				if (evaluateExpression(initExpr, inClassInitValue))
-					fieldInfo.defaultValue = inClassInitValue;
+				AnnotateAttr* fieldAttr = fieldDecl->getAttr<AnnotateAttr>();
+				if (fieldAttr != nullptr)
+				{
+					ParsedDeclInfo parsedFieldInfo;
+					parseExportAttribute(fieldAttr, srcClassName, parsedFieldInfo);
+
+					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::Exclude) != 0)
+					{
+						structInfo.requiresInterop = true;
+						continue;
+					}
+				}
+
+				auto iterFind = defaultFieldValues.find(fieldDecl);
+				if (iterFind != defaultFieldValues.end())
+					fieldInfo.defaultValue = iterFind->second;
+
+				if (fieldDecl->hasInClassInitializer())
+				{
+					Expr* initExpr = fieldDecl->getInClassInitializer();
+
+					std::string inClassInitValue;
+					if (evaluateExpression(initExpr, inClassInitValue))
+						fieldInfo.defaultValue = inClassInitValue;
+				}
+
+				std::string typeName;
+				if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
+				{
+					outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
+						<< srcClassName << "\". Skipping field.\n";
+					continue;
+				}
+
+				parseJavadocComments(fieldDecl, fieldInfo.documentation);
+				structInfo.fields.push_back(fieldInfo);
 			}
 
-			std::string typeName;
-			if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
+			auto iter = curDecl->bases_begin();
+			while (iter != curDecl->bases_end())
 			{
-				outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
-					<< srcClassName << "\". Skipping field.\n";
-				continue;
-			}
+				const CXXBaseSpecifier* baseSpec = iter;
+				CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
 
-			parseJavadocComments(fieldDecl, fieldInfo.documentation);
-			structInfo.fields.push_back(fieldInfo);
+				todo.push(baseDecl);
+				iter++;
+			}
 		}
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());

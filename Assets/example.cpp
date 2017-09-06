@@ -48,18 +48,6 @@ public:
 	virtual ~Component() {}
 };
 
-class __attribute__((annotate("something"))) toParse : public Component
-	/** Meow */
-{
-	int f(int i, INT32 z, toParse b, const vector<int>& vec) {  
-		if (i > 0) {
-			return true;
-		} else {
-			return false;
-		}
-	}
-};
-
 ////////////////////////////////////////
 
 enum class __attribute__((annotate("se,pl:true,f:TestOutput"))) MyEnum
@@ -158,6 +146,29 @@ struct BS_SCRIPT_EXPORT(m:Animation,pl:true) RootMotion
 	TAnimationCurve<float> rotation;
 };
 
+struct Str1
+{
+	float a;
+	int c;
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) Str2 : public Str1
+{
+	int cda;
+	BS_SCRIPT_EXPORT(ex:true)
+	float cdb;
+	std::string cdc;
+};
+
+class BS_SCRIPT_EXPORT() Cmp1 : public Component
+{
+
+};
+
+class BS_SCRIPT_EXPORT() Cmp2 : public Cmp1
+{
+
+};
 
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
