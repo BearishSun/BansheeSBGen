@@ -424,7 +424,7 @@ inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 inline std::string mapCppTypeToCSType(const std::string& cppType)
 {
 	if (cppType == "INT8")
-		return "byte";
+		return "sbyte";
 
 	if (cppType == "UINT8")
 		return "byte";
@@ -433,24 +433,32 @@ inline std::string mapCppTypeToCSType(const std::string& cppType)
 		return "short";
 
 	if (cppType == "UINT16")
-		return "short";
+		return "ushort";
 
 	if (cppType == "INT32")
 		return "int";
 
 	if (cppType == "UINT32")
-		return "int";
+		return "uint";
 
 	if (cppType == "INT64")
 		return "long";
 
 	if (cppType == "UINT64")
-		return "long";
+		return "ulong";
 
 	if (cppType == "wchar_t")
 		return "char";
 
 	return cppType;
+}
+
+inline std::string getCSLiteralSuffix(const std::string& cppType)
+{
+	if (cppType == "float")
+		return "f";
+
+	return "";
 }
 
 inline bool mapBuiltinTypeToCppType(BuiltinType::Kind kind, std::string& output)

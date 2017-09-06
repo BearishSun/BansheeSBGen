@@ -1126,13 +1126,16 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 		eventInfo.returnInfo.flags = eventSignature.returnType.flags;
 	}
 
+	int idx = 0;
 	for(auto& entry : eventSignature.paramTypes)
 	{
 		VarInfo paramInfo;
 		paramInfo.flags = entry.flags;
 		paramInfo.type = entry.name;
+		paramInfo.name = "p" + std::to_string(idx);
 
 		eventInfo.paramInfos.push_back(paramInfo);
+		idx++;
 	}
 
 	return true;

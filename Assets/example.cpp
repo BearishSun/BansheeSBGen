@@ -192,7 +192,7 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 *								mesh data instead.
 	 * @returns						Mesh.
 	 */
-	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc);
+	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
 	
 	/** Some docs. */
 	BS_SCRIPT_EXPORT()

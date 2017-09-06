@@ -446,6 +446,8 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 
 	if (typeInfo.type == ParsedType::Resource)
 		output.requiresResourceManager = true;
+	else if (typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject)
+		output.requiresGameObjectManager = true;
 }
 
 void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
@@ -2540,8 +2542,7 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 	{
 		bool isLast = (I + 1) == eventInfo.paramInfos.end();
 
-		std::string name = "p" + std::to_string(idx);
-		std::string argName = generateEventCallbackBodyBlockForParam(name, I->type, I->flags, I->arraySize, preCallActions);
+		std::string argName = generateEventCallbackBodyBlockForParam(I->name, I->type, I->flags, I->arraySize, preCallActions);
 
 		if (!isArrayOrVector(I->flags))
 		{
@@ -3185,7 +3186,7 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 		output << qualifiedType << " " << paramInfo.name;
 
 		if (!forInterop && !paramInfo.defaultValue.empty())
-			output << " = " << paramInfo.defaultValue;
+			output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
 
 		if ((I + 1) != methodInfo.paramInfos.end())
 			output << ", ";
@@ -3238,15 +3239,12 @@ std::string generateCSEventArgs(const MethodInfo& methodInfo)
 {
 	std::stringstream output;
 
-	int idx = 0;
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 	{
-		output << "p" << idx;
+		output << I->name;
 
 		if ((I + 1) != methodInfo.paramInfos.end())
 			output << ", ";
-
-		idx++;
 	}
 
 	return output.str();
@@ -3573,10 +3571,10 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (isStatic || isModule)
 			events << "static ";
 
-		events << "event Action<" << generateCSEventSignature(entry) << "> " << entry.scriptName << ";" << std::endl;
+		events << "event Action<" << generateCSEventSignature(entry) << "> " << entry.scriptName << ";\n\n";
 
 		// Event interop
-		interops << "private void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
+		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
 		interops << "\t\t{" << std::endl;
 		interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");" << std::endl;
 		interops << "\t\t}" << std::endl;
@@ -3697,7 +3695,7 @@ std::string generateCSStruct(StructInfo& input)
 			output << typeInfo.scriptName << " " << paramInfo.name;
 
 			if (!paramInfo.defaultValue.empty())
-				output << " = " << paramInfo.defaultValue;
+				output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
 
 			if ((I + 1) != entry.params.end())
 				output << ", ";
@@ -3739,7 +3737,7 @@ std::string generateCSStruct(StructInfo& input)
 			{
 				std::string defaultValue;
 				if (!fieldInfo.defaultValue.empty())
-					defaultValue = fieldInfo.defaultValue;
+					defaultValue = fieldInfo.defaultValue + getCSLiteralSuffix(fieldInfo.type);
 				else
 					defaultValue = getDefaultValue(fieldInfo.type, typeInfo);
 
