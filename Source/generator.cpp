@@ -1273,6 +1273,7 @@ void postProcessFileInfos()
 
 			// Needed for all .cpp files
 			fileInfo.second.referencedSourceIncludes.push_back("BsScript" + fileInfo.first + ".generated.h");
+			fileInfo.second.referencedSourceIncludes.push_back("BsMonoMethod.h");
 			fileInfo.second.referencedSourceIncludes.push_back("BsMonoClass.h");
 			fileInfo.second.referencedSourceIncludes.push_back("BsMonoUtil.h");
 
@@ -2848,10 +2849,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
 			if (!isStatic)
 			{
-				output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", getManagedInstance()";
+				output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", this";
 
 				for (int i = 0; i < (int)eventInfo.paramInfos.size(); i++)
-					output << ", _" << (i + 1);
+					output << ", std::placeholders::_" << (i + 1);
 
 				output << ")); " << std::endl;
 			}
