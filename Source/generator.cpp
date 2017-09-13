@@ -2825,6 +2825,13 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "\n";
 	}
 
+	// Event thunks
+	for (auto& eventInfo : classInfo.eventInfos)
+		output << "\t" << interopClassName << "::" << eventInfo.sourceName << "ThunkDef " << interopClassName << "::" << eventInfo.sourceName << "Thunk; \n";
+
+	if (!classInfo.eventInfos.empty())
+		output << "\n";
+
 	// Constructor
 	if(!isModule)
 		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value)" << std::endl;
