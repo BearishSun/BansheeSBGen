@@ -2563,10 +2563,15 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 	output << "\t{" << std::endl;
 	output << preCallActions.str();
 
-	if (isStatic || isModule)
-		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, " << methodArgs.str() << ");" << std::endl;
-	else
-		output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk, getManagedInstance(), " << methodArgs.str() << ");" << std::endl;
+	output << "\t\tMonoUtil::invokeThunk(" << eventInfo.sourceName << "Thunk";
+
+	if (!isStatic && !isModule)
+		output << ", getManagedInstance()";
+	
+	if (!eventInfo.paramInfos.empty())
+		output << ", " << methodArgs.str();
+
+	output << ");\n";
 
 	output << "\t}" << std::endl;
 	return output.str();
@@ -3571,7 +3576,12 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (isStatic || isModule)
 			events << "static ";
 
-		events << "event Action<" << generateCSEventSignature(entry) << "> " << entry.scriptName << ";\n\n";
+		events << "event Action";
+		
+		if (!entry.paramInfos.empty())
+			events << "<" << generateCSEventSignature(entry) << ">";
+		
+		events << " " << entry.scriptName << ";\n\n";
 
 		// Event interop
 		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
