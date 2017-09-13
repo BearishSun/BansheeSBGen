@@ -222,6 +222,7 @@ struct StructInfo
 	std::string name;
 	std::string cleanName;
 	std::string interopName;
+	std::string baseClass;
 	CSVisibility visibility;
 	SmallVector<std::string, 4> ns;
 	SmallVector<TemplateParamInfo, 0> templParams;

@@ -860,6 +860,20 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 	return output.str();
 }
 
+StructInfo* findStructInfo(const std::string& name)
+{
+	for (auto& fileInfo : outputFileInfos)
+	{
+		for (auto& structInfo : fileInfo.second.structInfos)
+		{
+			if (structInfo.name == name)
+				return &structInfo;
+		}
+	}
+
+	return nullptr;
+};
+
 void postProcessFileInfos()
 {
 	// Inject external methods into their appropriate class infos
@@ -1174,23 +1188,9 @@ void postProcessFileInfos()
 	}
 
 	// Mark parameters referencing complex structs and base types
-	auto findStructInfo = [](const std::string& name) -> StructInfo*
-	{
-		for (auto& fileInfo : outputFileInfos)
-		{
-			for (auto& structInfo : fileInfo.second.structInfos)
-			{
-				if (structInfo.name == name)
-					return &structInfo;
-			}
-		}
-
-		return nullptr;
-	};
-
 	for (auto& fileInfo : outputFileInfos)
 	{
-		auto markComplexType = [&findStructInfo](const std::string& type, int& flags)
+		auto markComplexType = [](const std::string& type, int& flags)
 		{
 			UserTypeInfo typeInfo = getTypeInfo(type, flags);
 			if (typeInfo.type != ParsedType::Struct)
@@ -3753,6 +3753,49 @@ std::string generateCSStruct(StructInfo& input)
 
 		output << "\t\t}" << std::endl;
 		output << std::endl;
+	}
+
+	if(!input.baseClass.empty())
+	{
+		UserTypeInfo baseTypeInfo = getTypeInfo(input.baseClass, 0);
+		StructInfo* baseStructInfo = findStructInfo(input.baseClass);
+		if (baseStructInfo != nullptr)
+		{
+			// GetBase()
+			output << "\t\t///<summary>\n";
+			output << "\t\t/// Returns a subset of this struct. This subset usually contains common fields shared with another struct.\n";
+			output << "\t\t///</summary>\n";
+			output << "\t\tpublic " << baseTypeInfo.scriptName << " GetBase()\n";
+			output << "\t\t{\n";
+			output << "\t\t\t" << baseTypeInfo.scriptName << " value;\n";
+
+			for (auto I = baseStructInfo->fields.begin(); I != baseStructInfo->fields.end(); ++I)
+			{
+				const FieldInfo& fieldInfo = *I;
+				output << "\t\t\tvalue." << fieldInfo.name << " = " << fieldInfo.name << ";\n";
+			}
+
+			output << "\t\t\treturn value;\n";
+			output << "\t\t}\n";
+			output << "\n";
+
+			// SetBase()
+			output << "\t\t///<summary>\n";
+			output << "\t\t/// Assigns values to a subset of fields of this struct. This subset usually contains common field shared with \n";
+			output << "\t\t/// another struct.\n";
+			output << "\t\t///</summary>\n";
+			output << "\t\tpublic void SetBase(" << baseTypeInfo.scriptName << " value)\n";
+			output << "\t\t{\n";
+
+			for (auto I = baseStructInfo->fields.begin(); I != baseStructInfo->fields.end(); ++I)
+			{
+				const FieldInfo& fieldInfo = *I;
+				output << "\t\t\t" << fieldInfo.name << " = value." << fieldInfo.name << ";\n";
+			}
+
+			output << "\t\t}\n";
+			output << "\n";
+		}
 	}
 
 	for (auto I = input.fields.begin(); I != input.fields.end(); ++I)

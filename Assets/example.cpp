@@ -146,7 +146,7 @@ struct BS_SCRIPT_EXPORT(m:Animation,pl:true) RootMotion
 	TAnimationCurve<float> rotation;
 };
 
-struct Str1
+struct BS_SCRIPT_EXPORT(pl:true) Str1
 {
 	float a;
 	int c;

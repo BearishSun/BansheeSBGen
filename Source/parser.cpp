@@ -535,6 +535,38 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 	return "";
 }
 
+std::string parseExportableBaseStruct(const CXXRecordDecl* decl)
+{
+	if (!decl->hasDefinition())
+		return "";
+
+	auto iter = decl->bases_begin();
+	while (iter != decl->bases_end())
+	{
+		const CXXBaseSpecifier* baseSpec = iter;
+		CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+
+		std::string className = baseDecl->getName();
+
+		AnnotateAttr* attr = baseDecl->getAttr<AnnotateAttr>();
+		if (attr != nullptr)
+		{
+			StringRef sourceClassName = baseDecl->getName();
+			ParsedDeclInfo parsedDeclInfo;
+
+			if (parseExportAttribute(attr, sourceClassName, parsedDeclInfo))
+			{
+				if((parsedDeclInfo.exportFlags & (int)ExportFlags::Plain) != 0)
+					return sourceClassName;
+			}
+		}
+
+		iter++;
+	}
+
+	return "";
+}
+
 bool isModule(const CXXRecordDecl* decl)
 {
 	if (!decl->hasDefinition())
@@ -1359,6 +1391,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		StructInfo structInfo;
 		structInfo.name = srcClassName;
 		structInfo.cleanName = declName;
+		structInfo.baseClass = parseExportableBaseStruct(decl);
 		structInfo.visibility = parsedClassInfo.visibility;
 		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 		structInfo.requiresInterop = false;
