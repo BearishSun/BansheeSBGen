@@ -602,44 +602,8 @@ ScriptExportParser::ScriptExportParser(CompilerInstance* CI)
 	:astContext(&(CI->getASTContext()))
 { }
 
-bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
+bool ScriptExportParser::evaluateLiteral(Expr* expr, std::string& evalValue)
 {
-	if (!expr->isEvaluatable(*astContext))
-	{
-		// Check for nullptr
-		do {
-			// Skip through reference binding to temporary.
-			if (MaterializeTemporaryExpr* materialize = dyn_cast<MaterializeTemporaryExpr>(expr))
-				expr = materialize->GetTemporaryExpr();
-
-			// Skip any temporary bindings; they're implicit.
-			if (CXXBindTemporaryExpr* binder = dyn_cast<CXXBindTemporaryExpr>(expr))
-				expr = binder->getSubExpr();
-
-			expr = expr->IgnoreParenCasts();
-
-			if (CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr))
-				expr = ctorExp->getArg(0);
-			else
-				break;
-
-			QualType type = expr->getType();
-			if(type->isBuiltinType())
-			{
-				const BuiltinType* builtinType = type->getAs<BuiltinType>();
-				if (builtinType->getKind() == BuiltinType::NullPtr)
-				{
-					evalValue = "null";
-					return true;
-				}
-
-				return false;
-			}
-		} while (expr);  
-
-		return false;
-	}
-
 	QualType type = expr->getType();
 	if (type->isBuiltinType())
 	{
@@ -718,6 +682,63 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue)
 	}
 
 	return false;
+}
+
+bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, std::string& valType)
+{
+	if (!expr->isEvaluatable(*astContext))
+	{
+		// Check for nullptr, literals in constructors and cast literals
+		do {
+			if (ExprWithCleanups* cleanups = dyn_cast<ExprWithCleanups>(expr))
+				expr = cleanups->getSubExpr();
+
+			// Skip through reference binding to temporary.
+			if (MaterializeTemporaryExpr* materialize = dyn_cast<MaterializeTemporaryExpr>(expr))
+				expr = materialize->GetTemporaryExpr();
+
+			// Skip any temporary bindings; they're implicit.
+			if (CXXBindTemporaryExpr* binder = dyn_cast<CXXBindTemporaryExpr>(expr))
+				expr = binder->getSubExpr();
+
+			expr = expr->IgnoreParenCasts();
+
+			CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr);
+			if (ctorExp)
+				expr = ctorExp->getArg(0);
+			else
+				break;
+
+			if (expr->isEvaluatable(*astContext))
+			{
+				// Constructor or cast of some type
+				QualType parentType = ctorExp->getType();
+
+				int dummy1;
+				unsigned dummy2;
+				parseType(parentType, valType, dummy1, dummy2);
+
+				return evaluateLiteral(expr, evalValue);
+			}
+
+			QualType type = expr->getType();
+			if(type->isBuiltinType())
+			{
+				const BuiltinType* builtinType = type->getAs<BuiltinType>();
+				if (builtinType->getKind() == BuiltinType::NullPtr)
+				{
+					evalValue = "null";
+					return true;
+				}
+
+				return false;
+			}
+		} while (expr);  
+
+		return false;
+	}
+
+	return evaluateLiteral(expr, evalValue);
 }
 
 bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& output)
@@ -1314,8 +1335,8 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 		}
 		else if(tmplArg.getKind() == TemplateArgument::Expression)
 		{
-			std::string tmplArgExprValue;
-			if (!evaluateExpression(tmplArg.getAsExpr(), tmplArgExprValue))
+			std::string tmplArgExprValue, exprType;
+			if (!evaluateExpression(tmplArg.getAsExpr(), tmplArgExprValue, exprType))
 			{
 				outs() << "Error: Template argument for type \"" << className << "\" cannot be constantly evaluated, ignoring it.\n";
 				tmplArgsStream << "unknown";
@@ -1402,7 +1423,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		parseJavadocComments(templatedDecl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
 
-		std::unordered_map<FieldDecl*, std::string> defaultFieldValues;
+		std::unordered_map<FieldDecl*, std::pair<std::string, std::string>> defaultFieldValues;
 
 		// Parse non-default constructors & determine default values for fields
 		if (decl->hasUserDeclaredConstructor())
@@ -1440,7 +1461,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					if (paramDecl->hasDefaultArg() && !skippedDefaultArgument)
 					{
-						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue, paramInfo.defaultValueType))
 						{
 							outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
 								<< "argument that cannot be constantly evaluated, ignoring it.\n";
@@ -1488,9 +1509,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						if (isValid)
 						{
 							// Check for constant value first
-							std::string evalValue;
-							if (evaluateExpression(initExpr, evalValue))
-								defaultFieldValues[field] = evalValue;
+							std::string evalValue, evalTypeValue;
+							if (evaluateExpression(initExpr, evalValue, evalTypeValue))
+								defaultFieldValues[field] = std::make_pair(evalValue, evalTypeValue);
 							else // Check for initializers referencing parameters
 							{
 								Decl* varDecl = initExpr->getReferencedDeclOfCallee();
@@ -1583,6 +1604,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		std::stack<const CXXRecordDecl*> todo;
 		todo.push(decl);
 
+		bool hasDefaultValue = false;
 		while (!todo.empty())
 		{
 			const CXXRecordDecl* curDecl = todo.top();
@@ -1609,15 +1631,16 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				auto iterFind = defaultFieldValues.find(fieldDecl);
 				if (iterFind != defaultFieldValues.end())
-					fieldInfo.defaultValue = iterFind->second;
+				{
+					fieldInfo.defaultValue = iterFind->second.first;
+					fieldInfo.defaultValueType = iterFind->second.second;
+				}
 
 				if (fieldDecl->hasInClassInitializer())
 				{
 					Expr* initExpr = fieldDecl->getInClassInitializer();
 
-					std::string inClassInitValue;
-					if (evaluateExpression(initExpr, inClassInitValue))
-						fieldInfo.defaultValue = inClassInitValue;
+					evaluateExpression(initExpr, fieldInfo.defaultValue, fieldInfo.defaultValueType);
 				}
 
 				std::string typeName;
@@ -1627,6 +1650,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						<< srcClassName << "\". Skipping field.\n";
 					continue;
 				}
+
+				if (!fieldInfo.defaultValue.empty())
+					hasDefaultValue = true;
 
 				parseJavadocComments(fieldDecl, fieldInfo.documentation);
 				structInfo.fields.push_back(fieldInfo);
@@ -1642,6 +1668,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				iter++;
 			}
 		}
+
+		// If struct has in-class default values assigned, but no explicit constructors, add a parameterless constructor
+		if (structInfo.ctors.empty())
+			structInfo.ctors.push_back(SimpleConstructorInfo());
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
 		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
@@ -1739,7 +1769,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
 					{
-						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue))
+						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue, paramInfo.defaultValueType))
 						{
 							outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
 								<< "argument that cannot be constantly evaluated, ignoring it.\n";
@@ -1919,7 +1949,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					else
 						defaultArg = paramDecl->getDefaultArg();
 
-					if (!evaluateExpression(defaultArg, paramInfo.defaultValue))
+					if (!evaluateExpression(defaultArg, paramInfo.defaultValue, paramInfo.defaultValueType))
 					{
 						outs() << "Error: Method parameter \"" << paramDecl->getName().str() << "\" has a default "
 							<< "argument that cannot be constantly evaluated, ignoring it.\n";

@@ -12,7 +12,8 @@ public:
 	bool VisitCXXRecordDecl(CXXRecordDecl* decl);
 
 private:
-	bool evaluateExpression(Expr* expr, std::string& evalValue);
+	bool evaluateLiteral(Expr* expr, std::string& evalValue);
+	bool evaluateExpression(Expr* expr, std::string& evalValue, std::string& valType);
 	bool parseEventSignature(QualType type, FunctionTypeInfo& typeInfo);
 	bool parseEvent(ValueDecl* decl, const std::string& className, MethodInfo& eventInfo);
 	bool parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue = false);

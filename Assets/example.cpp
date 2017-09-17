@@ -40,6 +40,22 @@ class Event;
 template <class RetType, class... Args>
 class Event<RetType(Args...) > : public TEvent <RetType, Args...>
 { };
+
+class Radian
+{
+public:
+	explicit Radian(float r = 0.0f): mRad(r) {}
+	
+	Radian& operator=(const float& r) { mRad = r; return *this; }
+private:
+	float mRad;
+};
+
+class Math
+{
+public:
+	static constexpr float PI = 3.14f;	
+};
 }
 
 class Component
@@ -144,6 +160,11 @@ struct BS_SCRIPT_EXPORT(m:Animation,pl:true) RootMotion
 
 	/** Animation curve representing the rotation of the root bone. */
 	TAnimationCurve<float> rotation;
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) StrCtor
+{
+	bs::Radian r = (bs::Radian)0.5f;;
 };
 
 struct BS_SCRIPT_EXPORT(pl:true) Str1

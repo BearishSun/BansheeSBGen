@@ -3186,6 +3186,18 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 	return output.str();
 }
 
+std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
+{
+	if(paramInfo.defaultValueType.empty())
+		return paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type);
+	else
+	{
+		// Constructor or cast, assuming constructor as cast implies a constructor accepting the type exists (and we don't export cast operators anyway)
+		UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
+		return defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type) + ")";
+	}
+}
+
 std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop)
 {
 	std::stringstream output;
@@ -3198,7 +3210,7 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 		output << qualifiedType << " " << paramInfo.name;
 
 		if (!forInterop && !paramInfo.defaultValue.empty())
-			output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
+			output << " = " << generateCSDefaultValueAssignment(paramInfo);
 
 		if ((I + 1) != methodInfo.paramInfos.end())
 			output << ", ";
@@ -3712,7 +3724,7 @@ std::string generateCSStruct(StructInfo& input)
 			output << typeInfo.scriptName << " " << paramInfo.name;
 
 			if (!paramInfo.defaultValue.empty())
-				output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
+				output << " = " << generateCSDefaultValueAssignment(paramInfo);
 
 			if ((I + 1) != entry.params.end())
 				output << ", ";
@@ -3754,7 +3766,7 @@ std::string generateCSStruct(StructInfo& input)
 			{
 				std::string defaultValue;
 				if (!fieldInfo.defaultValue.empty())
-					defaultValue = fieldInfo.defaultValue + getCSLiteralSuffix(fieldInfo.type);
+					defaultValue = generateCSDefaultValueAssignment(fieldInfo);
 				else
 					defaultValue = getDefaultValue(fieldInfo.type, typeInfo);
 
