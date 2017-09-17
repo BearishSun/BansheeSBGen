@@ -3194,7 +3194,7 @@ std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
 	{
 		// Constructor or cast, assuming constructor as cast implies a constructor accepting the type exists (and we don't export cast operators anyway)
 		UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
-		return defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type) + ")";
+		return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type) + ")";
 	}
 }
 

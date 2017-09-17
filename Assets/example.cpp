@@ -26,6 +26,8 @@ template<class Elem> class basic_string
 typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
 
+#define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
+
 namespace bs
 {
 template <class RetType, class... Args>
@@ -41,21 +43,112 @@ template <class RetType, class... Args>
 class Event<RetType(Args...) > : public TEvent <RetType, Args...>
 { };
 
-class Radian
-{
-public:
-	explicit Radian(float r = 0.0f): mRad(r) {}
-	
-	Radian& operator=(const float& r) { mRad = r; return *this; }
-private:
-	float mRad;
-};
+	struct Degree;
 
+	class Radian
+	{
+	public:
+		explicit Radian(float r = 0.0f) : mRad(r) {}
+		Radian(const Degree& d);
+		Radian& operator= (const float& f) { mRad = f; return *this; }
+		Radian& operator= (const Radian& r) { mRad = r.mRad; return *this; }
+		Radian& operator= (const Degree& d);
+
+		/** Returns the value of the angle in degrees. */
+		float valueDegrees() const;
+
+		/** Returns the value of the angle in radians. */
+		float valueRadians() const { return mRad; }
+
+		/** Wraps the angle in [0, 2 *  PI) range. */
+		Radian wrap();
+
+        const Radian& operator+ () const { return *this; }
+		Radian operator+ (const Radian& r) const { return Radian (mRad + r.mRad); }
+		Radian operator+ (const Degree& d) const;
+		Radian& operator+= (const Radian& r) { mRad += r.mRad; return *this; }
+		Radian& operator+= (const Degree& d);
+		Radian operator- () const { return Radian(-mRad); }
+		Radian operator- (const Radian& r) const { return Radian (mRad - r.mRad); }
+		Radian operator- (const Degree& d) const;
+		Radian& operator-= (const Radian& r) { mRad -= r.mRad; return *this; }
+		Radian& operator-= (const Degree& d);
+		Radian operator* (float f) const { return Radian (mRad * f); }
+        Radian operator* (const Radian& f) const { return Radian (mRad * f.mRad); }
+		Radian& operator*= (float f) { mRad *= f; return *this; }
+		Radian operator/ (float f) const { return Radian (mRad / f); }
+		Radian& operator/= (float f) { mRad /= f; return *this; }
+
+		friend Radian operator* (float lhs, const Radian& rhs) { return Radian(lhs * rhs.mRad); }
+		friend Radian operator/ (float lhs, const Radian& rhs) { return Radian(lhs / rhs.mRad); }
+		friend Radian operator+ (Radian& lhs, float rhs) { return Radian(lhs.mRad + rhs); }
+		friend Radian operator+ (float lhs, const Radian& rhs) { return Radian(lhs + rhs.mRad); }
+		friend Radian operator- (const Radian& lhs, float rhs) { return Radian(lhs.mRad - rhs); }
+		friend Radian operator- (const float lhs, const Radian& rhs) { return Radian(lhs - rhs.mRad); }
+
+		bool operator<  (const Radian& r) const { return mRad <  r.mRad; }
+		bool operator<= (const Radian& r) const { return mRad <= r.mRad; }
+		bool operator== (const Radian& r) const { return mRad == r.mRad; }
+		bool operator!= (const Radian& r) const { return mRad != r.mRad; }
+		bool operator>= (const Radian& r) const { return mRad >= r.mRad; }
+		bool operator>  (const Radian& r) const { return mRad >  r.mRad; }
+
+	private:
+		float mRad;
+	};
+	
 class Math
 {
 public:
 	static constexpr float PI = 3.14f;	
 };
+
+struct Spring;
+
+struct BS_SCRIPT_EXPORT(pl:true) LimitAngularRange
+	{
+		/** Constructs an empty limit. */
+		LimitAngularRange()
+		{ }
+
+		/**
+		 * Constructs a hard limit. Once the limit is reached the movement of the attached bodies will come to a stop.
+		 * 
+		 * @param	lower		Lower angle of the limit. Must be less than @p upper.
+		 * @param	upper		Upper angle of the limit. Must be more than @p lower.
+		 * @param	contactDist	Distance from the limit at which it becomes active. Allows the solver to activate earlier
+		 *						than the limit is reached to avoid breaking the limit. Specify -1 for the default.
+		 */
+		LimitAngularRange(Radian lower, Radian upper, float contactDist = -1.0f)
+			:lower(lower), upper(upper)
+		{ }
+
+		/**
+		 * Constructs a soft limit. Once the limit is reached the bodies will bounce back according to the resitution
+		 * parameter and will be pulled back towards the limit by the provided spring.
+		 * 
+		 * @param	lower		Lower angle of the limit. Must be less than @p upper.
+		 * @param	upper		Upper angle of the limit. Must be more than @p lower.
+		 * @param	spring		Spring that controls how are the bodies pulled back towards the limit when they breach it.
+		 * @param	restitution	Controls how do objects react when the limit is reached, values closer to zero specify
+		 *						non-ellastic collision, while those closer to one specify more ellastic (i.e bouncy)
+		 *						collision. Must be in [0, 1] range.
+		 */
+		LimitAngularRange(Radian lower, Radian upper, const Spring& spring, float restitution = 0.0f)
+			:lower(lower), upper(upper)
+		{ }
+
+		bool operator==(const LimitAngularRange& other) const
+		{
+			return lower == other.lower && upper == other.upper;
+		}
+
+		/** Lower angle of the limit. Must be less than #upper. */
+		Radian lower = Radian(0.0f);
+
+		/** Upper angle of the limit. Must be less than #lower. */
+		Radian upper = Radian(0.0f);
+	};
 }
 
 class Component
@@ -110,8 +203,6 @@ struct __attribute__((annotate("se,pl:true,f:TestOutput"))) MyStruct2
 	float c;
 };
 
-#define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
-
 enum BS_SCRIPT_EXPORT() FlgEnum
 {
 	a, b, c
@@ -160,11 +251,6 @@ struct BS_SCRIPT_EXPORT(m:Animation,pl:true) RootMotion
 
 	/** Animation curve representing the rotation of the root bone. */
 	TAnimationCurve<float> rotation;
-};
-
-struct BS_SCRIPT_EXPORT(pl:true) StrCtor
-{
-	bs::Radian r = (bs::Radian)0.5f;;
 };
 
 struct BS_SCRIPT_EXPORT(pl:true) Str1

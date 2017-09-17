@@ -709,6 +709,17 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 			else
 				break;
 
+			QualType type = expr->getType();
+			if(type->isBuiltinType())
+			{
+				const BuiltinType* builtinType = type->getAs<BuiltinType>();
+				if (builtinType->getKind() == BuiltinType::NullPtr)
+				{
+					evalValue = "null";
+					return true;
+				}
+			}
+
 			if (expr->isEvaluatable(*astContext))
 			{
 				// Constructor or cast of some type
@@ -721,18 +732,6 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 				return evaluateLiteral(expr, evalValue);
 			}
 
-			QualType type = expr->getType();
-			if(type->isBuiltinType())
-			{
-				const BuiltinType* builtinType = type->getAs<BuiltinType>();
-				if (builtinType->getKind() == BuiltinType::NullPtr)
-				{
-					evalValue = "null";
-					return true;
-				}
-
-				return false;
-			}
 		} while (expr);  
 
 		return false;
@@ -1505,6 +1504,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 								break;
 							}
 						}
+
+						// Let the member initializer code handle the default value
+						if (dyn_cast<CXXDefaultInitExpr>(initExpr))
+							isValid = false;
 						
 						if (isValid)
 						{
@@ -1523,7 +1526,14 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 										assignments[field] = parmVarDecl;
 								}
 								else
-									outs() << "Error: Unrecognized initializer format in struct \"" + srcClassName + "\".\n";
+								{
+									std::string fieldName;
+
+									if (field)
+										fieldName = field->getName();
+
+									outs() << "Error: Unrecognized initializer format in struct \"" + srcClassName + "\ for field \"" + fieldName + "\".\n";
+								}
 							}
 						}
 					}
