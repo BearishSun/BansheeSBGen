@@ -3188,13 +3188,13 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 
 std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
 {
-	if(paramInfo.defaultValueType.empty())
-		return paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type);
+	if (paramInfo.defaultValueType.empty())
+		return paramInfo.defaultValue;
 	else
 	{
 		// Constructor or cast, assuming constructor as cast implies a constructor accepting the type exists (and we don't export cast operators anyway)
 		UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
-		return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + getCSLiteralSuffix(paramInfo.type) + ")";
+		return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + ")";
 	}
 }
 

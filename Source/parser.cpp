@@ -646,6 +646,16 @@ bool ScriptExportParser::evaluateLiteral(Expr* expr, std::string& evalValue)
 			return true;
 		}
 		case BuiltinType::Float:
+		{
+			APFloat result(0.0f);
+			expr->EvaluateAsFloat(result, *astContext);
+
+			SmallString<8> valueStr;
+			result.toString(valueStr);
+			evalValue = valueStr.str().str() + "f";
+
+			return true;
+		}
 		case BuiltinType::Double:
 		{
 			APFloat result(0.0f);
@@ -1680,7 +1690,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		}
 
 		// If struct has in-class default values assigned, but no explicit constructors, add a parameterless constructor
-		if (structInfo.ctors.empty())
+		if (structInfo.ctors.empty() && hasDefaultValue)
 			structInfo.ctors.push_back(SimpleConstructorInfo());
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
