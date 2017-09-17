@@ -76,19 +76,30 @@ std::string getCppVarType(const std::string& typeName, ParsedType type, int flag
 }
 
 std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes,
-	bool arraySuffixes, bool forceStructAsRef)
+	bool arraySuffixes, bool forceStructAsRef, bool forSignature = false)
 {
 	std::stringstream output;
 
-	if (paramPrefixes && isOutput(flags))
-		output << "out ";
-	else if (forceStructAsRef && (isPlainStruct(type, flags)))
-		output << "ref ";
+	if (!forSignature)
+	{
+		if (paramPrefixes && isOutput(flags))
+			output << "out ";
+		else if (forceStructAsRef && (isPlainStruct(type, flags)))
+			output << "ref ";
+	}
 
 	output << typeName;
 
 	if (arraySuffixes && isArrayOrVector(flags))
 		output << "[]";
+
+	if (forSignature)
+	{
+		if (paramPrefixes && isOutput(flags))
+			output << "&";
+		else if (forceStructAsRef && (isPlainStruct(type, flags)))
+			output << "&";
+	}
 
 	return output.str();
 }
@@ -2903,7 +2914,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		{
 			const VarInfo& paramInfo = *I;
 			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, false, true, false);
+			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
 
 			output << csType;
 
