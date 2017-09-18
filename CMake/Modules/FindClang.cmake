@@ -53,7 +53,7 @@ if(UNIX)
     llvm_map_components_to_libnames(llvm_libs support option core demangle aarch64codegen debuginfodwarf)
 
     find_package(Threads REQUIRED)
-    message(${llvm_libs})
+    
     FIND_AND_ADD_CLANG_LIB(clangFrontendTool)
     FIND_AND_ADD_CLANG_LIB(clangFrontend)
     FIND_AND_ADD_CLANG_LIB(clangStaticAnalyzerCheckers)
