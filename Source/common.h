@@ -123,6 +123,7 @@ struct VarInfo
 	unsigned arraySize;
 
 	std::string defaultValue;
+	std::string defaultValueType;
 	int flags;
 };
 

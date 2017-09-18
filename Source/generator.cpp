@@ -76,19 +76,30 @@ std::string getCppVarType(const std::string& typeName, ParsedType type, int flag
 }
 
 std::string getCSVarType(const std::string& typeName, ParsedType type, int flags, bool paramPrefixes,
-	bool arraySuffixes, bool forceStructAsRef)
+	bool arraySuffixes, bool forceStructAsRef, bool forSignature = false)
 {
 	std::stringstream output;
 
-	if (paramPrefixes && isOutput(flags))
-		output << "out ";
-	else if (forceStructAsRef && (isPlainStruct(type, flags)))
-		output << "ref ";
+	if (!forSignature)
+	{
+		if (paramPrefixes && isOutput(flags))
+			output << "out ";
+		else if (forceStructAsRef && (isPlainStruct(type, flags)))
+			output << "ref ";
+	}
 
 	output << typeName;
 
 	if (arraySuffixes && isArrayOrVector(flags))
 		output << "[]";
+
+	if (forSignature)
+	{
+		if (paramPrefixes && isOutput(flags))
+			output << "&";
+		else if (forceStructAsRef && (isPlainStruct(type, flags)))
+			output << "&";
+	}
 
 	return output.str();
 }
@@ -2903,7 +2914,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		{
 			const VarInfo& paramInfo = *I;
 			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, false, true, false);
+			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
 
 			output << csType;
 
@@ -3186,6 +3197,18 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 	return output.str();
 }
 
+std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
+{
+	if (paramInfo.defaultValueType.empty())
+		return paramInfo.defaultValue;
+	else
+	{
+		// Constructor or cast, assuming constructor as cast implies a constructor accepting the type exists (and we don't export cast operators anyway)
+		UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
+		return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + ")";
+	}
+}
+
 std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop)
 {
 	std::stringstream output;
@@ -3198,7 +3221,7 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 		output << qualifiedType << " " << paramInfo.name;
 
 		if (!forInterop && !paramInfo.defaultValue.empty())
-			output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
+			output << " = " << generateCSDefaultValueAssignment(paramInfo);
 
 		if ((I + 1) != methodInfo.paramInfos.end())
 			output << ", ";
@@ -3712,7 +3735,7 @@ std::string generateCSStruct(StructInfo& input)
 			output << typeInfo.scriptName << " " << paramInfo.name;
 
 			if (!paramInfo.defaultValue.empty())
-				output << " = " << paramInfo.defaultValue << getCSLiteralSuffix(paramInfo.type);
+				output << " = " << generateCSDefaultValueAssignment(paramInfo);
 
 			if ((I + 1) != entry.params.end())
 				output << ", ";
@@ -3754,7 +3777,7 @@ std::string generateCSStruct(StructInfo& input)
 			{
 				std::string defaultValue;
 				if (!fieldInfo.defaultValue.empty())
-					defaultValue = fieldInfo.defaultValue + getCSLiteralSuffix(fieldInfo.type);
+					defaultValue = generateCSDefaultValueAssignment(fieldInfo);
 				else
 					defaultValue = getDefaultValue(fieldInfo.type, typeInfo);
 
