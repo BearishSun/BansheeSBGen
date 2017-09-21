@@ -28,6 +28,7 @@ using namespace clang;
 extern const char* BUILTIN_COMPONENT_TYPE;
 extern const char* BUILTIN_SCENEOBJECT_TYPE;
 extern const char* BUILTIN_RESOURCE_TYPE;
+extern const char* BUILTIN_MODULE_TYPE;
 
 enum class ParsedType
 {

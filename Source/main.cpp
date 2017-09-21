@@ -4,6 +4,7 @@
 const char* BUILTIN_COMPONENT_TYPE = "Component";
 const char* BUILTIN_SCENEOBJECT_TYPE = "SceneObject";
 const char* BUILTIN_RESOURCE_TYPE = "Resource";
+const char* BUILTIN_MODULE_TYPE = "Module";
 
 std::array<std::string, FT_COUNT> fileTypeFolders =
 {
@@ -94,6 +95,7 @@ int main(int argc, const char** argv)
 	cppToCsTypeMap["Vector2I"] = UserTypeInfo("Vector2I", ParsedType::Struct, "Math/BsVector2I.h", "Wrappers/BsScriptVector2I.h");
 	cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "Math/BsRect2.h", "");
 	cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "Math/BsRect2I.h", "");
+	cppToCsTypeMap["Bounds"] = UserTypeInfo("Bounds", ParsedType::Struct, "Math/BsBounds.h", "");
 
 	CommonOptionsParser op(argc, argv, OptCategory);
 	ClangTool Tool(op.getCompilations(), op.getSourcePathList());

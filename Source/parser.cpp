@@ -480,6 +480,39 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 	return true;
 }
 
+bool isBase(const CXXRecordDecl* decl)
+{
+	std::string className = decl->getName();
+
+	if (className == BUILTIN_COMPONENT_TYPE)
+		return true;
+	else if (className == BUILTIN_RESOURCE_TYPE)
+		return true;
+	else if (className == BUILTIN_SCENEOBJECT_TYPE)
+		return true;
+	else if (className == BUILTIN_MODULE_TYPE)
+		return true;
+
+	return false;
+}
+
+bool isExportable(const CXXRecordDecl* decl)
+{
+	std::string className = decl->getName();
+
+	AnnotateAttr* attr = decl->getAttr<AnnotateAttr>();
+	if (attr != nullptr)
+	{
+		StringRef sourceClassName = decl->getName();
+		ParsedDeclInfo parsedDeclInfo;
+
+		if (parseExportAttribute(attr, sourceClassName, parsedDeclInfo))
+			return true;
+	}
+
+	return false;
+}
+
 std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 {
 	if (!decl->hasDefinition())
@@ -501,17 +534,7 @@ std::string parseExportableBaseClass(const CXXRecordDecl* decl)
 
 			std::string className = baseDecl->getName();
 
-			if (className == BUILTIN_COMPONENT_TYPE)
-			{
-				iter++;
-				continue;
-			}
-			else if (className == BUILTIN_RESOURCE_TYPE)
-			{
-				iter++;
-				continue;
-			}
-			else if (className == BUILTIN_SCENEOBJECT_TYPE)
+			if(isBase(baseDecl))
 			{
 				iter++;
 				continue;
@@ -587,7 +610,7 @@ bool isModule(const CXXRecordDecl* decl)
 			CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
 
 			std::string className = baseDecl->getName();
-			if (className == "Module")
+			if (className == BUILTIN_MODULE_TYPE)
 				return true;
 
 			todo.push(baseDecl);
@@ -1744,35 +1767,217 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, destFile);
 
-		// Parse constructors for non-module (singleton) classes
-		if (!clsIsModule)
-		{
-			for (auto I = decl->ctor_begin(); I != decl->ctor_end(); ++I)
-			{
-				CXXConstructorDecl* ctorDecl = *I;
+		std::stack<const CXXRecordDecl*> todo;
+		todo.push(decl);
 
-				AnnotateAttr* methodAttr = ctorDecl->getAttr<AnnotateAttr>();
+		while (!todo.empty())
+		{
+			const CXXRecordDecl* curDecl = todo.top();
+			todo.pop();
+
+			// Parse constructors for non-module (singleton) classes
+			if (!clsIsModule)
+			{
+				for (auto I = curDecl->ctor_begin(); I != curDecl->ctor_end(); ++I)
+				{
+					CXXConstructorDecl* ctorDecl = *I;
+
+					AnnotateAttr* methodAttr = ctorDecl->getAttr<AnnotateAttr>();
+					if (methodAttr == nullptr)
+						continue;
+
+					StringRef dummy;
+					ParsedDeclInfo parsedMethodInfo;
+					if (!parseExportAttribute(methodAttr, dummy, parsedMethodInfo))
+						continue;
+
+					MethodInfo methodInfo;
+					methodInfo.sourceName = declName;
+					methodInfo.scriptName = parsedClassInfo.exportName;
+					methodInfo.flags = (int)MethodFlags::Constructor;
+					methodInfo.visibility = parsedMethodInfo.visibility;
+					parseJavadocComments(ctorDecl, methodInfo.documentation);
+
+					if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
+						methodInfo.flags |= (int)MethodFlags::InteropOnly;
+
+					bool invalidParam = false;
+					bool skippedDefaultArg = false;
+					for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
+					{
+						ParmVarDecl* paramDecl = *J;
+						QualType paramType = paramDecl->getType();
+
+						VarInfo paramInfo;
+						paramInfo.name = paramDecl->getName();
+
+						if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+						{
+							outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << srcClassName << "\"'s constructor.\n";
+							invalidParam = true;
+							continue;
+						}
+
+						if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
+						{
+							if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue, paramInfo.defaultValueType))
+							{
+								outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+									<< "argument that cannot be constantly evaluated, ignoring it.\n";
+								skippedDefaultArg = true;
+							}
+						}
+
+						methodInfo.paramInfos.push_back(paramInfo);
+					}
+
+					if (invalidParam)
+						continue;
+
+					classInfo.ctorInfos.push_back(methodInfo);
+				}
+			}
+
+			for (auto I = curDecl->method_begin(); I != curDecl->method_end(); ++I)
+			{
+				CXXMethodDecl* methodDecl = *I;
+
+				CXXConstructorDecl* ctorDecl = dyn_cast<CXXConstructorDecl>(methodDecl);
+				if (ctorDecl != nullptr)
+					continue;
+
+				if (!methodDecl->isUserProvided() || methodDecl->isImplicit())
+					continue;
+
+				AnnotateAttr* methodAttr = methodDecl->getAttr<AnnotateAttr>();
 				if (methodAttr == nullptr)
 					continue;
 
-				StringRef dummy;
+				StringRef sourceMethodName = methodDecl->getName();
+
 				ParsedDeclInfo parsedMethodInfo;
-				if (!parseExportAttribute(methodAttr, dummy, parsedMethodInfo))
+				if (!parseExportAttribute(methodAttr, sourceMethodName, parsedMethodInfo))
 					continue;
 
-				MethodInfo methodInfo;
-				methodInfo.sourceName = declName;
-				methodInfo.scriptName = parsedClassInfo.exportName;
-				methodInfo.flags = (int)MethodFlags::Constructor;
-				methodInfo.visibility = parsedMethodInfo.visibility;
-				parseJavadocComments(ctorDecl, methodInfo.documentation);
+				if (methodDecl->getAccess() != AS_public)
+					outs() << "Error: Exported method \"" + sourceMethodName + "\" isn't public. This will likely result in invalid code generation.";
+
+				int methodFlags = 0;
+
+				bool isExternal = false;
+				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::External) != 0)
+				{
+					methodFlags |= (int)MethodFlags::External;
+					isExternal = true;
+				}
+
+				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::ExternalConstructor) != 0)
+				{
+					methodFlags |= (int)MethodFlags::External;
+					methodFlags |= (int)MethodFlags::Constructor;
+
+					isExternal = true;
+				}
 
 				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
-					methodInfo.flags |= (int)MethodFlags::InteropOnly;
+					methodFlags |= (int)MethodFlags::InteropOnly;
+
+				bool isStatic = false;
+				if (methodDecl->isStatic() && !isExternal) // Note: Perhaps add a way to mark external methods as static
+				{
+					methodFlags |= (int)MethodFlags::Static;
+					isStatic = true;
+				}
+
+				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
+					methodFlags |= (int)MethodFlags::PropertyGetter;
+				else if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertySetter) != 0)
+					methodFlags |= (int)MethodFlags::PropertySetter;
+
+				MethodInfo methodInfo;
+				methodInfo.sourceName = sourceMethodName;
+				methodInfo.scriptName = parsedMethodInfo.exportName;
+				methodInfo.flags = methodFlags;
+				methodInfo.externalClass = srcClassName;
+				methodInfo.visibility = parsedMethodInfo.visibility;
+				parseJavadocComments(methodDecl, methodInfo.documentation);
+
+				bool isProperty = (parsedMethodInfo.exportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
+
+				if (!isProperty)
+				{
+					QualType returnType = methodDecl->getReturnType();
+					if (!returnType->isVoidType())
+					{
+						ReturnInfo returnInfo;
+						if (!parseType(returnType, returnInfo.type, returnInfo.flags, returnInfo.arraySize, true))
+						{
+							outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
+							continue;
+						}
+
+						methodInfo.returnInfo = returnInfo;
+					}
+				}
+				else
+				{
+					if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
+					{
+						QualType returnType = methodDecl->getReturnType();
+						if (returnType->isVoidType())
+						{
+							outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
+								<< "\" has no return value.\n";
+							continue;
+						}
+
+						// Note: I can potentially allow an output parameter instead of a return value
+						if (methodDecl->param_size() > 1 || ((!isExternal || isStatic) && methodDecl->param_size() > 0))
+						{
+							outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
+								<< "\" has parameters.\n";
+							continue;
+						}
+
+						if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true))
+						{
+							outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
+							continue;
+						}
+					}
+					else // Must be setter
+					{
+						QualType returnType = methodDecl->getReturnType();
+						if (!returnType->isVoidType())
+						{
+							outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
+								<< "\" has a return value.\n";
+							continue;
+						}
+
+						if (methodDecl->param_size() == 0 || methodDecl->param_size() > 2 || ((!isExternal || isStatic) && methodDecl->param_size() != 1))
+						{
+							outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
+								<< "\" has more or less than one parameter.\n";
+							continue;
+						}
+
+						ParmVarDecl* paramDecl = methodDecl->getParamDecl(0);
+
+						VarInfo paramInfo;
+						paramInfo.name = paramDecl->getName();
+
+						if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+						{
+							outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
+							continue;
+						}
+					}
+				}
 
 				bool invalidParam = false;
 				bool skippedDefaultArg = false;
-				for (auto J = ctorDecl->param_begin(); J != ctorDecl->param_end(); ++J)
+				for (auto J = methodDecl->param_begin(); J != methodDecl->param_end(); ++J)
 				{
 					ParmVarDecl* paramDecl = *J;
 					QualType paramType = paramDecl->getType();
@@ -1782,16 +1987,22 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
 					{
-						outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << srcClassName << "\"'s constructor.\n";
+						outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 						invalidParam = true;
 						continue;
 					}
 
 					if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
 					{
-						if (!evaluateExpression(paramDecl->getDefaultArg(), paramInfo.defaultValue, paramInfo.defaultValueType))
+						Expr* defaultArg;
+						if (paramDecl->hasUninstantiatedDefaultArg())
+							defaultArg = paramDecl->getUninstantiatedDefaultArg();
+						else
+							defaultArg = paramDecl->getDefaultArg();
+
+						if (!evaluateExpression(defaultArg, paramInfo.defaultValue, paramInfo.defaultValueType))
 						{
-							outs() << "Error: Constructor parameter \"" << paramDecl->getName().str() << "\" has a default "
+							outs() << "Error: Method parameter \"" << paramDecl->getName().str() << "\" has a default "
 								<< "argument that cannot be constantly evaluated, ignoring it.\n";
 							skippedDefaultArg = true;
 						}
@@ -1803,222 +2014,60 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				if (invalidParam)
 					continue;
 
-				classInfo.ctorInfos.push_back(methodInfo);
-			}
-		}
-
-		for (auto I = decl->method_begin(); I != decl->method_end(); ++I)
-		{
-			CXXMethodDecl* methodDecl = *I;
-
-			CXXConstructorDecl* ctorDecl = dyn_cast<CXXConstructorDecl>(methodDecl);
-			if (ctorDecl != nullptr)
-				continue;
-
-			if (!methodDecl->isUserProvided() || methodDecl->isImplicit())
-				continue;
-
-			AnnotateAttr* methodAttr = methodDecl->getAttr<AnnotateAttr>();
-			if (methodAttr == nullptr)
-				continue;
-
-			StringRef sourceMethodName = methodDecl->getName();
-
-			ParsedDeclInfo parsedMethodInfo;
-			if (!parseExportAttribute(methodAttr, sourceMethodName, parsedMethodInfo))
-				continue;
-
-			if (methodDecl->getAccess() != AS_public)
-				outs() << "Error: Exported method \"" + sourceMethodName + "\" isn't public. This will likely result in invalid code generation.";
-
-			int methodFlags = 0;
-
-			bool isExternal = false;
-			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::External) != 0)
-			{
-				methodFlags |= (int)MethodFlags::External;
-				isExternal = true;
-			}
-
-			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::ExternalConstructor) != 0)
-			{
-				methodFlags |= (int)MethodFlags::External;
-				methodFlags |= (int)MethodFlags::Constructor;
-
-				isExternal = true;
-			}
-
-			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
-				methodFlags |= (int)MethodFlags::InteropOnly;
-
-			bool isStatic = false;
-			if (methodDecl->isStatic() && !isExternal) // Note: Perhaps add a way to mark external methods as static
-			{
-				methodFlags |= (int)MethodFlags::Static;
-				isStatic = true;
-			}
-
-			if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
-				methodFlags |= (int)MethodFlags::PropertyGetter;
-			else if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertySetter) != 0)
-				methodFlags |= (int)MethodFlags::PropertySetter;
-
-			MethodInfo methodInfo;
-			methodInfo.sourceName = sourceMethodName;
-			methodInfo.scriptName = parsedMethodInfo.exportName;
-			methodInfo.flags = methodFlags;
-			methodInfo.externalClass = srcClassName;
-			methodInfo.visibility = parsedMethodInfo.visibility;
-			parseJavadocComments(methodDecl, methodInfo.documentation);
-
-			bool isProperty = (parsedMethodInfo.exportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
-
-			if (!isProperty)
-			{
-				QualType returnType = methodDecl->getReturnType();
-				if (!returnType->isVoidType())
+				if (isExternal)
 				{
-					ReturnInfo returnInfo;
-					if (!parseType(returnType, returnInfo.type, returnInfo.flags, returnInfo.arraySize, true))
-					{
-						outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
-						continue;
-					}
-
-					methodInfo.returnInfo = returnInfo;
+					ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
+					infos.methods.push_back(methodInfo);
 				}
-			}
-			else
-			{
-				if ((parsedMethodInfo.exportFlags & (int)ExportFlags::PropertyGetter) != 0)
-				{
-					QualType returnType = methodDecl->getReturnType();
-					if (returnType->isVoidType())
-					{
-						outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
-							<< "\" has no return value.\n";
-						continue;
-					}
-
-					// Note: I can potentially allow an output parameter instead of a return value
-					if (methodDecl->param_size() > 1 || ((!isExternal || isStatic) && methodDecl->param_size() > 0))
-					{
-						outs() << "Error: Unable to create a getter for property because method \"" << sourceMethodName
-							<< "\" has parameters.\n";
-						continue;
-					}
-
-					if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true))
-					{
-						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
-						continue;
-					}
-				}
-				else // Must be setter
-				{
-					QualType returnType = methodDecl->getReturnType();
-					if (!returnType->isVoidType())
-					{
-						outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
-							<< "\" has a return value.\n";
-						continue;
-					}
-
-					if (methodDecl->param_size() == 0 || methodDecl->param_size() > 2 || ((!isExternal || isStatic) && methodDecl->param_size() != 1))
-					{
-						outs() << "Error: Unable to create a setter for property because method \"" << sourceMethodName
-							<< "\" has more or less than one parameter.\n";
-						continue;
-					}
-
-					ParmVarDecl* paramDecl = methodDecl->getParamDecl(0);
-
-					VarInfo paramInfo;
-					paramInfo.name = paramDecl->getName();
-
-					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
-					{
-						outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
-						continue;
-					}
-				}
+				else
+					classInfo.methodInfos.push_back(methodInfo);
 			}
 
-			bool invalidParam = false;
-			bool skippedDefaultArg = false;
-			for (auto J = methodDecl->param_begin(); J != methodDecl->param_end(); ++J)
+			// Look for exported events
+			for (auto I = curDecl->field_begin(); I != curDecl->field_end(); ++I)
 			{
-				ParmVarDecl* paramDecl = *J;
-				QualType paramType = paramDecl->getType();
-
-				VarInfo paramInfo;
-				paramInfo.name = paramDecl->getName();
-
-				if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
-				{
-					outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
-					invalidParam = true;
-					continue;
-				}
-
-				if (paramDecl->hasDefaultArg() && !skippedDefaultArg)
-				{
-					Expr* defaultArg;
-					if (paramDecl->hasUninstantiatedDefaultArg())
-						defaultArg = paramDecl->getUninstantiatedDefaultArg();
-					else
-						defaultArg = paramDecl->getDefaultArg();
-
-					if (!evaluateExpression(defaultArg, paramInfo.defaultValue, paramInfo.defaultValueType))
-					{
-						outs() << "Error: Method parameter \"" << paramDecl->getName().str() << "\" has a default "
-							<< "argument that cannot be constantly evaluated, ignoring it.\n";
-						skippedDefaultArg = true;
-					}
-				}
-
-				methodInfo.paramInfos.push_back(paramInfo);
-			}
-
-			if (invalidParam)
-				continue;
-
-			if (isExternal)
-			{
-				ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
-				infos.methods.push_back(methodInfo);
-			}
-			else
-				classInfo.methodInfos.push_back(methodInfo);
-		}
-
-		// Look for exported events
-		for (auto I = decl->field_begin(); I != decl->field_end(); ++I)
-		{
-			FieldDecl* fieldDecl = *I;
-
-			MethodInfo eventInfo;
-			if (!parseEvent(fieldDecl, srcClassName, eventInfo))
-				continue;
-
-			classInfo.eventInfos.push_back(eventInfo);
-		}
-
-		// Find static data events
-		DeclContext* context = dyn_cast<DeclContext>(decl);
-		for (auto I = context->decls_begin(); I != context->decls_end(); ++I)
-		{
-			if(VarDecl* varDecl = dyn_cast<VarDecl>(*I))
-			{
-				if (!varDecl->isStaticDataMember())
-					continue;
+				FieldDecl* fieldDecl = *I;
 
 				MethodInfo eventInfo;
-				if (!parseEvent(varDecl, srcClassName, eventInfo))
+				if (!parseEvent(fieldDecl, srcClassName, eventInfo))
 					continue;
 
-				eventInfo.flags |= (int)MethodFlags::Static;
 				classInfo.eventInfos.push_back(eventInfo);
+			}
+
+			// Find static data events
+			const DeclContext* context = dyn_cast<DeclContext>(curDecl);
+			for (auto I = context->decls_begin(); I != context->decls_end(); ++I)
+			{
+				if (VarDecl* varDecl = dyn_cast<VarDecl>(*I))
+				{
+					if (!varDecl->isStaticDataMember())
+						continue;
+
+					MethodInfo eventInfo;
+					if (!parseEvent(varDecl, srcClassName, eventInfo))
+						continue;
+
+					eventInfo.flags |= (int)MethodFlags::Static;
+					classInfo.eventInfos.push_back(eventInfo);
+				}
+			}
+
+			auto iter = curDecl->bases_begin();
+			while (iter != curDecl->bases_end())
+			{
+				const CXXBaseSpecifier* baseSpec = iter;
+				CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+
+				// Base classes never need to be exported. Exportable classes will handle their own methods/fields.
+				if (isBase(baseDecl) || isExportable(baseDecl))
+				{
+					iter++;
+					continue;
+				}
+
+				todo.push(baseDecl);
+				iter++;
 			}
 		}
 
