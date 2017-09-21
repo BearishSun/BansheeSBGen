@@ -5,36 +5,23 @@
 #  clang_LIBRARIES
 #  clang_FOUND
 
-set(llvm_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Dependencies/llvm CACHE PATH "")
-set(llvm_BUILD_DIR ${llvm_SOURCE_DIR}/Build CACHE PATH "")
-set(llvm_LIB_DIR ${llvm_SOURCE_DIR}/Build CACHE PATH "")
-
-set(clang_INCLUDE_SEARCH_DIRS 
-	"${llvm_SOURCE_DIR}/include"
-	"${llvm_SOURCE_DIR}/tools/clang/include"
-	"${llvm_BUILD_DIR}/include"
-	"${llvm_BUILD_DIR}/tools/clang/include")
+set(clang_INSTALL_DIR ${PROJECT_SOURCE_DIR}/Dependencies/llvm CACHE PATH "")
+set(clang_INCLUDE_SEARCH_DIRS "${clang_INSTALL_DIR}/include")
+set(clang_LIBRARY_SEARCH_DIRS "${clang_INSTALL_DIR}/lib")
 
 message(STATUS "Looking for Clang & LLVM installation...")
-find_path(llvm_INCLUDE_DIR llvm/Pass.h PATHS "${llvm_SOURCE_DIR}/include")	
-find_path(llvm_BUILD_INCLUDE_DIR llvm/Config/llvm-config.h PATHS "${llvm_BUILD_DIR}/include")	
-find_path(clang_INCLUDE_DIR clang/AST/AST.h PATHS "${llvm_SOURCE_DIR}/tools/clang/include" "${llvm_SOURCE_DIR}/include")	
-find_path(clang_BUILD_INCLUDE_DIR clang/Config/config.h PATHS "${llvm_BUILD_DIR}/tools/clang/include" "${llvm_BUILD_DIR}/include")	
-	
-mark_as_advanced(llvm_INCLUDE_DIR)
-mark_as_advanced(llvm_BUILD_INCLUDE_DIR)
+find_path(clang_INCLUDE_DIR llvm/Pass.h PATHS "${clang_INCLUDE_SEARCH_DIRS}")
+
 mark_as_advanced(clang_INCLUDE_DIR)
-mark_as_advanced(clang_BUILD_INCLUDE_DIR)
-mark_as_advanced(clang_LIBRARY_LIST)
-	
-if(llvm_INCLUDE_DIR AND llvm_BUILD_INCLUDE_DIR AND clang_INCLUDE_DIR AND clang_BUILD_INCLUDE_DIR)
+
+if(clang_INCLUDE_DIR)
 	set(clang_FOUND TRUE)
 else()
-	message(FATAL_ERROR "Clang/LLVM dependency: Cannot find all include files. Try modifying the llvm_SOURCE_DIR and llvm_BUILD_DIR paths.")
+	message(FATAL_ERROR "Clang/LLVM dependency: Cannot find include files.")
 endif()
 
 MACRO(FIND_AND_ADD_CLANG_LIB _libname_)
-find_library(CLANG_${_libname_}_LIB ${_libname_} ${llvm_LIB_DIR})
+find_library(CLANG_${_libname_}_LIB ${_libname_} ${clang_LIBRARY_SEARCH_DIRS})
 mark_as_advanced(CLANG_${_libname_}_LIB)
 
 if (CLANG_${_libname_}_LIB)
@@ -43,7 +30,7 @@ if (CLANG_${_libname_}_LIB)
 	
 	list(APPEND clang_LIBRARY_LIST ${_libname_})
 else()
-	message(FATAL_ERROR "Clang/LLVM dependency: Cannot find library '${_libname_}'. Try modifying the llvm_LIB_DIR path.")
+	message(FATAL_ERROR "Clang/LLVM dependency: Cannot find library '${_libname_}'.")
 	set(clang_FOUND FALSE)
 endif()
 ENDMACRO(FIND_AND_ADD_CLANG_LIB)
@@ -208,7 +195,7 @@ FIND_AND_ADD_CLANG_LIB(LLVMSupport)
 FIND_AND_ADD_CLANG_LIB(LLVMDemangle)
 
 if(clang_FOUND)
-	set(clang_INCLUDE_DIRS ${llvm_INCLUDE_DIR} ${llvm_BUILD_INCLUDE_DIR} ${clang_INCLUDE_DIR} ${clang_BUILD_INCLUDE_DIR})
+	set(clang_INCLUDE_DIRS ${clang_INCLUDE_DIR})
 	set(clang_LIBRARIES ${clang_LIBRARY_LIST})
 
 	message(STATUS "...Clang OK.")
