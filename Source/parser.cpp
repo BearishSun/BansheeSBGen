@@ -57,6 +57,7 @@ std::string getNamespace(const RecordDecl* decl)
 	{
 		// Note: Not checking more than one level of namespaces
 		const NamespaceDecl* nsDecl = cast<NamespaceDecl>(nsContext);
+
 		nsName = nsDecl->getName();
 	}
 
@@ -104,9 +105,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			const RecordDecl* recordDecl = recordType->getDecl();
 
 			std::string sourceTypeName = recordDecl->getName();
-			std::string nsName = getNamespace(recordDecl);
 
-			if (sourceTypeName == "vector" && nsName == "std")
+			if (sourceTypeName == "vector" && recordDecl->isInStdNamespace())
 			{
 				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::Vector;
@@ -142,9 +142,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			const RecordDecl* recordDecl = recordType->getDecl();
 
 			std::string sourceTypeName = recordDecl->getName();
-			std::string nsName = getNamespace(recordDecl);
 
-			if (sourceTypeName == "vector" && nsName == "std")
+			if (sourceTypeName == "vector" && recordDecl->isInStdNamespace())
 			{
 				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::Vector;
@@ -177,7 +176,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 					}
 				}
 			}
-			else if (sourceTypeName == "basic_string" && nsName == "std")
+			else if (sourceTypeName == "basic_string" && recordDecl->isInStdNamespace())
 			{
 				realType = specType->getArg(0).getAsType();
 
@@ -191,7 +190,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 
 				return true;
 			}
-			else if (sourceTypeName == "shared_ptr" && nsName == "std")
+			else if (sourceTypeName == "shared_ptr" && recordDecl->isInStdNamespace())
 			{
 				typeFlags |= (int)TypeFlags::SrcSPtr;
 
@@ -240,7 +239,6 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 		const RecordDecl* recordDecl = recordType->getDecl();
 
 		std::string sourceTypeName = recordDecl->getName();
-		std::string nsName = getNamespace(recordDecl);
 
 		// Handle special templated types
 		const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
