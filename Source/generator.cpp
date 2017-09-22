@@ -1492,7 +1492,7 @@ std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 	bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
 
 	std::stringstream output;
-	output << "\t\ttypedef void(__stdcall *" << eventInfo.sourceName << "ThunkDef) (";
+	output << "\t\ttypedef void(BS_THUNKCALL *" << eventInfo.sourceName << "ThunkDef) (";
 	
 	if (!isStatic && !isModule)
 		output << "MonoObject*, ";
@@ -2450,7 +2450,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 			if (classType == ParsedType::Class)
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = bs_shared_ptr_new<" << sourceClassName << ">(" << methodArgs.str() << ");" << std::endl;
-				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
+				output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 				isValid = true;
 			}
 		}
@@ -2461,13 +2461,13 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 			if (classType == ParsedType::Class)
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
-				output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
+				output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
 				isValid = true;
 			}
 			else if (classType == ParsedType::Resource)
 			{
 				output << "\t\tResourceHandle<" << sourceClassName << "> instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
-				output << "\t\tScriptResourceBase* scriptInstance = ScriptResourceManager::instance().createBuiltinScriptResource(instance, managedInstance);" << std::endl;
+				output << "\t\tScriptResourceManager::instance().createBuiltinScriptResource(instance, managedInstance);" << std::endl;
 				isValid = true;
 			}
 		}
@@ -2892,13 +2892,13 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	for (auto& methodInfo : classInfo.ctorInfos)
 	{
-		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
+		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
 	}
 
 	for (auto& methodInfo : classInfo.methodInfos)
 	{
-		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", &" <<
+		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
 	}
 
@@ -2963,7 +2963,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 			output << ctorParamsInit.str();
 			output << "\t\tMonoObject* managedInstance = metaData.scriptClass->createInstance(\"" << ctorSignature.str() << "\", ctorParams);" << std::endl;
-			output << "\t\t" << interopClassName << "* scriptInstance = new (bs_alloc<" << interopClassName << ">()) " << interopClassName << "(managedInstance, value);" << std::endl;
+			output << "\t\tnew (bs_alloc<" << interopClassName << ">()) " << interopClassName << "(managedInstance, value);" << std::endl;
 			output << "\t\treturn managedInstance;" << std::endl;
 
 			output << "\t}" << std::endl;
@@ -3169,12 +3169,20 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 			// Arrays can be assigned, so copy them entry by entry
 			if(isArray(fieldInfo.flags))
 			{
-				output << "\t\tauto tmp" << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, false, output) << ";\n";
+				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo
+						.arraySize, false, output);
+
+				output << "\t\tauto tmp" << fieldInfo.name << " = " << argName << ";\n";
 				output << "\t\tfor(int i = 0; i < " << fieldInfo.arraySize << "; ++i)\n";
 				output << "\t\t\toutput." << fieldInfo.name << "[i] = tmp" << fieldInfo.name << "[i];\n";
 			}
 			else
-				output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, false, output) << ";\n";
+			{
+				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags,
+						fieldInfo .arraySize, false, output);
+
+				output << "\t\toutput." << fieldInfo.name << " = " << argName << ";\n";
+			}
 		}
 
 		output << "\n";
@@ -3187,7 +3195,11 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 
 		output << "\t\t" << structInfo.interopName << " output;\n";
 		for(auto& fieldInfo : structInfo.fields)
-			output << "\t\toutput." << fieldInfo.name << " = " << generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize, true, output) << ";\n";
+		{
+			std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags,
+					fieldInfo.arraySize, true, output);
+			output << "\t\toutput." << fieldInfo.name << " = " << argName << ";\n";
+		}
 
 		output << "\n";
 		output << "\t\treturn output;\n";
@@ -4215,7 +4227,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		output << "#pragma once" << std::endl;
 		output << std::endl;
 
-		output << "#include \"BsBuiltinComponentLookup.h\"" << std::endl;
+		output << "#include \"Serialization/BsBuiltinComponentLookup.h\"" << std::endl;
 		output << "#include \"Reflection/BsRTTIType.h\"" << std::endl;
 		output << includes.str();
 
