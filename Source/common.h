@@ -570,6 +570,15 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 		return outType;
 	}
 
+	if ((flags & (int)TypeFlags::SrcGHandle) != 0)
+	{
+		UserTypeInfo outType;
+		outType.scriptName = "SceneObject";
+		outType.type = ParsedType::SceneObject;
+
+		return outType;
+	}
+
 	auto iterFind = cppToCsTypeMap.find(sourceType);
 	if (iterFind == cppToCsTypeMap.end())
 	{

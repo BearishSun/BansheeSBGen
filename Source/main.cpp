@@ -96,6 +96,7 @@ int main(int argc, const char** argv)
 	cppToCsTypeMap["Rect2"] = UserTypeInfo("Rect2", ParsedType::Struct, "Math/BsRect2.h", "");
 	cppToCsTypeMap["Rect2I"] = UserTypeInfo("Rect2I", ParsedType::Struct, "Math/BsRect2I.h", "");
 	cppToCsTypeMap["Bounds"] = UserTypeInfo("Bounds", ParsedType::Struct, "Math/BsBounds.h", "");
+	cppToCsTypeMap["SceneObject"] = UserTypeInfo("SceneObject", ParsedType::Struct, "Scene/BsSceneObject.h", "Wrappers/BsScriptSceneObject.h");
 
 	CommonOptionsParser op(argc, argv, OptCategory);
 	ClangTool Tool(op.getCompilations(), op.getSourcePathList());
