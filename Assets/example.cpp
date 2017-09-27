@@ -264,7 +264,7 @@ struct BS_SCRIPT_EXPORT(pl:true) Str2 : public Str1
 	int cda;
 	BS_SCRIPT_EXPORT(ex:true)
 	float cdb;
-	std::string cdc;
+	std::wstring cdc;
 };
 
 class BS_SCRIPT_EXPORT() Cmp1 : public Component

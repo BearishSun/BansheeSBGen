@@ -181,7 +181,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 				realType = specType->getArg(0).getAsType();
 
 				const BuiltinType* builtinType = realType->getAs<BuiltinType>();
-				if (builtinType->getKind() == BuiltinType::Kind::WChar_U)
+				if (builtinType->getKind() == BuiltinType::Kind::WChar_U ||
+						builtinType->getKind() == BuiltinType::Kind::WChar_S)
 					typeFlags |= (int)TypeFlags::WString;
 				else
 					typeFlags |= (int)TypeFlags::String;
