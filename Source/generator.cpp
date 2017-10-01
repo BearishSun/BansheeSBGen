@@ -2271,9 +2271,9 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			std::string scriptName = "script" + name;
 			std::string scriptType = getScriptInteropType(typeName);
 
-			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, name);
 			preCallActions << "\t\tif(" << scriptName << " != nullptr)\n";
-			preCallActions << "\t\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+			preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getManagedInstance();" << std::endl;
 		}
 		break;
 		}
@@ -2758,7 +2758,8 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	for (auto& eventInfo : classInfo.eventInfos)
 	{
 		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-		if(isStatic || isModule)
+		bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
+		if(!isCallback && (isStatic || isModule))
 			output << "\t\tstatic HEvent " << eventInfo.sourceName << "Conn;" << std::endl;
 	}
 
@@ -2871,14 +2872,23 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for (auto& eventInfo : classInfo.eventInfos)
 		{
 			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+			bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
 			if (!isStatic)
 			{
-				output << "\t\tvalue->" << eventInfo.sourceName << ".connect(std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", this";
+				if (!isCallback)
+					output << "\t\tvalue->" << eventInfo.sourceName << ".connect(";
+				else
+					output << "\t\tvalue->" << eventInfo.sourceName << " = ";
+
+				output << "std::bind(&" << interopClassName << "::" << eventInfo.interopName << ", this";
 
 				for (int i = 0; i < (int)eventInfo.paramInfos.size(); i++)
 					output << ", std::placeholders::_" << (i + 1);
 
-				output << ")); " << std::endl;
+				if (!isCallback)
+					output << ")";
+
+				output << ");\n";
 			}
 		}
 	}
@@ -2989,16 +2999,27 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for(auto& eventInfo : classInfo.eventInfos)
 		{
 			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-			if(isStatic)
+			bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
+			if (!isCallback)
 			{
-				output << "\t\t" << eventInfo.sourceName << "Conn = ";
-				output << classInfo.name << "::" << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+				if (isStatic)
+				{
+					output << "\t\t" << eventInfo.sourceName << "Conn = ";
+					output << classInfo.name << "::" << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+				}
+				else if (isModule)
+				{
+
+					output << "\t\t" << eventInfo.sourceName << "Conn = ";
+					output << classInfo.name << "::instance()." << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+				}
 			}
-			else if(isModule)
+			else
 			{
-				
-				output << "\t\t" << eventInfo.sourceName << "Conn = ";
-				output << classInfo.name << "::instance()." << eventInfo.sourceName << ".connect(&" << interopClassName << "::" << eventInfo.interopName << ");" << std::endl;
+				if (isStatic)
+					output << classInfo.name << "::" << eventInfo.sourceName << " = &" << interopClassName << "::" << eventInfo.interopName << ";" << std::endl;
+				else if (isModule)
+					output << classInfo.name << "::instance()." << eventInfo.sourceName << " = &" << interopClassName << "::" << eventInfo.interopName << ";" << std::endl;
 			}
 		}
 
@@ -3010,7 +3031,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for(auto& eventInfo : classInfo.eventInfos)
 		{
 			bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
-			if(isStatic || isModule)
+			bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
+			if(!isCallback && (isStatic || isModule))
 				output << "\t\t" << eventInfo.sourceName << "Conn.disconnect();" << std::endl;
 		}
 
@@ -3601,34 +3623,54 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		properties << std::endl;
 	}
 
-	// Events
+	// Events & callbacks
 	for(auto& entry : input.eventInfos)
 	{
 		bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
+		bool isCallback = (entry.flags & (int)MethodFlags::Callback) != 0;
 
 		events << generateXMLComments(entry.documentation, "\t\t");
+		events << "\t\t";
 
-		if (entry.visibility == CSVisibility::Internal)
-			events << "\t\tinternal ";
-		else if (entry.visibility == CSVisibility::Private)
-			events << "\t\tprivate ";
-		else
-			events << "\t\tpublic ";
+		if (!isCallback)
+		{
+			if (entry.visibility == CSVisibility::Internal)
+				events << "internal ";
+			else if (entry.visibility == CSVisibility::Private)
+				events << "private ";
+			else
+				events << "public ";
+		}
 
 		if (isStatic || isModule)
 			events << "static ";
 
-		events << "event Action";
+		if (!isCallback)
+		{
+			events << "event Action";
+
+			if (!entry.paramInfos.empty())
+				events << "<" << generateCSEventSignature(entry) << ">";
 		
-		if (!entry.paramInfos.empty())
-			events << "<" << generateCSEventSignature(entry) << ">";
+			events << " " << entry.scriptName << ";\n\n";
+		}
+		else
+		{
+			events << "partial void " << entry.scriptName << "(";
+
+			if (!entry.paramInfos.empty())
+				events << generateCSMethodParams(entry, false);
 		
-		events << " " << entry.scriptName << ";\n\n";
+			events << ");\n\n";
+		}		
 
 		// Event interop
 		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
 		interops << "\t\t{" << std::endl;
-		interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");" << std::endl;
+		if (!isCallback)
+			interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");\n";
+		else
+			interops << "\t\t\t" << entry.scriptName << "(" << generateCSEventArgs(entry) << ");\n";
 		interops << "\t\t}" << std::endl;
 	}
 

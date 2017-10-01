@@ -301,12 +301,10 @@ struct FunctionTypeInfo
 	ParsedTypeInfo returnType;
 };
 
-bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& typeInfo)
+bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& typeInfo, bool& isCallback)
 {
 	if (type->isStructureOrClassType())
 	{
-		// Check for arrays
-		// Note: Not supporting nested arrays
 		const TemplateSpecializationType* specType = type->getAs<TemplateSpecializationType>();
 		int numArgs = 0;
 
@@ -321,7 +319,16 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 			std::string sourceTypeName = recordDecl->getName();
 			std::string nsName = getNamespace(recordDecl);
 
+			bool isEvent = false;
 			if (sourceTypeName == "Event" && nsName == "bs")
+				isEvent = true;
+			else if(sourceTypeName == "function" && recordDecl->isInStdNamespace())
+			{
+				isEvent = true;
+				isCallback = true;
+			}
+
+			if (isEvent)
 			{
 				type = specType->getArg(0).getAsType();
 				if(type->isFunctionProtoType())
@@ -1177,7 +1184,8 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 		return false;
 
 	FunctionTypeInfo eventSignature;
-	if (!parseEventSignature(decl->getType(), eventSignature))
+	bool isCallback = false;
+	if (!parseEventSignature(decl->getType(), eventSignature, isCallback))
 	{
 		outs() << "Error: Exported class field \"" + sourceFieldName + "\" isn't an event. Non-event class fields cannot be exported to the script interface.";
 		return false;
@@ -1196,6 +1204,9 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 
 	if ((parsedEventInfo.exportFlags & (int)ExportFlags::InteropOnly))
 		eventFlags |= (int)MethodFlags::InteropOnly;
+
+	if (isCallback)
+		eventFlags |= (int)MethodFlags::Callback;
 
 	eventInfo.sourceName = sourceFieldName;
 	eventInfo.scriptName = parsedEventInfo.exportName;

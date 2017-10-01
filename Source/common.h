@@ -71,7 +71,8 @@ enum class MethodFlags
 	Constructor = 1 << 2,
 	PropertyGetter = 1 << 3,
 	PropertySetter = 1 << 4,
-	InteropOnly = 1 << 5
+	InteropOnly = 1 << 5,
+	Callback = 1 << 6
 };
 
 enum class CSVisibility
@@ -572,11 +573,14 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 
 	if ((flags & (int)TypeFlags::SrcGHandle) != 0)
 	{
-		UserTypeInfo outType;
-		outType.scriptName = "SceneObject";
-		outType.type = ParsedType::SceneObject;
+		if (sourceType == "SceneObject")
+		{
+			UserTypeInfo outType;
+			outType.scriptName = "SceneObject";
+			outType.type = ParsedType::SceneObject;
 
-		return outType;
+			return outType;
+		}
 	}
 
 	auto iterFind = cppToCsTypeMap.find(sourceType);

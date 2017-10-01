@@ -14,7 +14,7 @@ public:
 private:
 	bool evaluateLiteral(Expr* expr, std::string& evalValue);
 	bool evaluateExpression(Expr* expr, std::string& evalValue, std::string& valType);
-	bool parseEventSignature(QualType type, FunctionTypeInfo& typeInfo);
+	bool parseEventSignature(QualType type, FunctionTypeInfo& typeInfo, bool& isCallback);
 	bool parseEvent(ValueDecl* decl, const std::string& className, MethodInfo& eventInfo);
 	bool parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue = false);
 	std::string parseTemplArguments(const std::string& className, const TemplateArgument* tmplArgs, unsigned numArgs, SmallVector<TemplateParamInfo, 0>* templParams);
