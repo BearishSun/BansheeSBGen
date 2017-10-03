@@ -2929,7 +2929,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << csType;
 
 			if ((I + 1) != eventInfo.paramInfos.end())
-				output << ", ";
+				output << ",";
 		}
 
 		output << "\")->getThunk();" << std::endl;
