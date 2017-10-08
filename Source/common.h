@@ -72,7 +72,8 @@ enum class MethodFlags
 	PropertyGetter = 1 << 3,
 	PropertySetter = 1 << 4,
 	InteropOnly = 1 << 5,
-	Callback = 1 << 6
+	Callback = 1 << 6,
+	FieldWrapper = 1 << 7
 };
 
 enum class CSVisibility
@@ -202,6 +203,7 @@ struct ClassInfo
 	std::vector<PropertyInfo> propertyInfos;
 	std::vector<MethodInfo> methodInfos;
 	std::vector<MethodInfo> eventInfos;
+	std::vector<FieldInfo> fieldInfos;
 	std::string baseClass;
 
 	CommentEntry documentation;

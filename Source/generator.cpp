@@ -481,6 +481,35 @@ void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
 	}
 }
 
+void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
+{
+	UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+
+	// These types never require additional includes
+	if (fieldTypeInfo.type == ParsedType::Builtin || fieldTypeInfo.type == ParsedType::String || fieldTypeInfo.type == ParsedType::WString)
+		return;
+
+	// If passed by value, we needs its header in our header
+	if (isSrcValue(fieldInfo.flags))
+		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, true);
+
+	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
+		fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject ||
+		fieldTypeInfo.type == ParsedType::Resource)
+	{
+		if (!fieldTypeInfo.destFile.empty())
+		{
+			std::string name = "__" + fieldInfo.type;
+			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, false);
+		}
+
+		if (fieldTypeInfo.type == ParsedType::Resource)
+			output.requiresResourceManager = true;
+		else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
+			output.requiresGameObjectManager = true;
+	}
+}
+
 void gatherIncludes(const ClassInfo& classInfo, IncludesInfo& output)
 {
 	for (auto& methodInfo : classInfo.ctorInfos)
@@ -498,33 +527,7 @@ void gatherIncludes(const StructInfo& structInfo, IncludesInfo& output)
 	if (structInfo.requiresInterop)
 	{
 		for (auto& fieldInfo : structInfo.fields)
-		{
-			UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
-
-			// These types never require additional includes
-			if (fieldTypeInfo.type == ParsedType::Builtin || fieldTypeInfo.type == ParsedType::String || fieldTypeInfo.type == ParsedType::WString)
-				continue;
-
-			// If passed by value, we needs its header in our header
-			if(isSrcValue(fieldInfo.flags))
-				output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, true);
-
-			if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
-				fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject || 
-				fieldTypeInfo.type == ParsedType::Resource)
-			{
-				if(!fieldTypeInfo.destFile.empty())
-				{
-					std::string name = "__" + fieldInfo.type;
-					output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, false);
-				}
-
-				if (fieldTypeInfo.type == ParsedType::Resource)
-					output.requiresResourceManager = true;
-				else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
-					output.requiresGameObjectManager = true;
-			}
-		}
+			gatherIncludes(fieldInfo, output);
 	}
 }
 
@@ -2513,7 +2516,8 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 			// Dereference input if needed
 			if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
 			{
-				if (isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || isSrcValue(methodInfo.returnInfo.flags))
+				if ((isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || 
+					isSrcValue(methodInfo.returnInfo.flags)) && !isSrcSPtr(methodInfo.returnInfo.flags))
 					returnAssignment = "*" + returnAssignment;
 			}
 
@@ -2536,6 +2540,131 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		output << std::endl;
 		output << returnStmt << std::endl;
 	}
+
+	output << "\t}" << std::endl;
+	return output.str();
+}
+
+std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldInfo& fieldInfo, const MethodInfo& methodInfo,	
+	ParsedType classType, bool isModule)
+{
+	std::string returnAssignment;
+	std::string returnStmt;
+	std::stringstream preCallActions;
+	std::stringstream methodArgs;
+	std::stringstream postCallActions;
+
+	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
+
+	bool returnAsParameter = false;
+	UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+	if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
+		returnAsParameter = true;
+	else
+	{
+		std::string returnType = getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
+		postCallActions << "\t\t" << returnType << " __output;" << std::endl;
+
+		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
+			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+
+		returnAssignment = argName + " = ";
+		returnStmt = "\t\treturn __output;";
+	}
+
+	if (returnAsParameter)
+	{
+		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
+			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+
+		returnAssignment = argName + " = ";
+	}
+
+	std::stringstream output;
+	output << "\t{" << std::endl;
+	output << preCallActions.str();
+
+	std::stringstream fieldAccess;
+	if (isStatic)
+		fieldAccess << classInfo.name << "::" << fieldInfo.name << ";"; 
+	else if(isModule)
+		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name << ";";
+	else
+	{
+		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase);
+		fieldAccess << "->" << fieldInfo.name << ";";
+	}
+
+	// Dereference input if needed
+	if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
+	{
+		if (isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || isSrcValue(methodInfo.returnInfo.flags))
+			returnAssignment = "*" + returnAssignment;
+	}
+
+	std::string access = getAsCppToInteropArgument(fieldAccess.str(), returnTypeInfo.type, methodInfo.returnInfo.flags, "return");
+
+	output << "\t\t" << returnAssignment << access << "\n";
+
+	std::string postCallActionsStr = postCallActions.str();
+	if (!postCallActionsStr.empty())
+		output << std::endl;
+
+	output << postCallActionsStr;
+
+	output << std::endl;
+	output << returnStmt << std::endl;
+
+	output << "\t}" << std::endl;
+	return output.str();
+}
+
+std::string generateCppFieldSetterBody(const ClassInfo& classInfo, const FieldInfo& fieldInfo, const MethodInfo& methodInfo,
+	ParsedType classType, bool isModule)
+{
+	std::stringstream preCallActions;
+	std::stringstream argValue;
+	std::stringstream postCallActions;
+
+	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
+	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
+
+	const VarInfo& paramInfo = methodInfo.paramInfos[0];
+	std::string argName = generateMethodBodyBlockForParam(paramInfo.name, paramInfo.type, paramInfo.flags, paramInfo.arraySize, false, false,
+		preCallActions, postCallActions);
+
+	if (!isArrayOrVector(paramInfo.flags))
+	{
+		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+
+		argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
+	}
+	else
+		argValue << getAsManagedToCppArgument(argName, ParsedType::Builtin, paramInfo.flags, methodInfo.sourceName);
+
+	std::stringstream output;
+	output << "\t{" << std::endl;
+	output << preCallActions.str();
+
+	std::stringstream fieldAccess;
+	if (isStatic)
+		fieldAccess << classInfo.name << "::" << fieldInfo.name; 
+	else if(isModule)
+		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name;
+	else
+	{
+		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase);
+		fieldAccess << "->" << fieldInfo.name;
+	}
+
+	output << "\t\t" << fieldAccess.str() << " = " << argValue.str() << ";\n";
+
+	std::string postCallActionsStr = postCallActions.str();
+	if (!postCallActionsStr.empty())
+		output << std::endl;
+
+	output << postCallActionsStr;
 
 	output << "\t}" << std::endl;
 	return output.str();
@@ -2710,7 +2839,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	if (typeInfo.type == ParsedType::Class && !isModule)
 	{
 		// getInternal() method (handle types have getHandle() implemented by their base type)
-		output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
+		if (isBase || !classInfo.baseClass.empty())
+			output << "\t\t" << wrappedDataType << " getInternal() const;\n";
+		else
+			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
 
 		// create() method
 		output << "\t\tstatic MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
@@ -2741,7 +2873,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << std::endl;
 
 	// Data member
-	if (typeInfo.type == ParsedType::Class && !isModule)
+	if (typeInfo.type == ParsedType::Class && !isModule && classInfo.baseClass.empty() && !isBase)
 	{
 		output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
 		output << std::endl;
@@ -2858,13 +2990,19 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "TScriptComponent(managedInstance, value)";
 	else // Class
 	{
-		if(!isModule)
+		if(!isModule && !isBase && classInfo.baseClass.empty())
 			output << "ScriptObject(managedInstance), mInternal(value)";
 		else
 			output << "ScriptObject(managedInstance)";
 	}
 	output << std::endl;
 	output << "\t{" << std::endl;
+
+	if (typeInfo.type == ParsedType::Class)
+	{
+		if (!isModule && (isBase || !classInfo.baseClass.empty()))
+			output << "\t\tmInternal = value;\n";
+	}
 
 	// Register any non-static events
 	if (!isModule)
@@ -2895,6 +3033,18 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	output << "\t}" << std::endl;
 	output << std::endl;
+
+	// getInternalMethod
+	if (typeInfo.type == ParsedType::Class)
+	{
+		if (isBase || !classInfo.baseClass.empty())
+		{
+			output << "\t" << wrappedDataType << " " << interopClassName << "::getInternal() const \n";
+			output << "\t{\n";
+			output << "\t\treturn std::static_pointer_cast<" << classInfo.name << ">(mInternal);\n";
+			output << "\t}\n\n";
+		}
+	}
 
 	// CLR hook registration
 	output << "\tvoid " << interopClassName << "::initRuntimeData()" << std::endl;
@@ -3059,6 +3209,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	else
 		interopClassThisPtrType = interopClassName;
 
+	// Constructors
 	for (auto I = classInfo.ctorInfos.begin(); I != classInfo.ctorInfos.end(); ++I)
 	{
 		const MethodInfo& methodInfo = *I;
@@ -3070,14 +3221,54 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << std::endl;
 	}
 
+	// Methods
 	for (auto I = classInfo.methodInfos.begin(); I != classInfo.methodInfos.end(); ++I)
 	{
 		const MethodInfo& methodInfo = *I;
+
+		if ((methodInfo.flags & (int)MethodFlags::FieldWrapper) != 0)
+			continue;
 
 		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppMethodBody(classInfo, methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
 
 		if ((I + 1) != classInfo.methodInfos.end())
+			output << std::endl;
+	}
+
+	// Field wrapper methods
+	for(auto I = classInfo.fieldInfos.begin(); I != classInfo.fieldInfos.end(); ++I)
+	{
+		const MethodInfo* setterInfo = nullptr;
+		const MethodInfo* getterInfo = nullptr;
+
+		std::string getterName = "get" + I->name;
+		std::string setterName = "set" + I->name;
+		for(auto& entry : classInfo.methodInfos)
+		{
+			if ((entry.flags & (int)MethodFlags::FieldWrapper) == 0)
+				continue;
+
+			if (entry.sourceName == getterName)
+				getterInfo = &entry;
+			else if (entry.sourceName == setterName)
+				setterInfo = &entry;
+
+			if (getterInfo != nullptr && setterInfo != nullptr)
+				break;
+		}
+
+		assert(getterInfo && setterInfo);
+
+		output << "\t" << generateCppMethodSignature(*getterInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
+		output << generateCppFieldGetterBody(classInfo, *I, *getterInfo, typeInfo.type, isModule);
+		
+		output << std::endl;
+
+		output << "\t" << generateCppMethodSignature(*setterInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
+		output << generateCppFieldSetterBody(classInfo, *I, *setterInfo, typeInfo.type, isModule);
+			
+		if ((I + 1) != classInfo.fieldInfos.end())
 			output << std::endl;
 	}
 

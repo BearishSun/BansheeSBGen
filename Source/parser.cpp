@@ -361,7 +361,7 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 
 struct ParsedDeclInfo
 {
-	StringRef exportName;
+	std::string exportName;
 	StringRef exportFile;
 	StringRef externalClass;
 	CSVisibility visibility;
@@ -384,6 +384,10 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 		return false;
 
 	output.exportName = sourceName;
+	
+	if (!output.exportName.empty())
+		output.exportName[0] = toupper(output.exportName[0]);
+
 	output.exportFile = sourceName;
 	output.visibility = CSVisibility::Public;
 	output.exportFlags = 0;
@@ -1186,10 +1190,7 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 	FunctionTypeInfo eventSignature;
 	bool isCallback = false;
 	if (!parseEventSignature(decl->getType(), eventSignature, isCallback))
-	{
-		outs() << "Error: Exported class field \"" + sourceFieldName + "\" isn't an event. Non-event class fields cannot be exported to the script interface.";
 		return false;
-	}
 
 	if (decl->getAccess() != AS_public)
 		outs() << "Error: Exported event \"" + sourceFieldName + "\" isn't public. This will likely result in invalid code generation.";
@@ -1337,7 +1338,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 		EnumEntryInfo entryInfo;
 		entryInfo.name = entryName.str();
-		entryInfo.scriptName = parsedEnumEntryInfo.exportName.str();
+		entryInfo.scriptName = parsedEnumEntryInfo.exportName;
 		parseJavadocComments(constDecl, entryInfo.documentation);
 
 		SmallString<5> valueStr;
@@ -2033,16 +2034,74 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					classInfo.methodInfos.push_back(methodInfo);
 			}
 
-			// Look for exported events
+			// Look for exported fields & events
 			for (auto I = curDecl->field_begin(); I != curDecl->field_end(); ++I)
 			{
 				FieldDecl* fieldDecl = *I;
 
 				MethodInfo eventInfo;
-				if (!parseEvent(fieldDecl, srcClassName, eventInfo))
-					continue;
+				if (parseEvent(fieldDecl, srcClassName, eventInfo))
+					classInfo.eventInfos.push_back(eventInfo);
+				else
+				{
+					FieldInfo fieldInfo;
+					fieldInfo.name = fieldDecl->getName();
 
-				classInfo.eventInfos.push_back(eventInfo);
+					AnnotateAttr* fieldAttr = fieldDecl->getAttr<AnnotateAttr>();
+					if (fieldAttr == nullptr)
+						continue;
+
+					ParsedDeclInfo parsedFieldInfo;
+					if (!parseExportAttribute(fieldAttr, fieldInfo.name, parsedFieldInfo))
+						continue;
+
+					std::string typeName;
+					if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
+					{
+						outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
+							<< srcClassName << "\". Skipping field.\n";
+						continue;
+					}
+
+					if (fieldDecl->getAccess() != AS_public)
+						outs() << "Error: Exported field \"" + fieldInfo.name + "\" isn't public. This will likely result in invalid code generation.";
+
+					parseJavadocComments(fieldDecl, fieldInfo.documentation);
+					classInfo.fieldInfos.push_back(fieldInfo);
+
+					// Register wrapper methods, this way we can re-use much of the same logic for method/property generation
+					MethodInfo getterInfo;
+					getterInfo.sourceName = "get" + fieldInfo.name;
+					getterInfo.scriptName = parsedFieldInfo.exportName;
+					getterInfo.returnInfo.flags = fieldInfo.flags;
+					getterInfo.returnInfo.arraySize = fieldInfo.arraySize;
+					getterInfo.returnInfo.type = fieldInfo.type;
+					getterInfo.visibility = parsedFieldInfo.visibility;
+					getterInfo.flags = (int)MethodFlags::PropertyGetter | (int)MethodFlags::FieldWrapper;
+
+					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)
+						getterInfo.flags |= (int)MethodFlags::InteropOnly;
+
+					VarInfo paramInfo;
+					paramInfo.flags = fieldInfo.flags;
+					paramInfo.arraySize = fieldInfo.arraySize;
+					paramInfo.type = fieldInfo.type;
+					paramInfo.name = "value";
+
+					MethodInfo setterInfo;
+					setterInfo.sourceName = "set" + fieldInfo.name;
+					setterInfo.scriptName = parsedFieldInfo.exportName;
+					setterInfo.documentation = fieldInfo.documentation;
+					setterInfo.paramInfos.push_back(paramInfo);
+					setterInfo.visibility = parsedFieldInfo.visibility;
+					setterInfo.flags = (int)MethodFlags::PropertySetter | (int)MethodFlags::FieldWrapper;
+
+					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)
+						setterInfo.flags |= (int)MethodFlags::InteropOnly;
+
+					classInfo.methodInfos.push_back(getterInfo);
+					classInfo.methodInfos.push_back(setterInfo);
+				}
 			}
 
 			// Find static data events
