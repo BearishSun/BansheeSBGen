@@ -35,6 +35,21 @@ class TEvent
 {
 };
 
+template<class Elem> class TResourceHandle
+{
+	
+};
+
+class Resource
+{
+	
+};
+
+class BS_SCRIPT_EXPORT() Texture : public Resource
+{
+	
+};
+
 template <typename Signature>
 class Event;
 
@@ -300,6 +315,12 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
+	
+	BS_SCRIPT_EXPORT()
+	std::vector<bs::TResourceHandle<bs::Texture>> textures;
+	
+	BS_SCRIPT_EXPORT()
+	std::vector<std::wstring> getIdentifiers() const;
 	
 	/** Some docs. */
 	BS_SCRIPT_EXPORT()

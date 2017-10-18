@@ -2634,14 +2634,8 @@ std::string generateCppFieldSetterBody(const ClassInfo& classInfo, const FieldIn
 	std::string argName = generateMethodBodyBlockForParam(paramInfo.name, paramInfo.type, paramInfo.flags, paramInfo.arraySize, false, false,
 		preCallActions, postCallActions);
 
-	if (!isArrayOrVector(paramInfo.flags))
-	{
-		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-
-		argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
-	}
-	else
-		argValue << getAsManagedToCppArgument(argName, ParsedType::Builtin, paramInfo.flags, methodInfo.sourceName);
+	UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+	argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
 
 	std::stringstream output;
 	output << "\t{" << std::endl;
@@ -3034,7 +3028,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\t}" << std::endl;
 	output << std::endl;
 
-	// getInternalMethod
+	// getInternal method
 	if (typeInfo.type == ParsedType::Class)
 	{
 		if (isBase || !classInfo.baseClass.empty())

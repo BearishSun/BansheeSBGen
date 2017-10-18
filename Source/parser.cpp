@@ -182,12 +182,16 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 
 				const BuiltinType* builtinType = realType->getAs<BuiltinType>();
 				if (builtinType->getKind() == BuiltinType::Kind::WChar_U ||
-						builtinType->getKind() == BuiltinType::Kind::WChar_S)
+					builtinType->getKind() == BuiltinType::Kind::WChar_S)
+				{
+					outType = "WString";
 					typeFlags |= (int)TypeFlags::WString;
+				}
 				else
+				{
+					outType = "String";
 					typeFlags |= (int)TypeFlags::String;
-
-				outType = "string";
+				}
 
 				return true;
 			}
@@ -350,9 +354,9 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 					else
 						typeInfo.returnType.flags = 0;
 				}
-			}
 
-			return true;
+				return true;
+			}
 		}
 	}
 
