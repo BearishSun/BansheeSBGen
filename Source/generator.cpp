@@ -1666,10 +1666,14 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
 			std::string scriptType = getScriptInteropType(typeName);
 
-			preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
+			preCallActions << "\t\t" << tmpType << " " << argName;
+			if ((returnValue || isOutput(flags)) && isPassedByValue(flags))
+				preCallActions << " = bs_shared_ptr_new<" << typeName << ">()";
+
+			preCallActions << ";\n";
 
 			if (returnValue)
-				postCallActions << "\t\t\t" << name << " = " << scriptType << "::create(" << argName << ");\n";
+				postCallActions << "\t\t" << name << " = " << scriptType << "::create(" << argName << ");\n";
 			else if (isOutput(flags))
 				postCallActions << "\t\t*" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
 			else
@@ -2599,7 +2603,8 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 	// Dereference input if needed
 	if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
 	{
-		if (isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || isSrcValue(methodInfo.returnInfo.flags))
+		if ((isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || 
+			isSrcValue(methodInfo.returnInfo.flags)) && !isSrcSPtr(methodInfo.returnInfo.flags))
 			returnAssignment = "*" + returnAssignment;
 	}
 

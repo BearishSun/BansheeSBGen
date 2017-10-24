@@ -682,6 +682,11 @@ inline bool isPlainStruct(ParsedType type, int flags)
 	return type == ParsedType::Struct && !isArrayOrVector(flags);
 }
 
+inline bool isPassedByValue(int flags)
+{
+	return (isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
+}
+
 inline bool canBeReturned(ParsedType type, int flags)
 {
 	if (isOutput(flags))
