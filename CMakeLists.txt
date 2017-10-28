@@ -3,7 +3,6 @@ project (BansheeSBGen)
 
 set(CMAKE_CXX_STANDARD 14)
 mark_as_advanced(CMAKE_CONFIGURATION_TYPES)
-mark_as_advanced(CMAKE_INSTALL_PREFIX)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake/Modules/")
 
@@ -36,3 +35,12 @@ else()
 	target_link_libraries(BansheeSBGen PUBLIC pthread rt dl m)
 endif()
 
+install(TARGETS BansheeSBGen 
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib)
+
+if(NOT WIN32)
+	install(DIRECTORY ${clang_INSTALL_DIR}/lib/clang/ 
+		DESTINATION lib/clang/)
+endif()
