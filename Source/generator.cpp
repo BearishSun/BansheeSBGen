@@ -874,6 +874,76 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 	return output.str();
 }
 
+void handleDefaultParams(MethodInfo& methodInfo, std::vector<MethodInfo>& newMethodInfos)
+{
+	int firstDefaultParam = -1;
+	int lastInvalidParam = -1;
+	for(int i = 0; i < methodInfo.paramInfos.size(); i++)
+	{
+		const VarInfo& param = methodInfo.paramInfos[i];
+
+		if (!param.defaultValue.empty())
+			firstDefaultParam = i;
+
+		if (!param.defaultValueType.empty())
+			lastInvalidParam = i;
+	}
+
+	// Nothing to handle
+	if (lastInvalidParam == -1)
+		return;
+
+	// Mark any non-complex default params as complex, so the generator doesn't generate them (since default arguments
+	// must follow them, which they can't because at least one is complex)
+	for(int i = firstDefaultParam; i <= lastInvalidParam; i++)
+	{
+		VarInfo& param = methodInfo.paramInfos[i];
+
+		if (param.defaultValueType.empty())
+			param.defaultValueType = "null";
+	}
+
+	// Generate a method for each default param
+	for(int i = lastInvalidParam; i >= firstDefaultParam; i--)
+	{
+		MethodInfo copyMethodInfo = methodInfo;
+
+		// Clear all param default values
+		for(int j = firstDefaultParam; j < i; j++)
+		{
+			VarInfo& param = copyMethodInfo.paramInfos[j];
+			param.defaultValue = "";
+			param.defaultValueType = "";
+		}
+
+		// Erase docs for the params we'll skip during generation
+		CommentEntry& docs = copyMethodInfo.documentation;
+		for(int j = i; j <= lastInvalidParam; j++)
+		{
+			const std::string& paramName = copyMethodInfo.paramInfos[j].name;
+
+			for(auto iter = docs.params.begin(); iter != docs.params.end();)
+			{
+				if (iter->name == paramName)
+					iter = docs.params.erase(iter);
+				else
+					++iter;
+			}
+		}
+
+		copyMethodInfo.flags |= (int)MethodFlags::CSOnly;
+		newMethodInfos.push_back(copyMethodInfo);
+	}
+
+	// Clear default params from this method
+	for(int i = firstDefaultParam; i <= lastInvalidParam; i++)
+	{
+		VarInfo& param = methodInfo.paramInfos[i];
+		param.defaultValue = "";
+		param.defaultValueType = "";
+	}
+}
+
 StructInfo* findStructInfo(const std::string& name)
 {
 	for (auto& fileInfo : outputFileInfos)
@@ -1363,6 +1433,27 @@ void postProcessFileInfos()
 
 			for (auto& entry : includesInfo.fwdDecls)
 				fileInfo.second.forwardDeclarations.insert(entry.second);
+		}
+	}
+
+	// Generate overloads for unsupported default parameters
+	for (auto& fileInfo : outputFileInfos)
+	{
+		for (auto& classInfo : fileInfo.second.classInfos)
+		{
+			std::vector<MethodInfo> newMethodInfos;
+			for (auto& methodInfo : classInfo.methodInfos)
+				handleDefaultParams(methodInfo, newMethodInfos);
+
+			for (auto& methodInfo : newMethodInfos)
+				classInfo.methodInfos.push_back(methodInfo);
+
+			std::vector<MethodInfo> newCtorInfos;
+			for (auto& ctorInfo : classInfo.ctorInfos)
+				handleDefaultParams(ctorInfo, newCtorInfos);
+
+			for (auto& ctorInfo : newCtorInfos)
+				classInfo.ctorInfos.push_back(ctorInfo);
 		}
 	}
 }
@@ -2905,10 +2996,20 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		interopClassThisPtrType = interopClassName;
 
 	for (auto& methodInfo : classInfo.ctorInfos)
+	{
+		if (isCSOnly(methodInfo.flags))
+			continue;
+
 		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
+	}
 
 	for (auto& methodInfo : classInfo.methodInfos)
+	{
+		if (isCSOnly(methodInfo.flags))
+			continue;
+
 		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
+	}
 
 	output << "\t};" << std::endl;
 	return output.str();
@@ -3051,12 +3152,18 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	for (auto& methodInfo : classInfo.ctorInfos)
 	{
+		if (isCSOnly(methodInfo.flags))
+			continue;
+
 		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
 	}
 
 	for (auto& methodInfo : classInfo.methodInfos)
 	{
+		if (isCSOnly(methodInfo.flags))
+			continue;
+
 		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
 	}
@@ -3213,6 +3320,9 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		const MethodInfo& methodInfo = *I;
 
+		if (isCSOnly(methodInfo.flags))
+			continue;
+
 		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppMethodBody(classInfo, methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
 
@@ -3224,6 +3334,9 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	for (auto I = classInfo.methodInfos.begin(); I != classInfo.methodInfos.end(); ++I)
 	{
 		const MethodInfo& methodInfo = *I;
+
+		if (isCSOnly(methodInfo.flags))
+			continue;
 
 		if ((methodInfo.flags & (int)MethodFlags::FieldWrapper) != 0)
 			continue;
@@ -3439,6 +3552,18 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 	{
 		const VarInfo& paramInfo = *I;
+
+		if(!forInterop && !paramInfo.defaultValueType.empty())
+		{
+			// We don't generate parameters that have complex default values (as they're not supported in C#).
+			// Instead the post-processor has generated different versions of this method, so we can just skip
+			// such parameters
+			continue;
+		}
+
+		if (I != methodInfo.paramInfos.begin())
+			output << ", ";
+
 		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
 		std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, forInterop);
 
@@ -3446,9 +3571,6 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 
 		if (!forInterop && !paramInfo.defaultValue.empty())
 			output << " = " << generateCSDefaultValueAssignment(paramInfo);
-
-		if ((I + 1) != methodInfo.paramInfos.end())
-			output << ", ";
 	}
 
 	return output.str();
@@ -3474,6 +3596,33 @@ std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 	}
 
 	return output.str();
+}
+
+std::string generateCSMethodDefaultParamAssignments(const MethodInfo& methodInfo, const std::string& indent)
+{
+	std::stringstream output;
+	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
+	{
+		const VarInfo& paramInfo = *I;
+		
+		if (paramInfo.defaultValueType.empty())
+			continue;
+
+		if (paramInfo.defaultValueType == "null")
+		{
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			output << indent << paramTypeInfo.scriptName << " " << paramInfo.name << " = " << paramInfo.defaultValue << ";\n";
+		}
+		else
+		{
+			UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
+			output << indent << defaultValTypeInfo.scriptName << " " << paramInfo.name << " = ";
+			output << "new " << defaultValTypeInfo.scriptName << "(" << paramInfo.defaultValue << ");\n";
+		}
+	}
+
+	return output.str();
+	
 }
 
 std::string generateCSEventSignature(const MethodInfo& methodInfo)
@@ -3594,14 +3743,17 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	// Constructors
 	for (auto& entry : input.ctorInfos)
 	{
-		// Generate interop
-		interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-		interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName << " managedInstance";
+		if (!isCSOnly(entry.flags))
+		{
+			// Generate interop
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName << " managedInstance";
 
-		if (entry.paramInfos.size() > 0)
-			interops << ", " << generateCSMethodParams(entry, true);
+			if (entry.paramInfos.size() > 0)
+				interops << ", " << generateCSMethodParams(entry, true);
 
-		interops << ");\n";
+			interops << ");\n";
+		}
 
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 		if (interopOnly)
@@ -3618,6 +3770,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		ctors << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 		ctors << "\t\t{" << std::endl;
+		ctors << generateCSMethodDefaultParamAssignments(entry, "\t\t\t");
 		ctors << "\t\t\tInternal_" << entry.interopName << "(this";
 
 		if (entry.paramInfos.size() > 0)
@@ -3632,9 +3785,12 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	for (auto& entry : input.methodInfos)
 	{
 		// Generate interop
-		interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
-		interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName, isModule) << ";";
-		interops << std::endl;
+		if (!isCSOnly(entry.flags))
+		{
+			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
+			interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName, isModule) << ";";
+			interops << std::endl;
+		}
 
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 		if (interopOnly)
@@ -3656,6 +3812,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 			ctors << typeInfo.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 			ctors << "\t\t{" << std::endl;
+			ctors << generateCSMethodDefaultParamAssignments(entry, "\t\t\t");
 			ctors << "\t\t\tInternal_" << entry.interopName << "(this";
 
 			if (entry.paramInfos.size() > 0)
@@ -3694,6 +3851,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 				methods << returnType << " " << entry.scriptName << "(" << generateCSMethodParams(entry, false) << ")" << std::endl;
 				methods << "\t\t{" << std::endl;
+				methods << generateCSMethodDefaultParamAssignments(entry, "\t\t\t");
 
 				bool returnByParam = false;
 				if (!entry.returnInfo.type.empty())
@@ -3973,6 +4131,15 @@ std::string generateCSStruct(StructInfo& input)
 			if (!isValidStructType(typeInfo, paramInfo.flags))
 			{
 				// We report the error during field generation, as it checks for the same condition
+				continue;
+			}
+
+			
+			if(!paramInfo.defaultValueType.empty())
+			{
+				// We don't generate parameters that have complex default values (as they're not supported in C#).
+				// Instead the post-processor has generated different versions of this method, so we can just skip
+				// such parameters
 				continue;
 			}
 

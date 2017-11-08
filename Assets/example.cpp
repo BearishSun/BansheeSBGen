@@ -223,6 +223,11 @@ enum BS_SCRIPT_EXPORT() FlgEnum
 	a, b, c
 };
 
+struct Vector3I
+{
+	Vector3I(int x, int y, int z);
+};
+
 typedef Flags<FlgEnum> FlgEnums;
 
 /** Animation keyframe, represented as an endpoint of a cubic hermite spline. */
@@ -315,6 +320,8 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
+	
+	BS_SCRIPT_EXPORT() void tst(Vector3I dft = Vector3I(1, 1, 1));
 	
 	BS_SCRIPT_EXPORT()
 	std::vector<bs::TResourceHandle<bs::Texture>> textures;

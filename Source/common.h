@@ -73,7 +73,8 @@ enum class MethodFlags
 	PropertySetter = 1 << 4,
 	InteropOnly = 1 << 5,
 	Callback = 1 << 6,
-	FieldWrapper = 1 << 7
+	FieldWrapper = 1 << 7,
+	CSOnly = 1 << 8
 };
 
 enum class CSVisibility
@@ -685,6 +686,11 @@ inline bool isPlainStruct(ParsedType type, int flags)
 inline bool isPassedByValue(int flags)
 {
 	return (isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
+}
+
+inline bool isCSOnly(int flags)
+{
+	return (flags & (int)MethodFlags::CSOnly) != 0;
 }
 
 inline bool canBeReturned(ParsedType type, int flags)
