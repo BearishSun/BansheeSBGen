@@ -258,19 +258,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 		}
 		else
 		{
-			// Check for ScriptObject types (this is a special type that allows interop with manually coded script bindings)
-			if(sourceTypeName == "ScriptObjectBase")
-			{
-				if (isSrcPointer(typeFlags))
-					typeFlags |= (int)TypeFlags::ScriptObject;
-				else
-				{
-					outs() << "Error: Found an object of type ScriptObjectBase but not passed by pointer. This is not supported. \n";
-					return false;
-				}
-			}
-			// Or just a direct pointer to the managed object
-			else if(sourceTypeName == "_MonoObject")
+			// Check for a direct pointer to a managed object
+			if(sourceTypeName == "_MonoObject")
 			{
 				if (isSrcPointer(typeFlags))
 					typeFlags |= (int)TypeFlags::MonoObject;

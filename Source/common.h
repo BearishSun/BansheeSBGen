@@ -41,7 +41,6 @@ enum class ParsedType
 	Builtin,
 	String,
 	WString,
-	ScriptObject,
 	MonoObject
 };
 
@@ -57,13 +56,12 @@ enum class TypeFlags
 	SrcGHandle = 1 << 7,
 	String = 1 << 8,
 	WString = 1 << 9,
-	ScriptObject = 1 << 10,
-	Function = 1 << 11,
-	ComplexStruct = 1 << 12,
-	FlagsEnum = 1 << 13,
-	ReferencesBase = 1 << 14,
-	Array = 1 << 15,
-	MonoObject = 1 << 16
+	Function = 1 << 10,
+	ComplexStruct = 1 << 11,
+	FlagsEnum = 1 << 12,
+	ReferencesBase = 1 << 13,
+	Array = 1 << 14,
+	MonoObject = 1 << 15
 };
 
 enum class MethodFlags
@@ -567,15 +565,6 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 		return outType;
 	}
 
-	if ((flags & (int)TypeFlags::ScriptObject) != 0)
-	{
-		UserTypeInfo outType;
-		outType.scriptName = "object";
-		outType.type = ParsedType::ScriptObject;
-
-		return outType;
-	}
-
 	if ((flags & (int)TypeFlags::MonoObject) != 0)
 	{
 		UserTypeInfo outType;
@@ -754,9 +743,6 @@ inline std::string getStructInteropType(const std::string& name)
 inline bool isValidStructType(UserTypeInfo& typeInfo, int flags)
 {
 	if (isOutput(flags))
-		return false;
-
-	if (typeInfo.type == ParsedType::ScriptObject)
 		return false;
 
 	return true;
