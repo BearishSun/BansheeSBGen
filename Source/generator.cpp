@@ -2932,6 +2932,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		else
 			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
 
+		// getManagedInstance() method (needed for events)
+		if (!classInfo.eventInfos.empty())
+			output << "\t\tMonoObject* getManagedInstance() const;\n";
+
 		// create() method
 		output << "\t\tstatic MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
 		output << std::endl;
@@ -2952,6 +2956,13 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	}
 
 	output << "\tprivate:" << std::endl;
+
+	// Handle (if required)
+	if (typeInfo.type == ParsedType::Class)
+	{
+		if (!classInfo.eventInfos.empty())
+			output << "\t\tUINT32 mGCHandle = 0;\n\n";
+	}
 
 	// Event callback methods
 	for (auto& eventInfo : classInfo.eventInfos)
@@ -3098,6 +3109,9 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	if (typeInfo.type == ParsedType::Class)
 	{
+		if (!classInfo.eventInfos.empty())
+			output << "\t\tmGCHandle = MonoUtil::newWeakGCHandle(managedInstance);\n";
+
 		if (!isModule && (isBase || !classInfo.baseClass.empty()))
 			output << "\t\tmInternal = value;\n";
 	}
@@ -3132,14 +3146,23 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\t}" << std::endl;
 	output << std::endl;
 
-	// getInternal method
 	if (typeInfo.type == ParsedType::Class)
 	{
+		// getInternal method
 		if (isBase || !classInfo.baseClass.empty())
 		{
 			output << "\t" << wrappedDataType << " " << interopClassName << "::getInternal() const \n";
 			output << "\t{\n";
 			output << "\t\treturn std::static_pointer_cast<" << classInfo.name << ">(mInternal);\n";
+			output << "\t}\n\n";
+		}
+
+		// getManagedInstance() method (needed for events)
+		if (!classInfo.eventInfos.empty())
+		{
+			output << "\tMonoObject* " << interopClassName << "::getManagedInstance() const\n";
+			output << "\t{\n";
+			output << "\t\treturn MonoUtil::getObjectFromGCHandle(mGCHandle);\n";
 			output << "\t}\n\n";
 		}
 	}
