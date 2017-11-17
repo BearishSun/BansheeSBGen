@@ -269,6 +269,17 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 					return false;
 				}
 			}
+			// Or just a direct pointer to the managed object
+			else if(sourceTypeName == "_MonoObject")
+			{
+				if (isSrcPointer(typeFlags))
+					typeFlags |= (int)TypeFlags::MonoObject;
+				else
+				{
+					outs() << "Error: Found an object of type MonoObject but not passed by pointer. This is not supported. \n";
+					return false;
+				}
+			}
 		}
 
 		// Its a user-defined type

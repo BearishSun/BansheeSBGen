@@ -171,6 +171,7 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 			return getArgumentPlain(false);
 		else
 			return getArgumentPlain(true);
+	case ParsedType::MonoObject:
 	case ParsedType::ScriptObject: // Input type is either a pointer or a pointer to pointer, depending if output or not
 		{
 			if (isOutput(flags))
@@ -252,6 +253,7 @@ std::string getAsCppToManagedArgument(const std::string& name, ParsedType type, 
 		}
 	}
 	case ParsedType::ScriptObject: // Always passed as a pointer, input must always be a pointer
+	case ParsedType::MonoObject:
 	case ParsedType::String:
 	case ParsedType::WString:
 	case ParsedType::Component:
@@ -286,6 +288,7 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 		}
 	}
 	case ParsedType::ScriptObject: // Always passed as a pointer, input must always be a pointer
+	case ParsedType::MonoObject:
 			return name;
 	case ParsedType::Component: // Always passed as a handle, input must be a handle
 	case ParsedType::SceneObject:
@@ -1751,6 +1754,26 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 		}
 		break;
+		case ParsedType::MonoObject:
+		{
+			argName = "tmp" + name;
+			
+			if (returnValue)
+			{
+				preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
+				postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
+			}
+			else if (isOutput(flags))
+			{
+				preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
+				postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
+			}
+			else
+			{
+				outs() << "Error: MonoObject type not supported as input. Ignoring. \n";
+			}
+		}
+		break;
 		case ParsedType::Class:
 		{
 			argName = "tmp" + name;
@@ -1826,6 +1849,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			entryType = typeName;
 			break;
 		case ParsedType::ScriptObject:
+		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
@@ -1871,6 +1895,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				break;
 			case ParsedType::ScriptObject:
 				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
+				break;
+			case ParsedType::MonoObject:
+				outs() << "Error: MonoObject type not supported as input. Ignoring. \n";
 				break;
 			case ParsedType::Enum:
 			{
@@ -1964,6 +1991,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				break;
 			case ParsedType::ScriptObject:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]->getManagedInstance());" << std::endl;
+				break;
+			case ParsedType::MonoObject:
+				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << argName << "[i]));" << std::endl;
@@ -2065,6 +2095,14 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			outs() << "ScriptObject cannot be used a struct field. \n";
 		}
 		break;
+		case ParsedType::MonoObject:
+		{
+			arg = "tmp" + name;
+
+			preActions << "\t\tMonoObject* " << arg << ";" << std::endl;
+			preActions << "\t\t" << arg << " = " << name << ";" << std::endl;
+		}
+		break;
 		case ParsedType::Class:
 		{
 			arg = "tmp" + name;
@@ -2162,6 +2200,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			entryType = typeName;
 			break;
 		case ParsedType::ScriptObject:
+		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
@@ -2204,6 +2243,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				break;
 			case ParsedType::ScriptObject:
 				outs() << "Error: ScriptObjectBase type not supported as input. Ignoring. \n";
+				break;
+			case ParsedType::MonoObject:
+				outs() << "Error: MonoObject type not supported as input. Ignoring. \n";
 				break;
 			case ParsedType::Enum:
 			{
@@ -2266,6 +2308,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				break;
 			case ParsedType::ScriptObject:
 				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]->getManagedInstance());" << std::endl;
+				break;
+			case ParsedType::MonoObject:
+				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
 				preActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(value." << name << "[i]));" << std::endl;
@@ -2352,6 +2397,12 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << name << "->getManagedInstance();" << std::endl;
 		}
 		break;
+		case ParsedType::MonoObject:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoObject* " << argName << " = " << name << ";\n";
+		}
+		break;
 		case ParsedType::Class:
 		{
 			argName = "tmp" + name;
@@ -2390,6 +2441,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			entryType = typeName;
 			break;
 		case ParsedType::ScriptObject:
+		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
@@ -2449,6 +2501,9 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\t\t\t" << arrayName << ".set(i, " << name << "[i]->getManagedInstance());" << std::endl;
 			preCallActions << "\t\t\telse\n";
 			preCallActions << "\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
+			break;
+		case ParsedType::MonoObject:
+			preCallActions << "\t\t\t\t" << arrayName << ".set(i, " << name << "[i]);" << std::endl;
 			break;
 		case ParsedType::Class:
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << name << "[i]));" << std::endl;

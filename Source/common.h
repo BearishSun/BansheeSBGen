@@ -41,7 +41,8 @@ enum class ParsedType
 	Builtin,
 	String,
 	WString,
-	ScriptObject
+	ScriptObject,
+	MonoObject
 };
 
 enum class TypeFlags
@@ -61,7 +62,8 @@ enum class TypeFlags
 	ComplexStruct = 1 << 12,
 	FlagsEnum = 1 << 13,
 	ReferencesBase = 1 << 14,
-	Array = 1 << 15
+	Array = 1 << 15,
+	MonoObject = 1 << 16
 };
 
 enum class MethodFlags
@@ -570,6 +572,15 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 		UserTypeInfo outType;
 		outType.scriptName = "object";
 		outType.type = ParsedType::ScriptObject;
+
+		return outType;
+	}
+
+	if ((flags & (int)TypeFlags::MonoObject) != 0)
+	{
+		UserTypeInfo outType;
+		outType.scriptName = "object";
+		outType.type = ParsedType::MonoObject;
 
 		return outType;
 	}
