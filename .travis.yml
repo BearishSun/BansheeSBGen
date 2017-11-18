@@ -1,0 +1,70 @@
+sudo: false
+language: cpp
+compiler:
+  - gcc
+cache:
+  - apt
+  
+matrix:
+  include:
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - gcc-7
+            - g++-7
+            - binutils-2.26
+          update-alternatives:
+            - install /usr/bin/gcc gcc /usr/bin/gcc-7 50
+            - install /usr/bin/g++ g++ /usr/bin/g++-7 50
+      env:
+        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+
+before_install:
+  - eval "${MATRIX_EVAL}"
+  
+install:
+  - DEPS_DIR="${TRAVIS_BUILD_DIR}/Dependencies"
+
+  # Download CMake
+  - mkdir ${DEPS_DIR} && cd ${DEPS_DIR}
+  - |
+    if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then
+      CMAKE_URL="https://cmake.org/files/v3.9/cmake-3.9.6-Linux-x86_64.tar.gz"
+    elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
+      CMAKE_URL="https://cmake.org/files/v3.9/cmake-3.9.6-Darwin-x86_64.tar.gz"
+    fi
+  - mkdir cmake
+  - travis_retry wget --no-check-certificate --quiet -O - ${CMAKE_URL} | tar --strip-components=1 -xz -C cmake
+  - export PATH=${DEPS_DIR}/cmake/bin:${PATH}
+
+  # Download pre-built Clang & LLVM libraries
+  - |
+    if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then
+      CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_Linux.zip"
+    elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
+      CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_macOS.zip"
+    fi
+  - mkdir clang
+  - travis_retry wget --no-check-certificate --quiet -O clang.zip ${CLANG_URL} 
+  - unzip -q clang.zip -d clang
+
+  - cd ..
+
+script:
+  - ld --version
+  - mkdir Build
+  - mkdir Install
+  - cd Build
+  - ${DEPS_DIR}/cmake/bin/cmake .. -Dclang_INSTALL_DIR:STRING=${DEPS_DIR}/clang -DCMAKE_INSTALL_PREFIX:STRING=${INSTALL_DIR}
+  - make -j
+  
+after_success:
+  - cd ..
+  - make install
+  - today=`date +%Y-%m-%d.%H:%M:%S`
+  - filename=SBGen_${TRAVIS_OS_NAME}_${today}.zip
+  - zip -rq ${filename} Install
+  - curl --ftp-create-dirs -T ${filename} -u ${FTP_USER}:${FTP_PASSWORD} ${FTP_DESTINATION}
