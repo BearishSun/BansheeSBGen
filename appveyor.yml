@@ -25,7 +25,7 @@ install:
   - cmd: cd ..
 
 build_script:
-  - cmd: set INSTALL_DIR=C:/Projects/BansheeSBGen/Install
+  - cmd: set INSTALL_DIR=C:/Projects/BansheeSBGen/CI
   - cmd: mkdir "%INSTALL_DIR%"
   - cmd: mkdir Build
   - cmd: cd Build
@@ -34,7 +34,7 @@ build_script:
   - cmd: cmake --build ./ --config Release --target INSTALL
   
 artifacts:
-  - path: Install/*
+  - path: CI\bin
     name: SBGen_Win64_$(APPVEYOR_BUILD_NUMBER)
     type: zip
 
@@ -44,6 +44,8 @@ deploy:
     host: $(FTP_HOST)
     username: $(FTP_USER)
     password: $(FTP_PASSWORD)
-    folder: /data/web/e53796/html/data/CI
+    folder: /data/web/e53796/html/data
     application:
     active_mode: false
+    beta: true
+    debug: true
