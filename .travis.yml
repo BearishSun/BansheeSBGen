@@ -1,13 +1,11 @@
 sudo: false
 language: cpp
-compiler:
-  - gcc
-cache:
-  - apt
-  
+
 matrix:
   include:
     - os: linux
+      compiler:
+        - gcc
       addons:
         apt:
           sources:
@@ -21,6 +19,12 @@ matrix:
             - install /usr/bin/g++ g++ /usr/bin/g++-7 50
       env:
         - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    - os: osx
+      compiler:
+        - clang 	
+      osx_image: xcode9
+      env:
+        - MATRIX_EVAL=""
 
 before_install:
   - eval "${MATRIX_EVAL}"
@@ -60,13 +64,11 @@ script:
   - ${DEPS_DIR}/cmake/bin/cmake .. -Dclang_INSTALL_DIR:STRING=${DEPS_DIR}/clang -DCMAKE_INSTALL_PREFIX:STRING=${INSTALL_DIR}
   - make -j
   - make install
-  - ls ${INSTALL_DIR}
-  - pwd
   
 after_success:
-  - pwd
   - cd ..
   - today=`date +%Y-%m-%d.%H:%M:%S`
   - filename=SBGen_${TRAVIS_OS_NAME}_${today}.zip
-  - zip -rq ${filename} Install
+  - cd ${INSTALL_DIR}
+  - zip -rq ${filename} ./*
   - curl --ftp-create-dirs -T ${filename} -u ${FTP_USER}:${FTP_PASSWORD} ${FTP_DESTINATION}
