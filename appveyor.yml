@@ -1,0 +1,49 @@
+image: Visual Studio 2017
+platform: x64
+configuration: Release
+clone_folder: C:\Projects\BansheeSBGen
+
+environment:
+  FTP_USER:
+    secure: 6/QO2m0slpHVIaSvCgshSQ==
+  FTP_PASSWORD:
+    secure: NZnU8rVuQ/CeRYWBRObDfQ==
+  FTP_HOST:
+    secure: vkR/qaZuHZ7k7iZQBfLlNYJzx/+rzkhRlOloJq7o0mk=
+
+install:
+  - cmd: set DEPS_DIR=%APPVEYOR_BUILD_FOLDER%/Dependencies
+  - cmd: mkdir "%DEPS_DIR%"
+  - cmd: cd "%DEPS_DIR%"
+  
+  # Download pre-built Clang & LLVM libraries
+  - cmd: set CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_Win64.zip"
+  - cmd: mkdir clang
+  - cmd: curl -o clang.zip %CLANG_URL%
+  - cmd: 7z x -oclang clang.zip
+  
+  - cmd: cd ..
+
+build_script:
+  - cmd: set INSTALL_DIR=C:/Projects/BansheeSBGen/Install
+  - cmd: mkdir "%INSTALL_DIR%"
+  - cmd: mkdir Build
+  - cmd: cd Build
+  - cmd: cmake -G "Visual Studio 15 2017 Win64" -Dclang_INSTALL_DIR:STRING="%DEPS_DIR%/clang" -DCMAKE_INSTALL_PREFIX:STRING=%INSTALL_DIR% ..
+  - cmd: cmake --build ./ --config Release
+  - cmd: cmake --build ./ --config Release --target INSTALL
+  
+artifacts:
+  - path: Install/*
+    name: SBGen_Win64_$(APPVEYOR_BUILD_NUMBER)
+    type: zip
+
+deploy:
+  - provider: FTP
+    protocol: ftp
+    host: $(FTP_HOST)
+    username: $(FTP_USER)
+    password: $(FTP_PASSWORD)
+    folder: /data/web/e53796/html/data/CI
+    application:
+    active_mode: false
