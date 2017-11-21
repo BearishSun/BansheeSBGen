@@ -1,3 +1,7 @@
+[![Build Status](https://travis-ci.org/BearishSun/BansheeSBGen.svg?branch=master)](https://travis-ci.org/BearishSun/BansheeSBGen)
+[![Build status](https://ci.appveyor.com/api/projects/status/lfpbyfy08jvuh0kt?svg=true)](https://ci.appveyor.com/project/BearishSun/bansheesbgen)
+
+
 Tool used for automatic script binding generation for Banshee 3D game engine.
 
 # Setting up dependencies
