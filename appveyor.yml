@@ -44,7 +44,7 @@ deploy:
     host: $(FTP_HOST)
     username: $(FTP_USER)
     password: $(FTP_PASSWORD)
-    folder: /data/web/e53796/html/data
+    folder: data
     application:
     active_mode: false
     beta: true

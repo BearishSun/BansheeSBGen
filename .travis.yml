@@ -40,8 +40,6 @@ install:
       mkdir cmake
       travis_retry wget --no-check-certificate --quiet -O - ${CMAKE_URL} | tar --strip-components=1 -xz -C cmake
       export PATH=${DEPS_DIR}/cmake/bin:${PATH}
-    elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
-      brew install cmake
     fi
 
   # Download pre-built Clang & LLVM libraries
@@ -49,7 +47,7 @@ install:
     if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then
       CLANG_URL="http://releases.llvm.org/5.0.0/clang+llvm-5.0.0-linux-x86_64-ubuntu14.04.tar.xz"
     elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
-      CLANG_URL="http://releases.llvm.org/5.0.0/clang+llvm-5.0.0-x86_64-apple-darwin.tar.xz"
+      CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_macOS.tar.xz"
     fi
   - mkdir clang
   - travis_retry wget --no-check-certificate --quiet -O clang.tar.xz ${CLANG_URL} 
@@ -61,7 +59,7 @@ script:
   - INSTALL_DIR="${TRAVIS_BUILD_DIR}/Install"
   - mkdir ${INSTALL_DIR}
   - mkdir Build && cd Build
-  - ${DEPS_DIR}/cmake/bin/cmake .. -Dclang_INSTALL_DIR:STRING=${DEPS_DIR}/clang -DCMAKE_INSTALL_PREFIX:STRING=${INSTALL_DIR}
+  - cmake .. -Dclang_INSTALL_DIR:STRING=${DEPS_DIR}/clang -DCMAKE_INSTALL_PREFIX:STRING=${INSTALL_DIR}
   - make -j
   - make install
   
