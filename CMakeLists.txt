@@ -34,7 +34,7 @@ if(WIN32)
 elseif(APPLE)
 	target_link_libraries(BansheeSBGen PUBLIC curses z m)
 elseif(UNIX)
-	target_link_libraries(BansheeSBGen PUBLIC pthread rt dl m)
+	target_link_libraries(BansheeSBGen PUBLIC curses z pthread rt dl m)
 endif()
 
 install(TARGETS BansheeSBGen 

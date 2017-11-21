@@ -27,7 +27,7 @@ before_install:
   
 install:
   - DEPS_DIR="${TRAVIS_BUILD_DIR}/Dependencies"
-
+  
   # Download CMake
   - mkdir ${DEPS_DIR} && cd ${DEPS_DIR}
   - |
@@ -43,27 +43,29 @@ install:
   # Download pre-built Clang & LLVM libraries
   - |
     if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then
-      CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_Linux.zip"
+      CLANG_URL="http://releases.llvm.org/5.0.0/clang+llvm-5.0.0-linux-x86_64-ubuntu14.04.tar.xz"
     elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
-      CLANG_URL="http://data.banshee3d.com/ClangLLVM_5.0.0_macOS.zip"
+      CLANG_URL="http://releases.llvm.org/5.0.0/clang+llvm-5.0.0-x86_64-apple-darwin.tar.xz"
     fi
   - mkdir clang
-  - travis_retry wget --no-check-certificate --quiet -O clang.zip ${CLANG_URL} 
-  - unzip -q clang.zip -d clang
+  - travis_retry wget --no-check-certificate --quiet -O clang.tar.xz ${CLANG_URL} 
+  - tar --strip-components=1 -xf clang.tar.xz -C clang
 
   - cd ..
 
 script:
-  - ld --version
-  - mkdir Build
-  - mkdir Install
-  - cd Build
+  - INSTALL_DIR="${TRAVIS_BUILD_DIR}/Install"
+  - mkdir ${INSTALL_DIR}
+  - mkdir Build && cd Build
   - ${DEPS_DIR}/cmake/bin/cmake .. -Dclang_INSTALL_DIR:STRING=${DEPS_DIR}/clang -DCMAKE_INSTALL_PREFIX:STRING=${INSTALL_DIR}
   - make -j
+  - make install
+  - ls ${INSTALL_DIR}
+  - pwd
   
 after_success:
+  - pwd
   - cd ..
-  - make install
   - today=`date +%Y-%m-%d.%H:%M:%S`
   - filename=SBGen_${TRAVIS_OS_NAME}_${today}.zip
   - zip -rq ${filename} Install
