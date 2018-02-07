@@ -688,6 +688,29 @@ inline bool isPassedByValue(int flags)
 	return (isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
 }
 
+inline bool isReferenceType(ParsedType type, int flags)
+{
+	if (isArrayOrVector(flags))
+		return true;
+
+	switch(type)
+	{
+	case ParsedType::Component:
+	case ParsedType::SceneObject:
+	case ParsedType::Resource:
+	case ParsedType::Class:
+	case ParsedType::String:
+	case ParsedType::WString:
+	case ParsedType::MonoObject:
+		return true;
+	case ParsedType::Struct:
+	case ParsedType::Enum:
+	case ParsedType::Builtin:
+	default: 
+		return false;
+	}
+}
+
 inline bool isCSOnly(int flags)
 {
 	return (flags & (int)MethodFlags::CSOnly) != 0;

@@ -1659,7 +1659,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					if(isComplexStruct(flags))
 					{
 						std::string scriptType = getScriptInteropType(typeName);
-						postCallActions << "\t\t*" << name << " = " << scriptType << "::toInterop(" << argName << ");" << std::endl;
+
+						postCallActions << "\t\t" << getStructInteropType(typeName) << " interop" << name << ";\n";
+						postCallActions << "\t\tinterop" << name << " = " << scriptType << "::toInterop(" << argName << ");\n";
+
+						postCallActions << "\t\tMonoUtil::valueCopy(" << name << ", ";
+						postCallActions << "&interop" << name << ", ";
+						postCallActions << scriptType << "::getMetaData()->scriptClass->_getInternalClass());\n";
 					}
 					else
 						postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
@@ -1677,7 +1683,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
 
 					std::string scriptType = getScriptInteropType(typeName);
-					postCallActions << "\t\t*" << name << " = " << scriptType << "::toInterop(" << argName << ");" << std::endl;
+
+					postCallActions << "\t\t" << getStructInteropType(typeName) << " interop" << name << ";\n";
+					postCallActions << "\t\tinterop" << name << " = " << scriptType << "::toInterop(" << argName << ");\n";
+
+					postCallActions << "\t\tMonoUtil::valueCopy(" << name << ", ";
+					postCallActions << "&interop" << name << ", ";
+					postCallActions << scriptType << "::getMetaData()->scriptClass->_getInternalClass());\n";
 				}
 				else if (isFlagsEnum(flags))
 				{
@@ -3544,6 +3556,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 		{
 			std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags,
 					fieldInfo.arraySize, true, output);
+
 			output << "\t\toutput." << fieldInfo.name << " = " << argName << ";\n";
 		}
 
