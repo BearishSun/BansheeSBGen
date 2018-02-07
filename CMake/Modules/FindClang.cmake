@@ -37,7 +37,7 @@ else()
 endif()
 ENDMACRO(FIND_AND_ADD_CLANG_LIB)
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
 	find_program(LLVM_CONFIG_PATH llvm-config ${clang_BINARY_SEARCH_DIRS})
 	mark_as_advanced(LLVM_CONFIG_PATH)
 
