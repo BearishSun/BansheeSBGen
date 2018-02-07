@@ -4,10 +4,12 @@
 #  clang_INCLUDE_DIRS
 #  clang_LIBRARIES
 #  clang_FOUND
+#  LLVM_CONFIG
 
 set(clang_INSTALL_DIR ${PROJECT_SOURCE_DIR}/Dependencies/llvm CACHE PATH "")
 set(clang_INCLUDE_SEARCH_DIRS "${clang_INSTALL_DIR}/include")
 set(clang_LIBRARY_SEARCH_DIRS "${clang_INSTALL_DIR}/lib")
+set(clang_BINARY_SEARCH_DIRS "${clang_INSTALL_DIR}/bin")
 
 message(STATUS "Looking for Clang & LLVM installation...")
 find_path(clang_INCLUDE_DIR llvm/Pass.h PATHS "${clang_INCLUDE_SEARCH_DIRS}")
@@ -34,6 +36,16 @@ else()
 	set(clang_FOUND FALSE)
 endif()
 ENDMACRO(FIND_AND_ADD_CLANG_LIB)
+
+find_program(LLVM_CONFIG_PATH llvm-config ${clang_BINARY_SEARCH_DIRS})
+mark_as_advanced(LLVM_CONFIG_PATH)
+
+if (LLVM_CONFIG_PATH)
+	set(LLVM_CONFIG ${LLVM_CONFIG_PATH})
+else()
+	message(FATAL_ERROR "Clang/LLVM dependency: Cannot find llvm-config.")
+	set(clang_FOUND FALSE)
+endif()
 
 # Clang libraries must be specified before LLVM (order matters)
 ## Not all of these may be required but there is no llvm-config for clang to easily determine which ones are

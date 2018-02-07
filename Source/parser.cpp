@@ -1614,7 +1614,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 									if (field)
 										fieldName = field->getName();
 
-									outs() << "Error: Unrecognized initializer format in struct \"" + srcClassName + "\ for field \"" + fieldName + "\".\n";
+									outs() << "Error: Unrecognized initializer format in struct \"" << srcClassName << "\" for field \"" << fieldName << "\".\n";
 								}
 							}
 						}
