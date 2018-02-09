@@ -1724,7 +1724,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = MonoUtil::stringToMono(" << argName << ");" << std::endl;
 			else if (isOutput(flags))
-				postCallActions << "\t\t*" << name << " = MonoUtil::stringToMono(" << argName << ");" << std::endl;
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ",  (MonoObject*)MonoUtil::stringToMono(" << argName << "));" << std::endl;
 			else
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
 		}
@@ -1737,7 +1737,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = MonoUtil::wstringToMono(" << argName << ");" << std::endl;
 			else if (isOutput(flags))
-				postCallActions << "\t\t*" << name << " = MonoUtil::wstringToMono(" << argName << ");" << std::endl;
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", (MonoObject*)MonoUtil::wstringToMono(" << argName << "));" << std::endl;
 			else
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToWString(" << name << ");" << std::endl;
 		}
@@ -1754,7 +1754,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			else if (isOutput(flags))
 			{
 				preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
-				postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << argName << ");" << std::endl;
 			}
 			else
 			{
@@ -1777,7 +1777,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = " << scriptType << "::create(" << argName << ");\n";
 			else if (isOutput(flags))
-				postCallActions << "\t\t*" << name << " = " << scriptType << "::create(" << argName << ");" << std::endl;
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << scriptType << "::create(" << argName << "));" << std::endl;
 			else
 			{
 				std::string scriptName = "script" + name;
@@ -1809,7 +1809,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
 				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				postCallActions << "\t\t\t*" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
+				postCallActions << "\t\t\tMonoUtil::referenceCopy(" << name << ", " << scriptName << "->getManagedInstance());" << std::endl;
 				postCallActions << "\t\telse" << std::endl;
 				postCallActions << "\t\t\t*" << name << " = nullptr;" << std::endl;
 			}
@@ -1997,7 +1997,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = " << arrayName << ".getInternal();" << std::endl;
 			else
-				postCallActions << "\t\t*" << name << " = " << arrayName << ".getInternal();" << std::endl;
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", (MonoObject*)" << arrayName << ".getInternal());" << std::endl;
 		}
 
 		return argName;
