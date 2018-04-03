@@ -636,7 +636,7 @@ bool isModule(const CXXRecordDecl* decl)
 }
 
 ScriptExportParser::ScriptExportParser(CompilerInstance* CI)
-	:astContext(&(CI->getASTContext()))
+	:astContext(&(CI->getASTContext())), preprocessor(CI->getPreprocessor())
 { }
 
 bool ScriptExportParser::evaluateLiteral(Expr* expr, std::string& evalValue)

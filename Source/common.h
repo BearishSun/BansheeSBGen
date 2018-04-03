@@ -10,6 +10,7 @@
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "clang/Lex/Lexer.h"
+#include "clang/Lex/HeaderSearch.h"
 #include "llvm/Support/Path.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/Comment.h"
@@ -786,6 +787,43 @@ inline std::string getDefaultValue(const std::string& typeName, const UserTypeIn
 
 	assert(false);
 	return ""; // Shouldn't be reached
+}
+
+inline std::string getRelativeTo(const StringRef& path, const StringRef& relativeTo)
+{
+	SmallVector<char, 100> relativeToVector(relativeTo.begin(), relativeTo.end());
+
+	vfs::getRealFileSystem()->makeAbsolute(relativeToVector);
+	StringRef absRelativeTo(relativeToVector.data(), relativeToVector.size());
+
+	SmallVector<char, 100> output;
+
+	auto iterPath = llvm::sys::path::begin(path);
+	auto iterRelativePath = llvm::sys::path::begin(absRelativeTo);
+
+	bool foundRelative = false;
+	for(; iterPath != llvm::sys::path::end(path) && iterRelativePath != llvm::sys::path::end(absRelativeTo); ++iterPath, ++iterRelativePath)
+	{
+		if (*iterPath != *iterRelativePath)
+			break;
+
+		foundRelative = true;
+	}
+
+	if (!foundRelative)
+		return path;
+
+	for(; iterRelativePath != llvm::sys::path::end(absRelativeTo); ++iterRelativePath)
+		llvm::sys::path::append(output, "..");
+
+	// Extra for folder for file type (not part of relativeTo)
+	llvm::sys::path::append(output, "..");
+	llvm::sys::path::append(output, "..");
+
+	for (; iterPath != llvm::sys::path::end(path); ++iterPath)
+		llvm::sys::path::append(output, *iterPath);
+
+	return std::string(output.data(), output.size());
 }
 
 void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder);

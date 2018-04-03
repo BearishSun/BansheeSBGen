@@ -8,10 +8,10 @@ const char* BUILTIN_MODULE_TYPE = "Module";
 
 std::array<std::string, FT_COUNT> fileTypeFolders =
 {
-	"Engine/Include",
-	"Engine/Source",
-	"Editor/Include",
-	"Editor/Source",
+	"SBansheeEngine/Generated",
+	"SBansheeEngine/Generated",
+	"SBansheeEditor/Generated",
+	"SBansheeEditor/Generated",
 	"",
 	""
 };

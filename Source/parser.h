@@ -25,4 +25,5 @@ private:
 	void parseComments(const CXXRecordDecl* decl);
 
 	ASTContext* astContext;
+	Preprocessor& preprocessor;
 };

@@ -4418,21 +4418,21 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 	cleanAndPrepareFolder(csEngineOutputFolder);
 	cleanAndPrepareFolder(csEditorOutputFolder);
 
-	{
-		std::string relativePath = "scriptBindings.timestamp";
-		StringRef filenameRef(relativePath.data(), relativePath.size());
+	//{
+	//	std::string relativePath = "scriptBindings.timestamp";
+	//	StringRef filenameRef(relativePath.data(), relativePath.size());
 
-		SmallString<128> filepath = cppOutputFolder;
-		sys::path::append(filepath, filenameRef);
+	//	SmallString<128> filepath = cppOutputFolder;
+	//	sys::path::append(filepath, filenameRef);
 
-		std::ofstream output;
-		output.open(filepath.str(), std::ios::out);
+	//	std::ofstream output;
+	//	output.open(filepath.str(), std::ios::out);
 
-		std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::system_clock::now().time_since_epoch());
-		output << std::to_string(ms.count());
-		output.close();
-	}
+	//	std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+	//		std::chrono::system_clock::now().time_since_epoch());
+	//	output << std::to_string(ms.count());
+	//	output.close();
+	//}
 
 	// Generate H
 	for (auto& fileInfo : outputFileInfos)
@@ -4473,7 +4473,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 		// Output includes
 		for (auto& include : fileInfo.second.referencedHeaderIncludes)
-			output << "#include \"" << include << "\"" << std::endl;
+			output << "#include \"" << getRelativeTo(include, cppOutputFolder) << "\"" << std::endl;
 
 		output << std::endl;
 
@@ -4550,7 +4550,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 
 		// Output includes
 		for (auto& include : fileInfo.second.referencedSourceIncludes)
-			output << "#include \"" << include << "\"" << std::endl;
+			output << "#include \"" << getRelativeTo(include, cppOutputFolder) << "\"" << std::endl;
 
 		output << std::endl;
 
@@ -4643,7 +4643,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 				if (typeInfo.type != ParsedType::Component)
 					continue;
 
-				includes << "#include \"" << typeInfo.declFile << "\"" << std::endl;
+				includes << "#include \"" << getRelativeTo(typeInfo.declFile, cppOutputFolder) << "\"" << std::endl;
 
 				std::string interopClassName = getScriptInteropType(classInfo.name);
 				body << "\t\tADD_ENTRY(" << classInfo.name << ", " << interopClassName << ")" << std::endl;
