@@ -225,7 +225,36 @@ enum BS_SCRIPT_EXPORT() FlgEnum
 
 struct Vector3I
 {
-	Vector3I(int x, int y, int z);
+	int32_t x, y, z;
+	
+	constexpr Vector3I(int32_t x, int32_t y, int32_t z)
+		: x(x), y(y), z(z)
+		{ }
+};
+
+enum BS_SCRIPT_EXPORT(n:MeshTopology,m:Rendering) DrawOperationType
+{
+	DOT_POINT_LIST		BS_SCRIPT_EXPORT(n:PointList)		= 1,
+	DOT_LINE_LIST		BS_SCRIPT_EXPORT(n:LineList)		= 2,
+	DOT_LINE_STRIP		BS_SCRIPT_EXPORT(n:LineStrip)		= 3,
+	DOT_TRIANGLE_LIST	BS_SCRIPT_EXPORT(n:TriangleList)	= 4,
+	DOT_TRIANGLE_STRIP	BS_SCRIPT_EXPORT(n:TriangleStrip)	= 5,
+	DOT_TRIANGLE_FAN	BS_SCRIPT_EXPORT(n:TriangleFan)		= 6
+};
+
+struct BS_SCRIPT_EXPORT(pl:true) SubMesh
+{
+	SubMesh()
+		: indexOffset(0), indexCount(0), drawOp(DOT_TRIANGLE_LIST)
+	{ }
+
+	SubMesh(uint32_t indexOffset, uint32_t indexCount, DrawOperationType drawOp):
+		indexOffset(indexOffset), indexCount(indexCount), drawOp(drawOp)
+	{ }
+
+	uint32_t indexOffset;
+	uint32_t indexCount;
+	DrawOperationType drawOp;
 };
 
 typedef Flags<FlgEnum> FlgEnums;
@@ -321,7 +350,7 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
 	
-	BS_SCRIPT_EXPORT() void tst(Vector3I dft = Vector3I(1, 1, 1));
+	BS_SCRIPT_EXPORT() void tst(const Vector3I& dft = Vector3I(1, 1, 1));
 	
 	BS_SCRIPT_EXPORT()
 	std::vector<bs::TResourceHandle<bs::Texture>> textures;

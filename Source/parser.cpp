@@ -164,7 +164,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 						std::string storageTypeStr;
 						if (mapBuiltinTypeToCppType(builtinType->getKind(), storageTypeStr))
 						{
-							if (storageTypeStr == "UINT32")
+							if (storageTypeStr == "uint32_t")
 								validStorageType = true;
 						}
 
@@ -733,92 +733,93 @@ bool ScriptExportParser::evaluateLiteral(Expr* expr, std::string& evalValue)
 
 bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, std::string& valType)
 {
-	if (!expr->isEvaluatable(*astContext))
+	if (expr->isEvaluatable(*astContext))
 	{
-		// Check for nullptr, literals in constructors and cast literals
-		if (ExprWithCleanups* cleanups = dyn_cast<ExprWithCleanups>(expr))
-			expr = cleanups->getSubExpr();
-
-		// Skip through reference binding to temporary.
-		if (MaterializeTemporaryExpr* materialize = dyn_cast<MaterializeTemporaryExpr>(expr))
-			expr = materialize->GetTemporaryExpr();
-
-		// Skip any temporary bindings; they're implicit.
-		if (CXXBindTemporaryExpr* binder = dyn_cast<CXXBindTemporaryExpr>(expr))
-			expr = binder->getSubExpr();
-
-		expr = expr->IgnoreParenCasts();
-
-		CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr);
-		if (!ctorExp)
-			return false;
-
-		// Check for special case of a single null parameter
-		{
-			expr = ctorExp->getArg(0);
-
-			bool isNull = false;
-			QualType type = expr->getType();
-			if (type->isBuiltinType())
-			{
-				const BuiltinType* builtinType = type->getAs<BuiltinType>();
-				if (builtinType->getKind() == BuiltinType::NullPtr)
-				{
-					evalValue = "null";
-					return true;
-				}
-			}
-		}
-
-		// Constructor or cast of some type
-		QualType parentType = ctorExp->getType();
-
-		int dummy1;
-		unsigned dummy2;
-		parseType(parentType, valType, dummy1, dummy2);
-
-		for(int i = 0; i < ctorExp->getNumArgs(); i++)
-		{
-			if (i != 0)
-				evalValue += ", ";
-
-			std::string argValue;
-			expr = ctorExp->getArg(i);
-
-			bool isNull = false;
-			QualType type = expr->getType();
-			if(type->isBuiltinType())
-			{
-				const BuiltinType* builtinType = type->getAs<BuiltinType>();
-				if (builtinType->getKind() == BuiltinType::NullPtr)
-				{
-					argValue = "null";
-					isNull = true;
-				}
-			}
-
-			if(!isNull)
-			{
-				if (expr->isEvaluatable(*astContext))
-				{
-					if (!evaluateLiteral(expr, argValue))
-						return false;
-				}
-				else
-				{
-					std::string dummy3;
-					if (!evaluateExpression(expr, argValue, dummy3))
-						return false;
-				}
-			}
-			
-			evalValue += argValue;
-		}
-
-		return true;
+		if (evaluateLiteral(expr, evalValue))
+			return true;
 	}
 
-	return evaluateLiteral(expr, evalValue);
+	// Check for nullptr, literals in constructors and cast literals
+	if (ExprWithCleanups* cleanups = dyn_cast<ExprWithCleanups>(expr))
+		expr = cleanups->getSubExpr();
+
+	// Skip through reference binding to temporary.
+	if (MaterializeTemporaryExpr* materialize = dyn_cast<MaterializeTemporaryExpr>(expr))
+		expr = materialize->GetTemporaryExpr();
+
+	// Skip any temporary bindings; they're implicit.
+	if (CXXBindTemporaryExpr* binder = dyn_cast<CXXBindTemporaryExpr>(expr))
+		expr = binder->getSubExpr();
+
+	expr = expr->IgnoreParenCasts();
+
+	CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr);
+	if (!ctorExp)
+		return false;
+
+	// Check for special case of a single null parameter
+	{
+		expr = ctorExp->getArg(0);
+
+		bool isNull = false;
+		QualType type = expr->getType();
+		if (type->isBuiltinType())
+		{
+			const BuiltinType* builtinType = type->getAs<BuiltinType>();
+			if (builtinType->getKind() == BuiltinType::NullPtr)
+			{
+				evalValue = "null";
+				return true;
+			}
+		}
+	}
+
+	// Constructor or cast of some type
+	QualType parentType = ctorExp->getType();
+
+	int dummy1;
+	unsigned dummy2;
+	parseType(parentType, valType, dummy1, dummy2);
+
+	for(int i = 0; i < ctorExp->getNumArgs(); i++)
+	{
+		if (i != 0)
+			evalValue += ", ";
+
+		std::string argValue;
+		expr = ctorExp->getArg(i);
+
+		bool isNull = false;
+		QualType type = expr->getType();
+		if(type->isBuiltinType())
+		{
+			const BuiltinType* builtinType = type->getAs<BuiltinType>();
+			if (builtinType->getKind() == BuiltinType::NullPtr)
+			{
+				argValue = "null";
+				isNull = true;
+			}
+		}
+
+		if(!isNull)
+		{
+			if (expr->isEvaluatable(*astContext))
+			{
+				if (!evaluateLiteral(expr, argValue))
+					return false;
+			}
+			else
+			{
+				std::string dummy3;
+				if (!evaluateExpression(expr, argValue, dummy3))
+					return false;
+			}
+		}
+			
+		evalValue += argValue;
+	}
+
+	return true;
 }
 
 bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& output)

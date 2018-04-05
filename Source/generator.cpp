@@ -1201,7 +1201,8 @@ void postProcessFileInfos()
 		EnumInfo* enumInfo = findEnumInfo(paramInfo.type);
 		if(enumInfo == nullptr)
 		{
-			outs() << "Error: Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			outs() << "Error: Cannot map default value of \"" + paramInfo.name + 
+				"\" to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -1209,7 +1210,8 @@ void postProcessFileInfos()
 		auto iterFind = enumInfo->entries.find(enumIdx);
 		if(iterFind == enumInfo->entries.end())
 		{
-			outs() << "Error: Cannot map default value to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+			outs() << "Error: Cannot map default value of \"" + paramInfo.name + 
+				"\" to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -1671,7 +1673,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 						postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
 				}
 				else if(isFlagsEnum(flags))
-					postCallActions << "\t\t" << name << " = (" << typeName << ")(UINT32)" << argName << ";" << std::endl;
+					postCallActions << "\t\t" << name << " = (" << typeName << ")(uint32_t)" << argName << ";" << std::endl;
 				else
 					postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 			}
@@ -1696,7 +1698,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					argName = "tmp" + name;
 					preCallActions << "\t\tFlags<" << typeName << "> " << argName << ";" << std::endl;
 
-					postCallActions << "\t\t*" << name << " = (" << typeName << ")(UINT32)" << argName << ";" << std::endl;
+					postCallActions << "\t\t*" << name << " = (" << typeName << ")(uint32_t)" << argName << ";" << std::endl;
 				}
 				else
 					argName = name;
@@ -1954,7 +1956,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
 				if(isFlagsEnum(flags))
-					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(UINT32)" << argName << "[i]);" << std::endl;
+					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(uint32_t)" << argName << "[i]);" << std::endl;
 				else
 					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << argName << "[i]);" << std::endl;
 				break;
@@ -2323,7 +2325,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			{
 				argName = "tmp" + name;
 				preCallActions << "\t\t" << typeName << argName << ";" << std::endl;
-				preCallActions << "\t\t" << argName << " = (" << typeName << ")(UINT32)" << name << ";" << std::endl;
+				preCallActions << "\t\t" << argName << " = (" << typeName << ")(uint32_t)" << name << ";" << std::endl;
 			}
 			else
 				argName = name;
@@ -2439,7 +2441,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
 			if(isFlagsEnum(flags))
-				preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(UINT32)" << name << "[i]);" << std::endl;
+				preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(uint32_t)" << name << "[i]);" << std::endl;
 			else
 				preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << name << "[i]);" << std::endl;
 			break;
@@ -2973,7 +2975,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	if (typeInfo.type == ParsedType::Class)
 	{
 		if (!classInfo.eventInfos.empty())
-			output << "\t\tUINT32 mGCHandle = 0;\n\n";
+			output << "\t\tuint32_t mGCHandle = 0;\n\n";
 	}
 
 	// Event callback methods

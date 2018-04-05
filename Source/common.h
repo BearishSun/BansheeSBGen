@@ -431,32 +431,38 @@ inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 
 inline std::string mapCppTypeToCSType(const std::string& cppType)
 {
-	if (cppType == "INT8")
+	if (cppType == "int8_t")
 		return "sbyte";
 
-	if (cppType == "UINT8")
+	if (cppType == "uint8_t")
 		return "byte";
 
-	if (cppType == "INT16")
+	if (cppType == "int16_t")
 		return "short";
 
-	if (cppType == "UINT16")
+	if (cppType == "uint16_t")
 		return "ushort";
 
-	if (cppType == "INT32")
+	if (cppType == "int32_t")
 		return "int";
 
-	if (cppType == "UINT32")
+	if (cppType == "uint32_t")
 		return "uint";
 
-	if (cppType == "INT64")
+	if (cppType == "int64_t")
 		return "long";
 
-	if (cppType == "UINT64")
+	if (cppType == "uint64_t")
 		return "ulong";
 
 	if (cppType == "wchar_t")
 		return "char";
+
+	if (cppType == "char16_t")
+		return "ushort";
+
+	if (cppType == "char32_t")
+		return "uint";
 
 	return cppType;
 }
@@ -480,38 +486,40 @@ inline bool mapBuiltinTypeToCppType(BuiltinType::Kind kind, std::string& output)
 		output = "bool";
 		return true;
 	case BuiltinType::Char_S:
+		output = "char";
+		return true;
 	case BuiltinType::SChar:
-		output = "INT8";
+		output = "int8_t";
 		return true;
 	case BuiltinType::Char_U:
-		output = "UINT8";
+		output = "uint8_t";
 		return true;
 	case BuiltinType::Short:
-		output = "INT16";
+		output = "int16_t";
 		return true;
 	case BuiltinType::Int:
-		output = "INT32";
+		output = "int32_t";
 		return true;
 	case BuiltinType::Long:
-		output = "INT32";
+		output = "int32_t";
 		return true;
 	case BuiltinType::LongLong:
-		output = "INT64";
+		output = "int64_t";
 		return true;
 	case BuiltinType::UChar:
-		output = "UINT8";
+		output = "uint8_t";
 		return true;
 	case BuiltinType::UShort:
-		output = "UINT16";
+		output = "uint16_t";
 		return true;
 	case BuiltinType::UInt:
-		output = "UINT32";
+		output = "uint32_t";
 		return true;
 	case BuiltinType::ULong:
-		output = "UINT32";
+		output = "uint32_t";
 		return true;
 	case BuiltinType::ULongLong:
-		output = "UINT64";
+		output = "uint64_t";
 		return true;
 	case BuiltinType::Float:
 		output = "float";
@@ -524,10 +532,10 @@ inline bool mapBuiltinTypeToCppType(BuiltinType::Kind kind, std::string& output)
 		output = "wchar_t";
 		return true;
 	case BuiltinType::Char16:
-		output = "UINT16";
+		output = "char16_t";
 		return true;
 	case BuiltinType::Char32:
-		output = "UINT32";
+		output = "char32_t";
 		return true;
 	default:
 		break;
