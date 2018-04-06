@@ -831,6 +831,7 @@ inline std::string getRelativeTo(const StringRef& path, const StringRef& relativ
 	for (; iterPath != llvm::sys::path::end(path); ++iterPath)
 		llvm::sys::path::append(output, *iterPath);
 
+	llvm::sys::path::native(output, llvm::sys::path::Style::posix);
 	return std::string(output.data(), output.size());
 }
 
