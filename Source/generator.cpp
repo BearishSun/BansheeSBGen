@@ -1611,21 +1611,23 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 
 	if (type == ParsedType::Resource)
 	{
-		output << indent << "ScriptResourceBase* " << scriptName << ";" << std::endl;
-		output << indent << scriptName << " = ScriptResourceManager::instance().getScriptResource(" << argName << ", true);"
-			<< std::endl;
+		output << indent << "ScriptResourceBase* " << scriptName << ";\n";
+		output << indent << scriptName << " = ScriptResourceManager::instance().getScriptResource(" << argName 
+			<< ", true);\n";
 	}
 	else if (type == ParsedType::Component)
 	{
-		output << indent << "ScriptComponentBase* " << scriptName << ";" << std::endl;
-		output << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
-			argName << ");" << std::endl;
+		output << indent << "ScriptComponentBase* " << scriptName << " = nullptr;\n";
+		output << indent << "if(" << argName << ")\n";
+		output << indent << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
+			argName << ");\n";
 	}
 	else if (type == ParsedType::SceneObject)
 	{
-		output << indent << "ScriptComponentBase* " << scriptName << ";" << std::endl;
+		output << indent << "ScriptComponentBase* " << scriptName << " = nullptr;\n";
+		output << indent << "if(" << argName << ")\n";
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getOrCreateScriptSceneObject(" <<
-			argName << ");" << std::endl;
+			argName << ");\n";
 	}
 	else
 		assert(false);
