@@ -1595,7 +1595,11 @@ std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
 	{
 		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
-		output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name << ", ";
+
+		if (paramTypeInfo.type == ParsedType::Struct)
+			output << "MonoObject* " << I-> name << ", ";
+		else
+			output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name << ", ";
 	}
 
 	output << "MonoException**);" << std::endl;
@@ -2334,18 +2338,22 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			break;
 		case ParsedType::Struct:
 			{
+				argName = "tmp" + name;
+
+				std::string scriptType = getScriptInteropType(typeName);
+				preCallActions << "\t\tMonoObject* " << argName << ";\n";
+
 				if(isComplexStruct(flags))
 				{
-					argName = "tmp" + name;
-
+					std::string interopName = "interop" + name;
 					std::string interopType = getStructInteropType(typeName);
-					std::string scriptType = getScriptInteropType(typeName);
-
-					preCallActions << "\t\t" << interopType << " " << argName << ";" << std::endl;
-					preCallActions << "\t\t" << argName << " = " << scriptType << "::toInterop(" << name << ");" << std::endl;
+					
+					preCallActions << "\t\t" << interopType << " " << interopName << ";" << std::endl;
+					preCallActions << "\t\t" << interopName << " = " << scriptType << "::toInterop(" << name << ");" << std::endl;
+					preCallActions << "\t\t" << argName << " = " << scriptType << "::box(" << interopName << ");\n";
 				}
 				else
-					argName = name;
+					preCallActions << "\t\t" << argName << " = " << scriptType << "::box(" << name << ");\n";
 			}
 
 			break;
@@ -2792,7 +2800,10 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 		{
 			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
 
-			methodArgs << getAsCppToManagedArgument(argName, paramTypeInfo.type, I->flags, eventInfo.sourceName);
+			if(paramTypeInfo.type == ParsedType::Struct)
+				methodArgs << getAsCppToManagedArgument(argName, ParsedType::Class, I->flags, eventInfo.sourceName);
+			else
+				methodArgs << getAsCppToManagedArgument(argName, paramTypeInfo.type, I->flags, eventInfo.sourceName);
 		}
 		else
 			methodArgs << getAsCppToManagedArgument(argName, ParsedType::Class, I->flags, eventInfo.sourceName);
