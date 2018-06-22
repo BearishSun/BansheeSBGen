@@ -139,18 +139,31 @@ struct ReturnInfo
 	int flags;
 };
 
+struct CommentRef
+{
+    uint32_t index;
+    std::string name;
+};
+
+struct CommentText
+{
+    std::string text;
+    SmallVector<CommentRef, 2> paramRefs;
+    SmallVector<CommentRef, 2> genericRefs;
+};
+
 struct CommentParamEntry
 {
 	std::string name;
-	SmallVector<std::string, 2> comments;
+	SmallVector<CommentText, 2> comments;
 };
 
 struct CommentEntry
 {
-	SmallVector<std::string, 2> brief;
+	SmallVector<CommentText, 2> brief;
 
 	SmallVector<CommentParamEntry, 4> params;
-	SmallVector<std::string, 2> returns;
+	SmallVector<CommentText, 2> returns;
 };
 
 struct FieldInfo : VarInfo

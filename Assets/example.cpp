@@ -271,6 +271,13 @@ struct TKeyframe
 
 template class BS_SCRIPT_EXPORT(n:Keyframe,pl:true) TKeyframe<float>;
 
+template <>
+struct BS_SCRIPT_EXPORT(n:KeyframeInt,pl:true) TKeyframe<INT32>
+{
+	INT32 value; /**< Value of the key. */
+	float time; /**< Position of the key along the animation spline. */
+};
+
 struct BS_SCRIPT_EXPORT(pl:true) KeyframeContainer
 {
 	TKeyframe<float> keyframe;
@@ -308,6 +315,16 @@ struct BS_SCRIPT_EXPORT(pl:true) Str1
 	int c;
 };
 
+class BS_SCRIPT_EXPORT(m:Image) ColorGradient
+{
+public:
+	BS_SCRIPT_EXPORT()
+	ColorGradient() = default;
+
+	BS_SCRIPT_EXPORT()
+	int evaluate(float t) const;
+};
+
 struct BS_SCRIPT_EXPORT(pl:true) Str2 : public Str1
 {
 	int cda;
@@ -331,7 +348,7 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	public:
 	/**
 	 * @native
-	 * Testing native docs!!
+	 * Testing native docs!! @p initialData is a parameter!
 	 *
 	 * Multiparagaph!
 	 * @endnative
@@ -350,6 +367,9 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
 	
+	BS_SCRIPT_EXPORT() ColorGradient anotherTest();
+	
+	/** Some stuff to comment @p dft some more stuff. */
 	BS_SCRIPT_EXPORT() void tst(const Vector3I& dft = Vector3I(1, 1, 1));
 	
 	BS_SCRIPT_EXPORT()

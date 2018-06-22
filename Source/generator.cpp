@@ -447,6 +447,11 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 			// If enum or passed by value we need to include the header for the source type
 			bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags);
 
+			// If a class is being passed by reference or a raw pointer then we need the declaration because we perform
+			// assignment copy
+			if (!sourceInclude)
+				sourceInclude = typeInfo.type == ParsedType::Class && !isSrcSPtr(flags);
+
 			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude);
 		}
 	}
@@ -747,7 +752,7 @@ void resolveCopydocComment(CommentEntry& comment, const std::string& parentType,
 	StringRef copydocArg;
 	for(auto& entry : comment.brief)
 	{
-		StringRef commentRef(entry.data(), entry.length());
+		StringRef commentRef(entry.text.data(), entry.text.length());
 
 		if (commentRef.startswith("@copydoc"))
 		{
@@ -769,6 +774,38 @@ void resolveCopydocComment(CommentEntry& comment, const std::string& parentType,
 		comment = outComment;
 
 	resolveCopydocComment(comment, parentType, curNS);
+}
+
+std::string generateXMLCommentText(const CommentText& commentTextEntry)
+{
+	uint32_t idx = 0;
+	std::stringstream output;
+
+	for(auto& entry : commentTextEntry.text)
+	{
+		for (auto& refEntry : commentTextEntry.paramRefs)
+		{
+			if(refEntry.index == idx)
+			{
+				output << "<paramref name=\"" << refEntry.name << "\"/>";
+				idx += refEntry.name.size();
+			}
+		}
+
+		for (auto& refEntry : commentTextEntry.genericRefs)
+		{
+			if (refEntry.index == idx)
+			{
+				output << "<see cref=\"" << refEntry.name << "\"/>";
+				idx += refEntry.name.size();
+			}
+		}
+
+		output << entry;
+		idx++;
+	}
+
+	return output.str();
 }
 
 std::string generateXMLComments(const CommentEntry& commentEntry, const std::string& indent)
@@ -821,14 +858,21 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 		return wordWrapped.str();
 	};
 
-	auto printParagraphs = [&output, &indent, &wordWrap](const std::string& head, const std::string& tail, const SmallVector<std::string, 2>& input)
+	auto printParagraphs = [&output, &indent, &wordWrap](const std::string& head, const std::string& tail, const SmallVector<CommentText, 2>& input)
 	{
 		bool multiline = false;
 		if(input.size() > 1)
 			multiline = true;
 		else
 		{
-			int lineLength = head.length() + tail.length() + indent.size() + 4 + input[0].size();
+			int refLength = 0;
+			for (auto& entry : input[0].paramRefs)
+				refLength += sizeof("<paramref name=\"\"/>") + entry.name.size();
+
+			for (auto& entry : input[0].genericRefs)
+				refLength += sizeof("<see cref=\"\"/>") + entry.name.size();
+
+			int lineLength = head.length() + tail.length() + indent.size() + 4 + input[0].text.size() + refLength;
 			if (lineLength >= 124)
 				multiline = true;
 		}
@@ -841,13 +885,15 @@ std::string generateXMLComments(const CommentEntry& commentEntry, const std::str
 				if (I != input.begin())
 					output << indent << "///\n";
 
-				output << wordWrap(*I, indent + "/// ");
+				std::string text = generateXMLCommentText(*I);
+				output << wordWrap(text, indent + "/// ");
 			}
 			output << indent << "/// " << tail << "\n";
 		}
 		else
 		{
-			output << indent << "/// " << head << input[0] << tail << "\n";
+			std::string text = generateXMLCommentText(input[0]);
+			output << indent << "/// " << head << text << tail << "\n";
 		}
 	};
 

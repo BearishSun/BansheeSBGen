@@ -64,6 +64,48 @@ std::string getNamespace(const RecordDecl* decl)
 	return nsName;
 }
 
+void updateParamRefComments(const std::vector<VarInfo>& paramInfos, CommentText& comment)
+{
+	for(auto iter = comment.paramRefs.begin(); iter != comment.paramRefs.end();)
+	{
+		const CommentRef& entry = *iter;
+
+		auto iterFind = std::find_if(paramInfos.begin(), paramInfos.end(), 
+			[&entry](const VarInfo& varInfo)
+		{
+			return entry.name == varInfo.name;
+		});
+
+		if (iterFind == paramInfos.end())
+		{
+			comment.genericRefs.push_back(entry);
+			iter = comment.paramRefs.erase(iter);
+		}
+		else
+			++iter;
+	}
+}
+
+void updateParamRefComments(const std::vector<VarInfo>& paramInfos, CommentEntry& comment)
+{
+	for (auto& entry : comment.brief)
+		updateParamRefComments(paramInfos, entry);
+
+	for (auto& entry : comment.params)
+	{
+		for(auto& textEntry : entry.comments)
+			updateParamRefComments(paramInfos, textEntry);
+	}
+
+	for (auto& entry : comment.returns)
+		updateParamRefComments(paramInfos, entry);
+}
+
+void clearParamRefComments(CommentEntry& comment)
+{
+	updateParamRefComments({}, comment);
+}
+
 bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue)
 {
 	typeFlags = 0;
@@ -882,7 +924,8 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 	}
 
 	bool hasAnyData = false;
-	auto parseParagraphComments = [&traits, &hasAnyData, this](const std::vector<comments::ParagraphComment*>& paragraphs, SmallVector<std::string, 2>& output)
+	auto parseParagraphComments = [&traits, &hasAnyData, this](const std::vector<comments::ParagraphComment*>& paragraphs, 
+		SmallVector<CommentText, 2>& output)
 	{
 		auto getTrimmedText = [](const StringRef& input, std::stringstream& output)
 		{
@@ -916,10 +959,13 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 		int nativeDoc = 0;
 		for (auto& paragraph : paragraphs)
 		{
+			CommentText commentText;
+
 			std::stringstream paragraphText;
 			std::stringstream copydocArg;
 			auto childIter = paragraph->child_begin();
 
+			uint32_t refsTotalSize = 0;
 			bool isCopydoc = false;
 			while (childIter != paragraph->child_end())
 			{
@@ -958,21 +1004,67 @@ bool ScriptExportParser::parseJavadocComments(const Decl* decl, CommentEntry& ou
 						nativeDoc++;
 					else if (name == "endnative")
 						nativeDoc--;
+					else if(name == "p" || name == "see")
+					{
+						if(nativeDoc <= 0 && inlineCommand->getNumArgs() > 0)
+						{
+							int orgg = paragraphText.tellg();
+							paragraphText.seekg(0, std::ios::end);
+							int size = paragraphText.tellg();
+							paragraphText.seekg(orgg, std::ios::beg);
+
+							CommentRef ref;
+							ref.index = size + refsTotalSize;
+
+							StringRef refArg = inlineCommand->getArgText(0);
+							if (refArg.endswith(".") || refArg.endswith(","))
+							{
+								paragraphText << refArg[refArg.size() - 1];
+								refArg = refArg.substr(0, refArg.size() - 1);
+							}
+
+							ref.name = refArg;
+
+							if (name == "p")
+								commentText.paramRefs.push_back(ref);
+							else if (name == "see")
+								commentText.genericRefs.push_back(ref);
+
+							refsTotalSize += ref.name.size();
+						}
+					}
 				}
 
 				++childIter;
 			}
 
 			if (isCopydoc)
-				output.push_back("@copydoc " + copydocArg.str());
+			{
+				commentText.text = "@copydoc " + copydocArg.str();
+				output.push_back(commentText);
+			}
 			else
 			{
 				std::string paragraphStr = paragraphText.str();
 				StringRef trimmedText(paragraphStr.data(), paragraphStr.length());
+
+				size_t leftTrimmedCount = trimmedText.find_first_not_of(" \t\n\v\f\r");
+				if(leftTrimmedCount != StringRef::npos)
+				{
+					for (auto& entry : commentText.paramRefs)
+						entry.index -= leftTrimmedCount;
+
+					for (auto& entry : commentText.genericRefs)
+						entry.index -= leftTrimmedCount;
+				}
+				
 				trimmedText = trimmedText.trim();
 
-				if(!trimmedText.empty())
-					output.push_back(trimmedText);
+				if (!trimmedText.empty() || !commentText.paramRefs.empty() || !commentText.genericRefs.empty())
+				{
+					commentText.text = trimmedText;
+					output.push_back(commentText);
+				}
 			}
 		}
 	};
@@ -1254,6 +1346,7 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 	eventInfo.externalClass = className;
 	eventInfo.visibility = parsedEventInfo.visibility;
 	parseJavadocComments(decl, eventInfo.documentation);
+	clearParamRefComments(eventInfo.documentation);
 
 	if (!eventSignature.returnType.name.empty())
 	{
@@ -1338,6 +1431,8 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	enumEntry.visibility = parsedEnumInfo.visibility;
 	enumEntry.module = parsedEnumInfo.moduleName;
 	parseJavadocComments(decl, enumEntry.documentation);
+	clearParamRefComments(enumEntry.documentation);
+
 	parseNamespace(decl, enumEntry.ns);
 
 	const BuiltinType* builtinType = underlyingType->getAs<BuiltinType>();
@@ -1379,6 +1474,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		entryInfo.name = entryName.str();
 		entryInfo.scriptName = parsedEnumEntryInfo.exportName;
 		parseJavadocComments(constDecl, entryInfo.documentation);
+		clearParamRefComments(entryInfo.documentation);
 
 		SmallString<5> valueStr;
 		entryVal.toString(valueStr);
@@ -1689,6 +1785,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					ctorInfo.fieldAssignments[fieldName] = paramName;
 				}
 
+				updateParamRefComments(ctorInfo.params, ctorInfo.documentation);
+
 				structInfo.ctors.push_back(ctorInfo);
 				++ctorIter;
 			}
@@ -1748,6 +1846,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					hasDefaultValue = true;
 
 				parseJavadocComments(fieldDecl, fieldInfo.documentation);
+				clearParamRefComments(fieldInfo.documentation);
+
 				structInfo.fields.push_back(fieldInfo);
 			}
 
@@ -1795,6 +1895,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		classInfo.module = parsedClassInfo.moduleName;
 		classInfo.templParams = templParams;
 		parseJavadocComments(templatedDecl, classInfo.documentation);
+		clearParamRefComments(classInfo.documentation);
+
 		parseNamespace(decl, classInfo.ns);
 
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
@@ -1884,6 +1986,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					if (invalidParam)
 						continue;
 
+					updateParamRefComments(methodInfo.paramInfos, methodInfo.documentation);
 					classInfo.ctorInfos.push_back(methodInfo);
 				}
 			}
@@ -2064,6 +2167,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				if (invalidParam)
 					continue;
 
+				updateParamRefComments(methodInfo.paramInfos, methodInfo.documentation);
+
 				if (isExternal)
 				{
 					ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
@@ -2106,6 +2211,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						outs() << "Error: Exported field \"" + fieldInfo.name + "\" isn't public. This will likely result in invalid code generation.";
 
 					parseJavadocComments(fieldDecl, fieldInfo.documentation);
+					clearParamRefComments(fieldInfo.documentation);
+
 					classInfo.fieldInfos.push_back(fieldInfo);
 
 					// Register wrapper methods, this way we can re-use much of the same logic for method/property generation
