@@ -1629,7 +1629,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					parseExportAttribute(ctorAttr, srcClassName, parsedCtorInfo);
 
 					if ((parsedCtorInfo.exportFlags & (int)ExportFlags::Exclude) != 0)
+					{
+						++ctorIter;
 						continue;
+					}
 				}
 
 				parseJavadocComments(ctorDecl, ctorInfo.documentation);
