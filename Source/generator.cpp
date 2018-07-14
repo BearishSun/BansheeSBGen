@@ -71,6 +71,8 @@ std::string getCppVarType(const std::string& typeName, ParsedType type, int flag
 		return "WString";
 	else if (type == ParsedType::Enum && isFlagsEnum(flags))
 		return "Flags<" + typeName + ">";
+	else if(type == ParsedType::GUIElement)
+		return typeName + "*";
 	else
 		return typeName;
 }
@@ -109,6 +111,8 @@ std::string generateGetInternalLine(const std::string& sourceClassName, const st
 	std::stringstream output;
 	if (classType == ParsedType::Class)
 		output << obj << "->getInternal()";
+	else if(classType == ParsedType::GUIElement)
+		output << "static_cast<" << sourceClassName << ">(" << obj << "->getGUIElement())";
 	else // Must be one of the handle types
 	{
 		assert(isHandleType(classType));
@@ -127,7 +131,8 @@ std::string generateGetInternalLine(const std::string& sourceClassName, const st
 	return output.str();
 }
 
-std::string generateManagedToScriptObjectLine(const std::string& indent, const std::string& scriptType, const std::string& scriptName, const std::string& name, bool isBase)
+std::string generateManagedToScriptObjectLine(const std::string& indent, const std::string& scriptType, 
+	const std::string& scriptName, const std::string& name, ParsedType type, bool isBase)
 {
 	std::stringstream output;
 	if (!isBase)
@@ -137,8 +142,14 @@ std::string generateManagedToScriptObjectLine(const std::string& indent, const s
 	}
 	else
 	{
-		output << indent << scriptType << "Base* " << scriptName << ";" << std::endl;
-		output << indent << scriptName << " = (" << scriptType << "Base*)" << scriptType << "::toNative(" << name << ");" << std::endl;
+		std::string scriptBaseType;
+		if(type == ParsedType::GUIElement)
+			scriptBaseType = "ScriptGUIElementBaseTBase";
+		else
+			scriptBaseType = scriptType + "Base";
+
+		output << indent << scriptBaseType << "* " << scriptName << ";" << std::endl;
+		output << indent << scriptName << " = (" << scriptBaseType << "*)" << scriptType << "::toNative(" << name << ");" << std::endl;
 	}
 
 	return output.str();
@@ -181,6 +192,8 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 	case ParsedType::String:
 	case ParsedType::WString: // Input type is always a value
 		return getArgumentPlain(false);
+	case ParsedType::GUIElement: // Input type is always a pointer
+		return getArgumentPlain(true);
 	case ParsedType::Component: // Input type is always a handle
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
@@ -286,6 +299,7 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 		}
 	}
 	case ParsedType::MonoObject: // Always passed as a pointer, input must always be a pointer
+	case ParsedType::GUIElement:
 			return name;
 	case ParsedType::Component: // Always passed as a handle, input must be a handle
 	case ParsedType::SceneObject:
@@ -1335,7 +1349,7 @@ void postProcessFileInfos()
 		auto markBaseType = [&findClassInfo](const std::string& type, int& flags)
 		{
 			UserTypeInfo typeInfo = getTypeInfo(type, flags);
-			if (typeInfo.type != ParsedType::Class && !isHandleType(typeInfo.type))
+			if (typeInfo.type != ParsedType::Class && typeInfo.type != ParsedType::GUIElement && !isHandleType(typeInfo.type))
 				return;
 
 			ClassInfo* classInfo = findClassInfo(type);
@@ -1420,6 +1434,8 @@ void postProcessFileInfos()
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptResource.h");
 				else if (typeInfo.type == ParsedType::Component)
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptComponent.h");
+				else if (typeInfo.type == ParsedType::GUIElement)
+					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/GUI/BsScriptGUIElement.h");
 				else // Class
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
 
@@ -1816,6 +1832,26 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 		}
 		break;
+		case ParsedType::GUIElement:
+		{
+			argName = "tmp" + name;
+			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+			std::string scriptType = getScriptInteropType(typeName);
+
+			preCallActions << "\t\t" << tmpType << " " << argName << ";\n";
+			if(returnValue || isOutput(flags))
+				outs() << "Error: GUIElement cannot be used as parameter outputs or return values. Ignoring. \n";
+			else
+			{
+				std::string scriptName = "script" + name;
+
+				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
+					paramTypeInfo.type, isBaseParam(flags));
+				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
+					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+			}
+		}
+			break;
 		case ParsedType::Class:
 		{
 			argName = "tmp" + name;
@@ -1836,8 +1872,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 				
-				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, isBaseParam(flags));
-				preCallActions << "\t\t" << argName << " = " << scriptName << "->getInternal();" << std::endl;
+				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
+					paramTypeInfo.type, isBaseParam(flags));
+				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
+					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
 			}
 		}
 			break;
@@ -1869,7 +1907,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else
 			{
-				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, isBaseParam(flags));
+				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, paramTypeInfo.type, isBaseParam(flags));
 				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
 			}
@@ -1965,9 +2003,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 
-				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", isBaseParam(flags));
+				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, isBaseParam(flags));
 				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+				preCallActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, 
+					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
 			}
 			break;
 			}
@@ -2032,7 +2071,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				break;
 			case ParsedType::Class:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << argName << "[i]));" << std::endl;
-			break;
+				break;
+			case ParsedType::GUIElement:
+				outs() << "Error: GUIElement cannot be used as parameter outputs or return values. Ignoring. \n";
+				break;
 			default: // Some resource or game object type
 			{
 				std::string scriptName = "script" + name;
@@ -2133,6 +2175,30 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			preActions << "\t\t" << arg << " = " << name << ";" << std::endl;
 		}
 		break;
+		case ParsedType::GUIElement:
+		{
+			arg = "tmp" + name;
+			std::string scriptType = getScriptInteropType(typeName);
+
+			if(!toInterop)
+			{
+				if(isSrcPointer(flags))
+				{
+					std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+					preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
+
+					std::string scriptName = "script" + name;
+					preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, 
+						paramTypeInfo.type, isBaseParam(flags));
+					preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+					preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName,
+						paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+				}
+				else
+					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
+			}
+		}
+			break;
 		case ParsedType::Class:
 		{
 			arg = "tmp" + name;
@@ -2170,7 +2236,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, isBaseParam(flags));
 				preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preActions << "\t\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
 
@@ -2205,7 +2271,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 				
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, isBaseParam(flags));
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
 				preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
 			}
@@ -2287,7 +2353,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			default: // Some object type
 			{
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, isBaseParam(flags));
 				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
 			}
@@ -2338,6 +2404,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			case ParsedType::Class:
 				preActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(value." << name << "[i]));" << std::endl;
 			break;
+			case ParsedType::GUIElement:
+				// Unsupported as output
+				break;
 			default: // Some resource or game object type
 			{
 				std::string scriptName = "script" + name;
@@ -2910,54 +2979,58 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	std::stringstream output;
 
-	// Generate base class if required
-	if (isBase)
+	// Generate a common base class if required
+	// (GUIElements already have one by default)
+	if(typeInfo.type != ParsedType::GUIElement)
 	{
-		interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
-
-		output << "\tclass " << exportAttr << " ";
-		output << interopBaseClassName << " : public ";
-
-		if (isRootBase)
+		if (isBase)
 		{
-			if (typeInfo.type == ParsedType::Class)
-				output << "ScriptObjectBase";
-			else if (typeInfo.type == ParsedType::Component)
-				output << "ScriptComponentBase";
-			else if (typeInfo.type == ParsedType::Resource)
-				output << "ScriptResourceBase";
-		}
-		else
-		{
-			std::string parentBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
-			output << parentBaseClassName;
-		}
+			interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
 
-		output << std::endl;
-		output << "\t{" << std::endl;
-		output << "\tpublic:" << std::endl;
-		output << "\t\t" << interopBaseClassName << "(MonoObject* instance);" << std::endl;
-		output << "\t\tvirtual ~" << interopBaseClassName << "() {}" << std::endl;
+			output << "\tclass " << exportAttr << " ";
+			output << interopBaseClassName << " : public ";
 
-		if (typeInfo.type == ParsedType::Class && !isModule)
-		{
-			output << std::endl;
-			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
-
-			// Data member only present in the top-most base class
 			if (isRootBase)
 			{
-				output << "\tprotected:" << std::endl;
-				output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
+				if (typeInfo.type == ParsedType::Class)
+					output << "ScriptObjectBase";
+				else if (typeInfo.type == ParsedType::Component)
+					output << "ScriptComponentBase";
+				else if (typeInfo.type == ParsedType::Resource)
+					output << "ScriptResourceBase";
 			}
-		}
+			else
+			{
+				std::string parentBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+				output << parentBaseClassName;
+			}
 
-		output << "\t};" << std::endl;
-		output << std::endl;
-	}
-	else if (!classInfo.baseClass.empty())
-	{
-		interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+			output << std::endl;
+			output << "\t{" << std::endl;
+			output << "\tpublic:" << std::endl;
+			output << "\t\t" << interopBaseClassName << "(MonoObject* instance);" << std::endl;
+			output << "\t\tvirtual ~" << interopBaseClassName << "() {}" << std::endl;
+
+			if (typeInfo.type == ParsedType::Class && !isModule)
+			{
+				output << std::endl;
+				output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
+
+				// Data member only present in the top-most base class
+				if (isRootBase)
+				{
+					output << "\tprotected:" << std::endl;
+					output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
+				}
+			}
+
+			output << "\t};" << std::endl;
+			output << std::endl;
+		}
+		else if (!classInfo.baseClass.empty())
+		{
+			interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+		}
 	}
 
 	// Generate main class
@@ -2970,6 +3043,8 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "TScriptResource<" << interopClassName << ", " << classInfo.name;
 	else if (typeInfo.type == ParsedType::Component)
 		output << "TScriptComponent<" << interopClassName << ", " << classInfo.name;
+	else if (typeInfo.type == ParsedType::GUIElement)
+		output << "TScriptGUIElement<" << interopClassName;
 	else // Class
 		output << "ScriptObject<" << interopClassName;
 
@@ -3073,7 +3148,12 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	// CLR hooks
 	std::string interopClassThisPtrType;
 	if (isBase)
-		interopClassThisPtrType = interopBaseClassName;
+	{
+		if(typeInfo.type == ParsedType::GUIElement)
+			interopClassThisPtrType = "ScriptGUIElementBaseTBase";
+		else
+			interopClassThisPtrType = interopBaseClassName;
+	}
 	else
 		interopClassThisPtrType = interopClassName;
 
@@ -3117,15 +3197,19 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
 
 	std::string interopBaseClassName;
-	if (isBase)
-		interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
-	else if (!classInfo.baseClass.empty())
-		interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+
+	if(typeInfo.type != ParsedType::GUIElement)
+	{
+		if (isBase)
+			interopBaseClassName = getScriptInteropType(classInfo.name) + "Base";
+		else if (!classInfo.baseClass.empty())
+			interopBaseClassName = getScriptInteropType(classInfo.baseClass) + "Base";
+	}
 
 	std::stringstream output;
 
 	// Base class constructor
-	if (isBase)
+	if (isBase && typeInfo.type != ParsedType::GUIElement)
 	{
 		output << "\t" << interopBaseClassName << "::" << interopBaseClassName << "(MonoObject* managedInstance)\n";
 		output << "\t\t:";
@@ -3170,6 +3254,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "TScriptResource(managedInstance, value)";
 	else if (typeInfo.type == ParsedType::Component)
 		output << "TScriptComponent(managedInstance, value)";
+	else if (typeInfo.type == ParsedType::GUIElement)
+		output << "TScriptGUIElement(managedInstance, value)";
 	else // Class
 	{
 		if(!isModule && !isBase && classInfo.baseClass.empty())
@@ -3405,7 +3491,12 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	// CLR hook method implementations
 	std::string interopClassThisPtrType;
 	if (isBase)
-		interopClassThisPtrType = interopBaseClassName;
+	{
+		if(typeInfo.type == ParsedType::GUIElement)
+			interopClassThisPtrType = "ScriptGUIElementBaseTBase";
+		else
+			interopClassThisPtrType = interopBaseClassName;
+	}
 	else
 		interopClassThisPtrType = interopClassName;
 
@@ -4147,6 +4238,8 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		baseType = "Resource";
 	else if (typeInfo.type == ParsedType::Component)
 		baseType = "Component";
+	else if (typeInfo.type == ParsedType::GUIElement)
+		baseType = "GUIElement";
 	else
 		baseType = "ScriptObject";
 

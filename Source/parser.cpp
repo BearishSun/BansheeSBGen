@@ -25,6 +25,8 @@ ParsedType getObjectType(const CXXRecordDecl* decl)
 				return ParsedType::Resource;
 			else if (className == BUILTIN_SCENEOBJECT_TYPE)
 				return ParsedType::SceneObject;
+			else if (className == BUILTIN_GUIELEMENT_TYPE)
+				return ParsedType::GUIElement;
 
 			todo.push(baseDecl);
 			iter++;
@@ -547,6 +549,8 @@ bool isBase(const CXXRecordDecl* decl)
 	else if (className == BUILTIN_SCENEOBJECT_TYPE)
 		return true;
 	else if (className == BUILTIN_MODULE_TYPE)
+		return true;
+	else if (className == BUILTIN_GUIELEMENT_TYPE)
 		return true;
 
 	return false;
@@ -1616,6 +1620,16 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				{
 					++ctorIter;
 					continue;
+				}
+
+				AnnotateAttr* ctorAttr = ctorDecl->getAttr<AnnotateAttr>();
+				if (ctorAttr != nullptr)
+				{
+					ParsedDeclInfo parsedCtorInfo;
+					parseExportAttribute(ctorAttr, srcClassName, parsedCtorInfo);
+
+					if ((parsedCtorInfo.exportFlags & (int)ExportFlags::Exclude) != 0)
+						continue;
 				}
 
 				parseJavadocComments(ctorDecl, ctorInfo.documentation);

@@ -30,12 +30,14 @@ extern const char* BUILTIN_COMPONENT_TYPE;
 extern const char* BUILTIN_SCENEOBJECT_TYPE;
 extern const char* BUILTIN_RESOURCE_TYPE;
 extern const char* BUILTIN_MODULE_TYPE;
+extern const char* BUILTIN_GUIELEMENT_TYPE;
 
 enum class ParsedType
 {
 	Component,
 	SceneObject,
 	Resource,
+	GUIElement,
 	Class,
 	Struct,
 	Enum,
@@ -720,6 +722,7 @@ inline bool isReferenceType(ParsedType type, int flags)
 	case ParsedType::Component:
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
+	case ParsedType::GUIElement:
 	case ParsedType::Class:
 	case ParsedType::String:
 	case ParsedType::WString:

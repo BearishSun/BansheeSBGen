@@ -5,6 +5,7 @@ const char* BUILTIN_COMPONENT_TYPE = "Component";
 const char* BUILTIN_SCENEOBJECT_TYPE = "SceneObject";
 const char* BUILTIN_RESOURCE_TYPE = "Resource";
 const char* BUILTIN_MODULE_TYPE = "Module";
+const char* BUILTIN_GUIELEMENT_TYPE = "GUIElement";
 
 std::array<std::string, FT_COUNT> fileTypeFolders =
 {
