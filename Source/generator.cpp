@@ -509,7 +509,11 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 
 	// If passed by value, we needs its header in our header
 	if (isSrcValue(fieldInfo.flags))
-		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, true);
+	{
+		bool complexStruct = isComplexStruct(fieldInfo.flags);
+
+		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, true, false, complexStruct);
+	}
 
 	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
 		fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject ||
@@ -1484,7 +1488,12 @@ void postProcessFileInfos()
 						fileInfo.second.referencedHeaderIncludes.push_back(include);
 				}
 
-				if (!entry.second.declOnly)
+				if(entry.second.destInclude)
+				{
+					if (!entry.second.typeInfo.destFile.empty())
+						fileInfo.second.referencedHeaderIncludes.push_back(entry.second.typeInfo.destFile);
+				}
+				else if (!entry.second.declOnly)
 				{
 					if (entry.second.typeInfo.type != ParsedType::Enum)
 					{
@@ -1686,7 +1695,7 @@ std::string generateNativeToScriptObjectLine(ParsedType type, const std::string&
 		output << indent << "ScriptComponentBase* " << scriptName << " = nullptr;\n";
 		output << indent << "if(" << argName << ")\n";
 		output << indent << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
-			argName << ");\n";
+			"static_object_cast<Component>(" << argName << "));\n";
 	}
 	else if (type == ParsedType::SceneObject)
 	{
@@ -2242,7 +2251,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 
 				// Cast to the source type from SPtr
 				if (isSrcValue(flags))
+				{
+					preActions << "\t\tif(" << arg << " != nullptr)" << std::endl;
 					arg = "*" + arg;
+				}
 				else if (isSrcPointer(flags))
 					arg = arg + ".get()";
 				else if(!isSrcSPtr(flags))
@@ -3752,6 +3764,10 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 
 		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
 		std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, forInterop);
+
+		bool isLastParam = (I + 1) == methodInfo.paramInfos.end();
+		if (isVarParam(paramInfo.flags) && isLastParam)
+			output << "params ";
 
 		output << qualifiedType << " " << paramInfo.name;
 

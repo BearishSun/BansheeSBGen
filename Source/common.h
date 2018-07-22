@@ -64,7 +64,8 @@ enum class TypeFlags
 	FlagsEnum = 1 << 12,
 	ReferencesBase = 1 << 13,
 	Array = 1 << 14,
-	MonoObject = 1 << 15
+	MonoObject = 1 << 15,
+	VarParams = 1 << 16,
 };
 
 enum class MethodFlags
@@ -143,15 +144,15 @@ struct ReturnInfo
 
 struct CommentRef
 {
-    uint32_t index;
-    std::string name;
+	uint32_t index;
+	std::string name;
 };
 
 struct CommentText
 {
-    std::string text;
-    SmallVector<CommentRef, 2> paramRefs;
-    SmallVector<CommentRef, 2> genericRefs;
+	std::string text;
+	SmallVector<CommentRef, 2> paramRefs;
+	SmallVector<CommentRef, 2> genericRefs;
 };
 
 struct CommentParamEntry
@@ -318,14 +319,16 @@ struct FileInfo
 struct IncludeInfo
 {
 	IncludeInfo() { }
-	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude, bool declOnly = false)
-		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude), declOnly(declOnly)
+	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, bool sourceInclude, bool declOnly = false, 
+		bool destInclude = false)
+		:typeName(typeName), typeInfo(typeInfo), sourceInclude(sourceInclude), declOnly(declOnly), destInclude(destInclude)
 	{ }
 
 	std::string typeName;
 	UserTypeInfo typeInfo;
 	bool sourceInclude;
 	bool declOnly;
+	bool destInclude;
 };
 
 struct IncludesInfo
@@ -690,6 +693,11 @@ inline bool isComplexStruct(int flags)
 inline bool isBaseParam(int flags)
 {
 	return (flags & (int)TypeFlags::ReferencesBase) != 0;
+}
+
+inline bool isVarParam(int flags)
+{
+	return (flags & (int)TypeFlags::VarParams) != 0;
 }
 
 inline bool isStruct(int flags)

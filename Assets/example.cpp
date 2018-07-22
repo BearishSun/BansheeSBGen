@@ -15,6 +15,19 @@ class Flags
 	S v;
 };
 
+using String = std::string;
+
+namespace bs
+{
+	class StringUtil
+	{
+	public:
+		static const String BLANK;
+	};
+
+	const String StringUtil::BLANK;
+}
+
 typedef int INT32;
 
 template<class Elem> class basic_string
@@ -27,6 +40,7 @@ typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
 
 #define BS_SCRIPT_EXPORT(...) __attribute__((annotate("se," #__VA_ARGS__)))
+#define BS_PARAMS __attribute__((annotate("params")))
 
 namespace bs
 {
@@ -116,6 +130,57 @@ class Math
 {
 public:
 	static constexpr float PI = 3.14f;	
+};
+
+class BS_SCRIPT_EXPORT(n:LocString,m:Localization) HString
+{
+public:
+	/**
+	 * Creates a new empty localized string.
+	 *
+	 * @param[in]	stringTableId	Unique identifier of the string table to retrieve the string from.
+	 */
+	BS_SCRIPT_EXPORT()
+	HString(uint32_t stringTableId = 0);
+};
+
+struct BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContentImages
+{
+	GUIContentImages() = default;
+
+	GUIContentImages(const HString& image)
+		:normal(image), hover(image), active(image), focused(image),
+		normalOn(image), hoverOn(image), activeOn(image), focusedOn(image)
+	{ }
+
+	HString normal;
+	HString hover;
+	HString active;
+	HString focused;
+	HString normalOn;
+	HString hoverOn;
+	HString activeOn;
+	HString focusedOn;
+};
+
+class BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContent
+{
+public:
+	/**	Constructs an empty content. */
+	GUIContent() = default;
+
+	/**	Constructs content with just a string. */
+	GUIContent(const HString& text)
+		:text(text)
+	{ }
+	
+	GUIContent(const HString& text, const HString& tooltip)
+		: text(text), tooltip(tooltip)
+	{ }	
+	
+	HString text;
+	GUIContentImages images;
+	HString tooltip;
 };
 
 struct Spring;
@@ -366,6 +431,10 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
+	
+	BS_SCRIPT_EXPORT() void strParamTest(String a = bs::StringUtil::BLANK);
+	
+	BS_SCRIPT_EXPORT() void paramsTest(int a, BS_PARAMS std::vector<float> b);
 	
 	BS_SCRIPT_EXPORT() ColorGradient anotherTest();
 	

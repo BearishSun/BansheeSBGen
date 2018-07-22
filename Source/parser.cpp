@@ -108,6 +108,57 @@ void clearParamRefComments(CommentEntry& comment)
 	updateParamRefComments({}, comment);
 }
 
+std::string getFullName(NamedDecl* decl)
+{
+	const DeclContext* context = decl->getDeclContext();
+
+	// Collect contexts.
+	SmallVector<const DeclContext *, 8> contexts;
+	while (context && isa<NamedDecl>(context)) 
+	{
+		contexts.push_back(context);
+		context = context->getParent();
+	}
+
+	std::string name;
+	raw_string_ostream ss(name);
+	for (const DeclContext* declContext : reverse(contexts))
+	{
+		if (const auto *ND = dyn_cast<NamespaceDecl>(declContext))
+		{
+			if (ND->isAnonymousNamespace())
+				ss << "(anonymous namespace)";
+			else
+				ss << *ND;
+		}
+		else if (const auto *RD = dyn_cast<RecordDecl>(declContext))
+		{
+			if (!RD->getIdentifier())
+				ss << "(anonymous " << RD->getKindName() << ')';
+			else
+				ss << *RD;
+		}
+		else if (const auto *ED = dyn_cast<EnumDecl>(declContext))
+		{
+			if (ED->isScoped() || ED->getIdentifier())
+				ss << *ED;
+			else
+				continue;
+		}
+		else
+			ss << *cast<NamedDecl>(declContext);
+
+		ss << "::";
+	}
+
+	if (decl->getDeclName() || isa<DecompositionDecl>(decl))
+		ss << *decl;
+	else
+		ss << "(anonymous)";
+
+	return ss.str();
+}
+
 bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue)
 {
 	typeFlags = 0;
@@ -416,7 +467,6 @@ struct ParsedDeclInfo
 	int exportFlags;
 	StringRef moduleName;
 };
-
 
 bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclInfo& output)
 {
@@ -817,6 +867,21 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 				evalValue = "null";
 				return true;
 			}
+		}
+	}
+
+	// Reference to some other declaration (e.g. a static)
+	DeclRefExpr* declRefExpr = dyn_cast<DeclRefExpr>(expr);
+	if(declRefExpr)
+	{
+		ValueDecl* decl = declRefExpr->getDecl();
+		std::string name = getFullName(decl);
+
+		if(name == "bs::StringUtil::BLANK" || name == "bs::StringUtil::WBLANK")
+		{
+			evalValue = "\"\"";
+			valType = "";
+			return true;
 		}
 	}
 
@@ -1997,6 +2062,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							}
 						}
 
+						AnnotateAttr* paramAttr = paramDecl->getAttr<AnnotateAttr>();
+						if (paramAttr && paramAttr->getAnnotation() == "params")
+							paramInfo.flags |= (int)TypeFlags::VarParams;
+
 						methodInfo.paramInfos.push_back(paramInfo);
 					}
 
@@ -2177,6 +2246,10 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							skippedDefaultArg = true;
 						}
 					}
+
+					AnnotateAttr* paramAttr = paramDecl->getAttr<AnnotateAttr>();
+					if (paramAttr && paramAttr->getAnnotation() == "params")
+						paramInfo.flags |= (int)TypeFlags::VarParams;
 
 					methodInfo.paramInfos.push_back(paramInfo);
 				}
