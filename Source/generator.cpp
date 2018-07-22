@@ -2717,6 +2717,12 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 				output << "\t\tScriptResourceManager::instance().createBuiltinScriptResource(instance, managedInstance);" << std::endl;
 				isValid = true;
 			}
+            else if (classType == ParsedType::GUIElement)
+            {
+                output << "\t\t" << sourceClassName << "* instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
+                output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
+                isValid = true;
+            }
 		}
 
 		if (!isValid)

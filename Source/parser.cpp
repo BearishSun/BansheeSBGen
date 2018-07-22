@@ -849,6 +849,21 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 
 	expr = expr->IgnoreParenCasts();
 
+	// Reference to some other declaration (e.g. a static)
+	DeclRefExpr* declRefExpr = dyn_cast<DeclRefExpr>(expr);
+	if(declRefExpr)
+	{
+		ValueDecl* decl = declRefExpr->getDecl();
+		std::string name = getFullName(decl);
+
+		if(name == "bs::StringUtil::BLANK" || name == "bs::StringUtil::WBLANK")
+		{
+			evalValue = "\"\"";
+			valType = "";
+			return true;
+		}
+	}
+
 	CXXConstructExpr* ctorExp = dyn_cast<CXXConstructExpr>(expr);
 	if (!ctorExp)
 		return false;
@@ -867,21 +882,6 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 				evalValue = "null";
 				return true;
 			}
-		}
-	}
-
-	// Reference to some other declaration (e.g. a static)
-	DeclRefExpr* declRefExpr = dyn_cast<DeclRefExpr>(expr);
-	if(declRefExpr)
-	{
-		ValueDecl* decl = declRefExpr->getDecl();
-		std::string name = getFullName(decl);
-
-		if(name == "bs::StringUtil::BLANK" || name == "bs::StringUtil::WBLANK")
-		{
-			evalValue = "\"\"";
-			valType = "";
-			return true;
 		}
 	}
 

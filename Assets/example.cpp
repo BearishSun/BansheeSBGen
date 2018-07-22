@@ -19,6 +19,9 @@ using String = std::string;
 
 namespace bs
 {
+	class GUIElement
+	{ };
+	
 	class StringUtil
 	{
 	public:
@@ -406,6 +409,24 @@ class BS_SCRIPT_EXPORT() Cmp1 : public Component
 class BS_SCRIPT_EXPORT() Cmp2 : public Cmp1
 {
 
+};
+
+class BS_SCRIPT_EXPORT(ed:true,m:GUIEditor) GUIColorGradient : public bs::GUIElement
+{
+public:
+	BS_SCRIPT_EXPORT(ec:GUIColorGradient)
+	static GUIColorGradient* create(const String& styleName = bs::StringUtil::BLANK);
+
+	/**	Color gradient to display. */
+	BS_SCRIPT_EXPORT(pr:setter,n:Gradient)
+	void setGradient(const ColorGradient& colorGradient);
+
+	/** @copydoc setGradient */
+	BS_SCRIPT_EXPORT(pr:getter,n:Gradient)
+	ColorGradient getGradient() const;
+
+	BS_SCRIPT_EXPORT()
+	bs::Event<void()> onClicked;
 };
 
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
