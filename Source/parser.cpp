@@ -309,6 +309,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 
 				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::SrcRHandle;
+				typeFlags |= (int)TypeFlags::AsResourceRef;
 			}
 			else if (sourceTypeName == "GameObjectHandle")
 			{
@@ -586,6 +587,37 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 	}
 
 	return true;
+}
+
+bool parseExportAttribute(Decl* decl, StringRef sourceName, ParsedDeclInfo& output)
+{
+    for (const auto& entry : decl->specific_attrs<AnnotateAttr>())
+    {
+        if (parseExportAttribute(entry, sourceName, output))
+            return true;
+    }
+
+    return false;
+}
+
+bool parseParamOrFieldAttribute(Decl* decl, bool isField, int& typeFlags)
+{
+	for(const auto& entry : decl->specific_attrs<AnnotateAttr>())
+	{
+		if (!isField && entry->getAnnotation() == "params")
+		{
+			typeFlags |= (int)TypeFlags::VarParams;
+			return true;
+		}
+
+		if (entry->getAnnotation() == "norref")
+		{
+			typeFlags &= ~(int)TypeFlags::AsResourceRef;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 bool isBase(const CXXRecordDecl* decl)
@@ -1924,6 +1956,28 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					continue;
 				}
 
+				parseParamOrFieldAttribute(fieldDecl, true, fieldInfo.flags);
+
+				// Remove the pass-as-resource-ref flag to all parameters initializing the field
+				if(!getPassAsResourceRef(fieldInfo.flags))
+				{
+					for(auto& ctorInfo : structInfo.ctors)
+					{
+						auto iterFindField = ctorInfo.fieldAssignments.find(fieldInfo.name);
+						if (iterFindField != ctorInfo.fieldAssignments.end())
+						{
+							auto iterFindParam = std::find_if(ctorInfo.params.begin(), ctorInfo.params.end(), 
+								[name = iterFindField->second](const VarInfo& varInfo)
+							{
+								return varInfo.name == name;
+							});
+
+							if (iterFindParam != ctorInfo.params.end())
+								iterFindParam->flags &= ~(int)TypeFlags::AsResourceRef;
+						}
+					}
+				}
+
 				if (!fieldInfo.defaultValue.empty())
 					hasDefaultValue = true;
 
@@ -2062,10 +2116,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							}
 						}
 
-						AnnotateAttr* paramAttr = paramDecl->getAttr<AnnotateAttr>();
-						if (paramAttr && paramAttr->getAnnotation() == "params")
-							paramInfo.flags |= (int)TypeFlags::VarParams;
-
+						parseParamOrFieldAttribute(paramDecl, false, paramInfo.flags);
 						methodInfo.paramInfos.push_back(paramInfo);
 					}
 
@@ -2095,7 +2146,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				StringRef sourceMethodName = methodDecl->getName();
 
 				ParsedDeclInfo parsedMethodInfo;
-				if (!parseExportAttribute(methodAttr, sourceMethodName, parsedMethodInfo))
+				if (!parseExportAttribute(methodDecl, sourceMethodName, parsedMethodInfo))
 					continue;
 
 				if (methodDecl->getAccess() != AS_public)
@@ -2155,6 +2206,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							continue;
 						}
 
+                        parseParamOrFieldAttribute(methodDecl, false, returnInfo.flags);
 						methodInfo.returnInfo = returnInfo;
 					}
 				}
@@ -2183,6 +2235,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 							continue;
 						}
+
+                        parseParamOrFieldAttribute(methodDecl, false, methodInfo.returnInfo.flags);
 					}
 					else // Must be setter
 					{
@@ -2247,10 +2301,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						}
 					}
 
-					AnnotateAttr* paramAttr = paramDecl->getAttr<AnnotateAttr>();
-					if (paramAttr && paramAttr->getAnnotation() == "params")
-						paramInfo.flags |= (int)TypeFlags::VarParams;
-
+					parseParamOrFieldAttribute(paramDecl, false, paramInfo.flags);
 					methodInfo.paramInfos.push_back(paramInfo);
 				}
 
@@ -2309,11 +2360,13 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					MethodInfo getterInfo;
 					getterInfo.sourceName = "get" + fieldInfo.name;
 					getterInfo.scriptName = parsedFieldInfo.exportName;
+					getterInfo.visibility = parsedFieldInfo.visibility;
+					getterInfo.flags = (int)MethodFlags::PropertyGetter | (int)MethodFlags::FieldWrapper;
+
 					getterInfo.returnInfo.flags = fieldInfo.flags;
 					getterInfo.returnInfo.arraySize = fieldInfo.arraySize;
 					getterInfo.returnInfo.type = fieldInfo.type;
-					getterInfo.visibility = parsedFieldInfo.visibility;
-					getterInfo.flags = (int)MethodFlags::PropertyGetter | (int)MethodFlags::FieldWrapper;
+					parseParamOrFieldAttribute(fieldDecl, true, getterInfo.returnInfo.flags);
 
 					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)
 						getterInfo.flags |= (int)MethodFlags::InteropOnly;
@@ -2323,6 +2376,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					paramInfo.arraySize = fieldInfo.arraySize;
 					paramInfo.type = fieldInfo.type;
 					paramInfo.name = "value";
+
+					parseParamOrFieldAttribute(fieldDecl, true, paramInfo.flags);
 
 					MethodInfo setterInfo;
 					setterInfo.sourceName = "set" + fieldInfo.name;

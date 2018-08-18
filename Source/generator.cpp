@@ -106,19 +106,27 @@ std::string getCSVarType(const std::string& typeName, ParsedType type, int flags
 	return output.str();
 }
 
-std::string generateGetInternalLine(const std::string& sourceClassName, const std::string& obj, ParsedType classType, bool isBase)
+std::string generateGetInternalLine(const std::string& sourceClassName, const std::string& obj, ParsedType classType, int flags)
 {
+	bool isRRef = getPassAsResourceRef(flags);
+	bool isBase = isBaseParam(flags);
+
 	std::stringstream output;
 	if (classType == ParsedType::Class)
 		output << obj << "->getInternal()";
 	else if(classType == ParsedType::GUIElement)
-		output << "static_cast<" << sourceClassName << ">(" << obj << "->getGUIElement())";
+		output << "static_cast<" << sourceClassName << "*>(" << obj << "->getGUIElement())";
 	else // Must be one of the handle types
 	{
 		assert(isHandleType(classType));
 
-		if (!isBase)
-			output << obj << "->getHandle()";
+		if (!isBase || isRRef)
+		{
+			if(isRRef)
+				output << "static_resource_cast<" << sourceClassName << ">(" << obj << "->getHandle())";
+			else
+				output << obj << "->getHandle()";
+		}
 		else
 		{
 			if (classType == ParsedType::Resource)
@@ -132,10 +140,13 @@ std::string generateGetInternalLine(const std::string& sourceClassName, const st
 }
 
 std::string generateManagedToScriptObjectLine(const std::string& indent, const std::string& scriptType, 
-	const std::string& scriptName, const std::string& name, ParsedType type, bool isBase)
+	const std::string& scriptName, const std::string& name, ParsedType type, int flags)
 {
+	bool isRRef = getPassAsResourceRef(flags);
+	bool isBase = isBaseParam(flags);
+
 	std::stringstream output;
-	if (!isBase)
+	if (!isBase || isRRef)
 	{
 		output << indent << scriptType << "* " << scriptName << ";" << std::endl;
 		output << indent << scriptName << " = " << scriptType << "::toNative(" << name << ");" << std::endl;
@@ -334,7 +345,7 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 	}
 }
 
-std::string getScriptInteropType(const std::string& name)
+std::string getScriptInteropType(const std::string& name, bool resourceRef = false)
 {
 	auto iterFind = cppToCsTypeMap.find(name);
 	if (iterFind == cppToCsTypeMap.end())
@@ -349,6 +360,15 @@ std::string getScriptInteropType(const std::string& name)
 		outs() << "Error: Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
 
 	std::string cleanName = cleanTemplParams(name);
+
+	if(resourceRef)
+	{
+		if(iterFind->second.type != ParsedType::Resource)
+			outs() << "Error: Type \"" << name << "\" cannot be wrapped in a resource reference.\n";
+
+		return "ScriptRRefBase";
+	}
+	
 	return "Script" + cleanName;
 }
 
@@ -458,15 +478,16 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 		auto iterFind = output.includes.find(typeName);
 		if (iterFind == output.includes.end())
 		{
-			// If enum or passed by value we need to include the header for the source type
-			bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags);
+			// If enum or passed by value or by resource reference we need to include the header for the source type
+			bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags) || getPassAsResourceRef(flags);
+			bool declOnly = getPassAsResourceRef(flags);
 
 			// If a class is being passed by reference or a raw pointer then we need the declaration because we perform
 			// assignment copy
 			if (!sourceInclude)
 				sourceInclude = typeInfo.type == ParsedType::Class && !isSrcSPtr(flags);
 
-			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude);
+			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude, declOnly);
 		}
 	}
 
@@ -474,7 +495,12 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 		output.fwdDecls[typeName] = { getStructInteropType(typeName), true };
 
 	if (typeInfo.type == ParsedType::Resource)
+	{
 		output.requiresResourceManager = true;
+
+		if (getPassAsResourceRef(flags))
+			output.requiresRRef = true;
+	}
 	else if (typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject)
 		output.requiresGameObjectManager = true;
 }
@@ -519,14 +545,21 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 		fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject ||
 		fieldTypeInfo.type == ParsedType::Resource)
 	{
-		if (!fieldTypeInfo.destFile.empty())
+		bool isRRef = getPassAsResourceRef(fieldInfo.flags);
+
+		if (!fieldTypeInfo.destFile.empty() || isRRef)
 		{
 			std::string name = "__" + fieldInfo.type;
-			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, false);
+			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, isRRef);
 		}
 
 		if (fieldTypeInfo.type == ParsedType::Resource)
+		{
 			output.requiresResourceManager = true;
+
+			if (getPassAsResourceRef(fieldInfo.flags))
+				output.requiresRRef = true;
+		}
 		else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
 			output.requiresGameObjectManager = true;
 	}
@@ -1470,6 +1503,9 @@ void postProcessFileInfos()
 			if(includesInfo.requiresResourceManager)
 				fileInfo.second.referencedSourceIncludes.push_back("BsScriptResourceManager.h");
 
+			if (includesInfo.requiresRRef)
+				fileInfo.second.referencedSourceIncludes.push_back("Wrappers/BsScriptRRefBase.h");
+
 			if(includesInfo.requiresGameObjectManager)
 				fileInfo.second.referencedSourceIncludes.push_back("BsScriptGameObjectManager.h");
 
@@ -1679,16 +1715,24 @@ std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 	return output.str();
 }
 
-std::string generateNativeToScriptObjectLine(ParsedType type, const std::string& scriptType, const std::string& scriptName,
+std::string generateNativeToScriptObjectLine(ParsedType type, int flags, const std::string& scriptName,
 	const std::string& argName, const std::string& indent = "\t\t")
 {
 	std::stringstream output;
 
 	if (type == ParsedType::Resource)
 	{
-		output << indent << "ScriptResourceBase* " << scriptName << ";\n";
-		output << indent << scriptName << " = ScriptResourceManager::instance().getScriptResource(" << argName 
-			<< ", true);\n";
+		if(getPassAsResourceRef(flags))
+		{
+			output << indent << "ScriptRRefBase* " << scriptName << ";\n";
+			output << indent << scriptName << " = ScriptResourceManager::instance().getScriptRRef(" << argName << ");\n";
+		}
+		else
+		{
+			output << indent << "ScriptResourceBase* " << scriptName << ";\n";
+			output << indent << scriptName << " = ScriptResourceManager::instance().getScriptResource(" << argName
+				<< ", true);\n";
+		}
 	}
 	else if (type == ParsedType::Component)
 	{
@@ -1855,9 +1899,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string scriptName = "script" + name;
 
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
-					paramTypeInfo.type, isBaseParam(flags));
+					paramTypeInfo.type, flags);
 				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+					paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 		}
 			break;
@@ -1882,9 +1926,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string scriptName = "script" + name;
 				
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
-					paramTypeInfo.type, isBaseParam(flags));
+					paramTypeInfo.type, flags);
 				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+					paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 		}
 			break;
@@ -1896,11 +1940,11 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
 
 			std::string scriptName = "script" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 
 			if (returnValue)
 			{
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
 				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
 				postCallActions << "\t\telse" << std::endl;
@@ -1908,7 +1952,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else if (isOutput(flags))
 			{
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, argName);
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
 				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\tMonoUtil::referenceCopy(" << name << ", " << scriptName << "->getManagedInstance());" << std::endl;
 				postCallActions << "\t\telse" << std::endl;
@@ -1916,9 +1960,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else
 			{
-				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, paramTypeInfo.type, isBaseParam(flags));
+				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, paramTypeInfo.type, flags);
 				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 		}
 		break;
@@ -1941,7 +1985,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName);
+			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 			break;
 		}
 
@@ -2012,10 +2056,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 
-				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, isBaseParam(flags));
+				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
 				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preCallActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+					paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 			break;
 			}
@@ -2088,7 +2132,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, argName + "[i]", "\t\t\t");
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName + "[i]", "\t\t\t");
 				postCallActions << "\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 				postCallActions << "\t\t\telse" << std::endl;
@@ -2198,10 +2242,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 
 					std::string scriptName = "script" + name;
 					preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, 
-						paramTypeInfo.type, isBaseParam(flags));
+						paramTypeInfo.type, flags);
 					preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 					preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName,
-						paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+						paramTypeInfo.type, flags) << ";" << std::endl;
 				}
 				else
 					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
@@ -2245,7 +2289,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, flags);
 				preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preActions << "\t\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
 
@@ -2265,12 +2309,12 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		default: // Some resource or game object type
 		{
 			arg = "tmp" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 			std::string scriptName = "script" + name;
 
 			if(toInterop)
 			{
-				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, "value." + name);
+				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "value." + name);
 
 				preActions << "\t\tMonoObject* " << arg << ";\n";
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
@@ -2283,9 +2327,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 				
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, flags);
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
-				preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+				preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 
 			if(!isSrcGHandle(flags) && !isSrcRHandle(flags))
@@ -2311,7 +2355,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName);
+			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 			break;
 		}
 
@@ -2365,9 +2409,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			default: // Some object type
 			{
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, isBaseParam(flags));
+				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
 				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, isBaseParam(flags)) << ";" << std::endl;
+				preActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 			break;
 			}
@@ -2423,7 +2467,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			{
 				std::string scriptName = "script" + name;
 
-				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, "value." + name + "[i]", "\t\t\t");
+				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "value." + name + "[i]", "\t\t\t");
 				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
 				preActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 				preActions << "\t\t\telse\n";
@@ -2519,9 +2563,9 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
 
 			std::string scriptName = "script" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 
-			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, scriptType, scriptName, name);
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, name);
 			preCallActions << "\t\tif(" << scriptName << " != nullptr)\n";
 			preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getManagedInstance();" << std::endl;
 		}
@@ -2545,7 +2589,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName);
+			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
 			break;
 		}
 
@@ -2606,7 +2650,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		{
 			std::string scriptName = "script" + name;
 
-			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, entryType, scriptName, name + "[i]", "\t\t\t");
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, name + "[i]", "\t\t\t");
 			preCallActions << "\t\t\tif(" << scriptName << "[i] != nullptr)\n";
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 			preCallActions << "\t\t\telse\n";
@@ -2717,12 +2761,12 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 				output << "\t\tScriptResourceManager::instance().createBuiltinScriptResource(instance, managedInstance);" << std::endl;
 				isValid = true;
 			}
-            else if (classType == ParsedType::GUIElement)
-            {
-                output << "\t\t" << sourceClassName << "* instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
-                output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
-                isValid = true;
-            }
+			else if (classType == ParsedType::GUIElement)
+			{
+				output << "\t\t" << sourceClassName << "* instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
+				output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
+				isValid = true;
+			}
 		}
 
 		if (!isValid)
@@ -2739,7 +2783,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 				methodCall << sourceClassName << "::instance()." << methodInfo.sourceName << "(" << methodArgs.str() << ");";
 			else
 			{
-				methodCall << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase);
+				methodCall << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
 				methodCall << "->" << methodInfo.sourceName << "(" << methodArgs.str() << ");";
 			}
 		}
@@ -2750,7 +2794,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 				methodCall << fullMethodName << "(" << methodArgs.str() << ");";
 			else
 			{
-				methodCall << fullMethodName << "(" << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase);
+				methodCall << fullMethodName << "(" << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
 
 				std::string methodArgsStr = methodArgs.str();
 				if (!methodArgsStr.empty())
@@ -2842,7 +2886,7 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name << ";";
 	else
 	{
-		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase);
+		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
 		fieldAccess << "->" << fieldInfo.name << ";";
 	}
 
@@ -2899,7 +2943,7 @@ std::string generateCppFieldSetterBody(const ClassInfo& classInfo, const FieldIn
 		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name;
 	else
 	{
-		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase);
+		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
 		fieldAccess << "->" << fieldInfo.name;
 	}
 
@@ -3083,8 +3127,17 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << std::endl;
 
 	// Constructor
-	if(!isModule)
-		output << "\t\t" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value);" << std::endl;
+	if (!isModule)
+	{
+		output << "\t\t" << interopClassName << "(MonoObject* managedInstance, ";
+
+		if (typeInfo.type != ParsedType::GUIElement)
+			output << "const " << wrappedDataType << "& value";
+		else
+			output << wrappedDataType << " value";
+
+		output << ");\n";
+	}
 	else
 		output << "\t\t" << interopClassName << "(MonoObject* managedInstance);" << std::endl;
 
@@ -3175,6 +3228,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	else
 		interopClassThisPtrType = interopClassName;
 
+	// Internal_GetRef interop method
+	if (typeInfo.type == ParsedType::Resource)
+		output << "\t\tstatic MonoObject* Internal_getRef(" << interopClassThisPtrType << "* thisPtr);\n\n";
+
 	for (auto& methodInfo : classInfo.ctorInfos)
 	{
 		if (isCSOnly(methodInfo.flags))
@@ -3261,8 +3318,17 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "\n";
 
 	// Constructor
-	if(!isModule)
-		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance, const " << wrappedDataType << "& value)" << std::endl;
+	if (!isModule)
+	{
+		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance, ";
+
+		if (typeInfo.type != ParsedType::GUIElement)
+			output << "const " << wrappedDataType << "& value";
+		else
+			output << wrappedDataType << " value";
+
+		output << ")\n";
+	}
 	else
 		output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance)" << std::endl;
 
@@ -3348,6 +3414,13 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\tvoid " << interopClassName << "::initRuntimeData()" << std::endl;
 	output << "\t{" << std::endl;
 
+	// Internal_GetRef interop method
+	if (typeInfo.type == ParsedType::Resource)
+	{
+		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_GetRef\", (void*)&" <<
+			interopClassName << "::Internal_getRef);\n";
+	}
+
 	for (auto& methodInfo : classInfo.ctorInfos)
 	{
 		if (isCSOnly(methodInfo.flags))
@@ -3378,7 +3451,35 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		{
 			const VarInfo& paramInfo = *I;
 			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-			std::string csType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
+
+			std::string typeName;
+
+			// Generic types require `X after their name
+			StringRef inputStr(paramTypeInfo.scriptName.data(), paramTypeInfo.scriptName.length());
+			inputStr = inputStr.trim();
+
+			const size_t leftBracketIdx = inputStr.find_first_of('<');
+			const size_t rightBracketIdx = inputStr.find_last_of('>');
+			const size_t numLeftBrackets = inputStr.count('<');
+			const size_t numRightBrackets = inputStr.count('>');
+
+			if (numLeftBrackets > 1 || numRightBrackets > 1)
+			{
+				outs() << "Error: Cannot parse event signature type. Nested generic parameters are not allowed.\n";
+				typeName = paramTypeInfo.scriptName;
+			}
+			else if (leftBracketIdx != StringRef::npos && rightBracketIdx != StringRef::npos)
+			{
+				StringRef templateType = inputStr.substr(0, leftBracketIdx);
+				StringRef templateArgs = inputStr.substr(leftBracketIdx + 1, rightBracketIdx - leftBracketIdx - 1);
+				const size_t numTemplateArgs = templateArgs.count(',') + 1;
+
+				typeName = templateType.str() + "`" + std::to_string(numTemplateArgs) + "<" + templateArgs.str() + ">";
+			}
+			else
+				typeName = paramTypeInfo.scriptName;
+
+			std::string csType = getCSVarType(typeName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
 
 			output << csType;
 
@@ -3517,6 +3618,15 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	}
 	else
 		interopClassThisPtrType = interopClassName;
+
+	// Internal_GetRef interop method
+	if (typeInfo.type == ParsedType::Resource)
+	{
+		output << "\tMonoObject* " << interopClassName << "::Internal_getRef(" << interopClassThisPtrType << "* thisPtr)\n";
+		output << "\t{\n";
+		output << "\t\treturn thisPtr->getRRef();\n";
+		output << "\t}\n\n";
+	}
 
 	// Constructors
 	for (auto I = classInfo.ctorInfos.begin(); I != classInfo.ctorInfos.end(); ++I)
@@ -3987,6 +4097,24 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		ctors << ");" << std::endl;
 		ctors << "\t\t}" << std::endl;
 		ctors << std::endl;
+	}
+
+	// 'Ref' property & conversion operator to RRef<T>
+	if(typeInfo.type == ParsedType::Resource)
+	{
+		interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]\n";
+		interops << "\t\tprivate static extern RRef<" << typeInfo.scriptName << "> Internal_GetRef(IntPtr thisPtr);\n";
+
+		properties << "\t\t/// <summary>Returns a reference wrapper for this resource.</summary>\n";
+		properties << "\t\tpublic RRef<" << typeInfo.scriptName << "> Ref\n";
+		properties << "\t\t{\n";
+		properties << "\t\t\tget { return Internal_GetRef(mCachedPtr); }\n";
+		properties << "\t\t}\n";
+		properties << "\n";
+
+		methods << "\t\t/// <summary>Returns a reference wrapper for this resource.</summary>\n";
+		methods << "\t\tpublic static implicit operator RRef<" << typeInfo.scriptName << ">(" << typeInfo.scriptName << " x)\n";
+		methods << "\t\t{ return Internal_GetRef(x.mCachedPtr); }\n\n";
 	}
 
 	// External constructors, methods and interop stubs
