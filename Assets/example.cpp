@@ -147,23 +147,25 @@ public:
 	HString(uint32_t stringTableId = 0);
 };
 
+#define BS_NORREF __attribute__((annotate("norref")))
+
 struct BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContentImages
 {
 	GUIContentImages() = default;
-
-	GUIContentImages(const HString& image)
+	
+	GUIContentImages(const bs::TResourceHandle<bs::Texture>& image)
 		:normal(image), hover(image), active(image), focused(image),
 		normalOn(image), hoverOn(image), activeOn(image), focusedOn(image)
 	{ }
 
-	HString normal;
-	HString hover;
-	HString active;
-	HString focused;
-	HString normalOn;
-	HString hoverOn;
-	HString activeOn;
-	HString focusedOn;
+	BS_NORREF bs::TResourceHandle<bs::Texture> normal;
+	BS_NORREF bs::TResourceHandle<bs::Texture> hover;
+	BS_NORREF bs::TResourceHandle<bs::Texture> active;
+	BS_NORREF bs::TResourceHandle<bs::Texture> focused;
+	BS_NORREF bs::TResourceHandle<bs::Texture> normalOn;
+	BS_NORREF bs::TResourceHandle<bs::Texture> hoverOn;
+	BS_NORREF bs::TResourceHandle<bs::Texture> activeOn;
+	BS_NORREF bs::TResourceHandle<bs::Texture> focusedOn;
 };
 
 class BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContent

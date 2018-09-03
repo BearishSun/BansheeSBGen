@@ -4312,11 +4312,12 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	{
 		bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
 		bool isCallback = (entry.flags & (int)MethodFlags::Callback) != 0;
+        bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 
 		events << generateXMLComments(entry.documentation, "\t\t");
 		events << "\t\t";
 
-		if (!isCallback)
+		if (!isCallback && !isInternal)
 		{
 			if (entry.visibility == CSVisibility::Internal)
 				events << "internal ";
@@ -4329,7 +4330,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (isStatic || isModule)
 			events << "static ";
 
-		if (!isCallback)
+		if (!isCallback && !isInternal)
 		{
 			events << "event Action";
 
@@ -4351,7 +4352,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		// Event interop
 		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
 		interops << "\t\t{" << std::endl;
-		if (!isCallback)
+		if (!isCallback && !isInternal)
 			interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");\n";
 		else
 			interops << "\t\t\t" << entry.scriptName << "(" << generateCSEventArgs(entry) << ");\n";
