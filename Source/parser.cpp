@@ -2312,6 +2312,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				if (isExternal)
 				{
+                    if (parsedMethodInfo.externalClass == "T")
+                        parsedMethodInfo.externalClass = srcClassName;
+
 					ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
 					infos.methods.push_back(methodInfo);
 				}

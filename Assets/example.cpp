@@ -47,6 +47,18 @@ typedef basic_string<wchar_t> wstring;
 
 namespace bs
 {
+template <class T>
+class TCtorBase : public GUIElement
+{
+	BS_SCRIPT_EXPORT(ec:T)
+	static T* create(int a);
+};
+
+class BS_SCRIPT_EXPORT() GUIElementTest : public TCtorBase<GUIElementTest>
+{
+	
+};
+	
 template <class RetType, class... Args>
 class TEvent
 {
