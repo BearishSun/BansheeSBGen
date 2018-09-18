@@ -403,8 +403,13 @@ public:
 	BS_SCRIPT_EXPORT()
 	ColorGradient() = default;
 
+	/** Test comments. */
 	BS_SCRIPT_EXPORT()
-	int evaluate(float t) const;
+	int evaluate(float t, float& factor) const;
+	
+	/** Test comments 2. */
+	BS_SCRIPT_EXPORT()
+	int evaluate(float t, int& factor) const;
 };
 
 struct BS_SCRIPT_EXPORT(pl:true) Str2 : public Str1
@@ -434,7 +439,24 @@ public:
 	/**	Color gradient to display. */
 	BS_SCRIPT_EXPORT(pr:setter,n:Gradient)
 	void setGradient(const ColorGradient& colorGradient);
+	
+	/**
+	* Calculates the total range covered by a set of curves.
+	*
+	* @param[in]	curves		Curves to calculate range for.
+	* @param[out]	xMin		Minimum time value present in the curves.
+	* @param[out]	xMax		Maximum time value present in the curves.
+	* @param[out]	yMin		Minimum curve value present in the curves.
+	* @param[out]	yMax		Maximum curve value present in the curves.
+	*/
+	static void calculateRange(const std::vector<TAnimationCurve<float>>& curves, 
+		float& xMin, float& xMax, float& yMin, float& yMax);
 
+	/** @copydoc calculateRange(const std::vector<TAnimationCurve<float>>&, float&, float&, float&, float&) */
+	BS_SCRIPT_EXPORT()
+	static void calculateRange(const std::vector<std::shared_ptr<TAnimationCurve<float>>>& curves, 
+		float& xMin, float& xMax, float& yMin, float& yMax);
+	
 	/** @copydoc setGradient */
 	BS_SCRIPT_EXPORT(pr:getter,n:Gradient)
 	ColorGradient getGradient() const;
@@ -442,6 +464,63 @@ public:
 	BS_SCRIPT_EXPORT()
 	bs::Event<void()> onClicked;
 };
+
+namespace bs
+{
+	class BS_SCRIPT_EXPORT(m:Math) Random
+	{
+	};
+
+	typedef unsigned int RGBA;
+
+	struct BS_SCRIPT_EXPORT(m:Particles) ColorDistribution
+	{
+		/** Creates a new empty distribution. */
+		BS_SCRIPT_EXPORT()
+		ColorDistribution();
+
+		/** 
+		 * Evaluates the value of the distribution.
+		 * 
+		 * @param[in]	t		Time at which to evaluate the distribution. This is only relevant if the distribution
+		 *						contains gradients.
+		 * @param[in]	factor	Value in range [0, 1] that determines how to interpolate between min/max value, if the
+		 *						distribution represents a range. Value of 0 will return the minimum value, while value of 1
+		 *						will return the maximum value, and interpolate the values in-between.
+		 * @return				Evaluated color.
+		 *
+		 */
+		RGBA evaluate(float t, float factor) const;
+
+		/** 
+		 * Evaluates the value of the distribution.
+		 * 
+		 * @param[in]	t		Time at which to evaluate the distribution. This is only relevant if the distribution
+		 *						contains gradients.
+		 * @param[in]	factor	Random number generator that determines the factor. Factor determines how to interpolate
+		 *						between min/max value, if the distribution represents a range.
+		 * @return				Evaluated color.
+		 *
+		 */
+		RGBA evaluate(float t, Random& factor) const;
+	};
+
+	struct Color
+	{};
+
+	/** Extension class for ColorDistribution, for adding additional functionality for the script interface. */
+	class BS_SCRIPT_EXPORT(e:ColorDistribution) ColorDistributionEx
+	{
+	public:
+		/** @copydoc ColorDistribution::evaluate(float, float) */
+		BS_SCRIPT_EXPORT(e:ColorDistribution)
+		static Color evaluate(const std::shared_ptr<ColorDistribution>& thisPtr, float t, float factor);
+
+		/** @copydoc ColorDistribution::evaluate(float, Random&) */
+		BS_SCRIPT_EXPORT(e:ColorDistribution)
+		static Color evaluate(const std::shared_ptr<ColorDistribution>& thisPtr, float t, Random& factor);
+	}; 
+}
 
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {

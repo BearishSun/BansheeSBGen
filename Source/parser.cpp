@@ -108,6 +108,32 @@ void clearParamRefComments(CommentEntry& comment)
 	updateParamRefComments({}, comment);
 }
 
+std::string getNamespace(const NamedDecl* decl)
+{
+	const DeclContext* context = decl->getDeclContext();
+
+	// Collect contexts.
+	SmallVector<const DeclContext *, 8> contexts;
+	while (context && isa<NamedDecl>(context))
+	{
+		contexts.push_back(context);
+		context = context->getParent();
+	}
+
+	std::string name;
+	raw_string_ostream ss(name);
+	for (const DeclContext* declContext : reverse(contexts))
+	{
+		if (const auto *ND = dyn_cast<NamespaceDecl>(declContext))
+		{
+			if (!ND->isAnonymousNamespace())
+				ss << *ND << "::";
+		}
+	}
+
+	return ss.str();
+}
+
 std::string getFullName(NamedDecl* decl)
 {
 	const DeclContext* context = decl->getDeclContext();
@@ -591,13 +617,13 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 
 bool parseExportAttribute(Decl* decl, StringRef sourceName, ParsedDeclInfo& output)
 {
-    for (const auto& entry : decl->specific_attrs<AnnotateAttr>())
-    {
-        if (parseExportAttribute(entry, sourceName, output))
-            return true;
-    }
+	for (const auto& entry : decl->specific_attrs<AnnotateAttr>())
+	{
+		if (parseExportAttribute(entry, sourceName, output))
+			return true;
+	}
 
-    return false;
+	return false;
 }
 
 bool parseParamOrFieldAttribute(Decl* decl, bool isField, int& typeFlags)
@@ -1204,11 +1230,45 @@ void ScriptExportParser::parseCommentInfo(const FunctionDecl* decl, CommentInfo&
 	CommentMethodInfo methodInfo;
 	if (ft)
 	{
-		unsigned numParams = decl->getNumParams();
+		std::string currentNS = getNamespace(decl);
+		std::string constQualifier = "const ";
+
+		const unsigned numParams = decl->getNumParams();
 		for (unsigned i = 0; i < numParams; ++i)
 		{
-			std::string paramType = decl->getParamDecl(i)->getType().getAsString(astContext->getPrintingPolicy());
-			methodInfo.params.push_back(paramType);
+			QualType type = decl->getParamDecl(i)->getType();
+
+			std::stringstream typeStream;
+			std::string typeName = type.getAsString(astContext->getPrintingPolicy());
+
+			const std::string::size_type constPos = typeName.find(constQualifier);
+			bool hasConst = false;
+			if (constPos != std::string::npos)
+			{
+				typeName.erase(constPos, constQualifier.length());
+				hasConst = true;
+			}
+
+			typeName.erase(std::remove_if(typeName.begin(), typeName.end(), [](const char& val)
+			{
+				return isspace(val) || val == '&' || val == '*';
+			}), typeName.end());
+
+			const std::string::size_type nsPos = typeName.find(currentNS);
+			if (nsPos != std::string::npos)
+				typeName.erase(nsPos, currentNS.length());
+
+			if (hasConst)
+				typeStream << "const ";
+
+			typeStream << typeName;
+
+			if (type->isReferenceType())
+				typeStream << "&";
+			else if (type->isPointerType())
+				typeStream << "*";
+
+			methodInfo.params.push_back(typeStream.str());
 		}
 	}
 
@@ -1312,7 +1372,7 @@ void ScriptExportParser::parseComments(const NamedDecl* decl, CommentInfo& comme
 		CommentInfo& existingInfo = commentInfos[iterFind->second];
 
 		bool foundExisting = false;
-		for(auto& paramInfo : commentInfo.overloads)
+		for(auto& paramInfo : existingInfo.overloads)
 		{
 			int numParams = paramInfo.params.size();
 			if (numParams != commentInfo.overloads[0].params.size())
@@ -2206,7 +2266,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							continue;
 						}
 
-                        parseParamOrFieldAttribute(methodDecl, false, returnInfo.flags);
+						parseParamOrFieldAttribute(methodDecl, false, returnInfo.flags);
 						methodInfo.returnInfo = returnInfo;
 					}
 				}
@@ -2236,7 +2296,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							continue;
 						}
 
-                        parseParamOrFieldAttribute(methodDecl, false, methodInfo.returnInfo.flags);
+						parseParamOrFieldAttribute(methodDecl, false, methodInfo.returnInfo.flags);
 					}
 					else // Must be setter
 					{
@@ -2312,8 +2372,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 				if (isExternal)
 				{
-                    if (parsedMethodInfo.externalClass == "T")
-                        parsedMethodInfo.externalClass = srcClassName;
+					if (parsedMethodInfo.externalClass == "T")
+						parsedMethodInfo.externalClass = srcClassName;
 
 					ExternalClassInfos& infos = externalClassInfos[parsedMethodInfo.externalClass];
 					infos.methods.push_back(methodInfo);
