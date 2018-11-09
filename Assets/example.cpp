@@ -47,6 +47,43 @@ typedef basic_string<wchar_t> wstring;
 
 namespace bs
 {
+	// START TEST CORE VARIANTS
+	template<class T>
+	struct CoreThreadType
+	{ };
+	
+	template<class T, bool Core>
+	struct CoreVariant { };
+
+	template<class T>
+	struct CoreVariant<T, false> { typedef T Type; };
+
+	template<class T> struct CoreVariant<T, true> { typedef typename CoreThreadType<T>::Type Type; };
+
+	template<class T, bool Core>
+	using CoreVariantType = typename CoreVariant<T, Core>::Type;
+
+	struct BS_SCRIPT_EXPORT() ParticleVectorFieldSettings
+	{
+		/** Intensity of the forces and velocities applied by the vector field. */
+		BS_SCRIPT_EXPORT()
+		float intensity = 1.0f;
+	};
+	
+	namespace ct
+	{
+		struct ParticleVectorFieldSettings {};
+	}
+
+	template<> struct CoreThreadType<ParticleVectorFieldSettings> { typedef ct::ParticleVectorFieldSettings Type; };
+	
+	class BS_SCRIPT_EXPORT() CoreVariantTest
+	{
+		BS_SCRIPT_EXPORT() CoreVariantType<ParticleVectorFieldSettings, false> vectorField;
+	};
+	// END TEST CORE VARIANTS
+	
+	
 template <class T>
 class TCtorBase : public GUIElement
 {
@@ -161,6 +198,8 @@ public:
 
 #define BS_NORREF __attribute__((annotate("norref")))
 
+typedef bs::TResourceHandle<bs::Texture> HTexture;
+
 struct BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContentImages
 {
 	GUIContentImages() = default;
@@ -170,7 +209,7 @@ struct BS_SCRIPT_EXPORT(pl:true,m:GUI) GUIContentImages
 		normalOn(image), hoverOn(image), activeOn(image), focusedOn(image)
 	{ }
 
-	BS_NORREF bs::TResourceHandle<bs::Texture> normal;
+	BS_NORREF HTexture normal;
 	BS_NORREF bs::TResourceHandle<bs::Texture> hover;
 	BS_NORREF bs::TResourceHandle<bs::Texture> active;
 	BS_NORREF bs::TResourceHandle<bs::Texture> focused;

@@ -210,11 +210,12 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 	else
 		realType = type;
 
-	// Check for arrays
+	// Check for arrays & core variant types
 	if (realType->isStructureOrClassType())
 	{
 		// Note: Not supporting nested arrays
 		const TemplateSpecializationType* specType = realType->getAs<TemplateSpecializationType>();
+
 		int numArgs = 0;
 
 		if (specType != nullptr)
@@ -231,6 +232,16 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			{
 				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::Vector;
+			}
+			else
+			{
+				const TemplateDecl* templateDecl = specType->getTemplateName().getAsTemplateDecl();
+				if(templateDecl)
+				{
+					std::string templateDeclName = templateDecl->getName();
+					if((templateDeclName == "CoreVariantType" || templateDeclName == "CoreVariantHandleType") && specType->isTypeAlias())
+						realType = specType->getAliasedType();
+				}
 			}
 		}
 	}
@@ -1683,12 +1694,10 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 			else
 				tmplArgsStream << tmplArgExprValue;
 
-			tmplArg.getAsExpr()->getType();
-
 			std::string tmplArgTypeName;
 			int dummy;
 			unsigned dummy2;
-			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, dummy2, false);
+			parseType(tmplArg.getAsExpr()->getType(), tmplArgTypeName, dummy, dummy2, false);
 
 			if(templParams != nullptr)
 				templParams->push_back({ tmplArgTypeName });
