@@ -1904,7 +1904,28 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 								defaultFieldValues[field] = std::make_pair(evalValue, evalTypeValue);
 							else // Check for initializers referencing parameters
 							{
-								Decl* varDecl = initExpr->getReferencedDeclOfCallee();
+								Decl* varDecl = nullptr;
+
+								// Check for std::move
+								if (CallExpr* callExpr = dyn_cast<CallExpr>(initExpr))
+								{
+									if(FunctionDecl* funcDecl = dyn_cast<FunctionDecl>(callExpr->getCalleeDecl()))
+									{
+										if(funcDecl->getName() == "move" && funcDecl->isInStdNamespace())
+										{
+											if(callExpr->getNumArgs() == 1)
+											{
+												if (Expr* argExpr = callExpr->getArg(0))
+													varDecl = argExpr->getReferencedDeclOfCallee();
+											}
+										}
+										
+									}
+								}
+								else
+								{
+									varDecl = initExpr->getReferencedDeclOfCallee();
+								}
 
 								if (varDecl != nullptr)
 								{

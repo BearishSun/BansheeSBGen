@@ -53,6 +53,40 @@ namespace bs
 		virtual ~Component() {}
 	};
 	
+	// START TEST DISTRIBUTION INITIALIZER
+	
+		/** Specifies a value as a distribution, which can include a constant value, random range or a curve. */
+	template<class T>
+	struct TDistribution
+	{
+		/** Creates a new empty distribution. */
+		BS_SCRIPT_EXPORT()
+		TDistribution();
+		
+		/** Creates a new distribution that returns a constant value. */
+		BS_SCRIPT_EXPORT()
+		TDistribution(T value);
+
+		/** Creates a new distribution that returns a random value in the specified range. */
+		BS_SCRIPT_EXPORT()
+		TDistribution(T minValue, T maxValue);
+	};
+
+	using FloatDistribution = TDistribution<float>;
+	template struct BS_SCRIPT_EXPORT(m:Particles,n:FloatDistribution) TDistribution<float>;
+
+	struct BS_SCRIPT_EXPORT(pl:true) DistributionTest
+	{
+		DistributionTest() = default;
+		DistributionTest(FloatDistribution count)
+			:count(std::move(count))
+		{ }
+		
+		FloatDistribution count = 0;
+	};
+	
+	// END TEST DISTRIBUTION INITIALIZER
+	
 	// START TEST CORE VARIANTS
 	template<class T>
 	struct CoreThreadType
