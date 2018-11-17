@@ -313,6 +313,13 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 	case ParsedType::GUIElement:
 			return name;
 	case ParsedType::Component: // Always passed as a handle, input must be a handle
+		if (!isSrcGHandle(flags))
+			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
+
+		if(getIsComponentOrActor(flags))
+			return name + ".getComponent()";
+
+		return name;
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
 	{
@@ -1738,12 +1745,12 @@ std::string generateNativeToScriptObjectLine(ParsedType type, int flags, const s
 	{
 		output << indent << "ScriptComponentBase* " << scriptName << " = nullptr;\n";
 		output << indent << "if(" << argName << ")\n";
-		output << indent << indent << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
+		output << indent << "\t" << scriptName << " = ScriptGameObjectManager::instance().getBuiltinScriptComponent(" <<
 			"static_object_cast<Component>(" << argName << "));\n";
 	}
 	else if (type == ParsedType::SceneObject)
 	{
-		output << indent << "ScriptComponentBase* " << scriptName << " = nullptr;\n";
+		output << indent << "ScriptSceneObject* " << scriptName << " = nullptr;\n";
 		output << indent << "if(" << argName << ")\n";
 		output << indent << scriptName << " = ScriptGameObjectManager::instance().getOrCreateScriptSceneObject(" <<
 			argName << ");\n";
@@ -2778,20 +2785,20 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		if (!isExternal)
 		{
 			if (isStatic)
-				methodCall << sourceClassName << "::" << methodInfo.sourceName << "(" << methodArgs.str() << ");"; 
+				methodCall << sourceClassName << "::" << methodInfo.sourceName << "(" << methodArgs.str() << ")"; 
 			else if(isModule)
-				methodCall << sourceClassName << "::instance()." << methodInfo.sourceName << "(" << methodArgs.str() << ");";
+				methodCall << sourceClassName << "::instance()." << methodInfo.sourceName << "(" << methodArgs.str() << ")";
 			else
 			{
 				methodCall << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
-				methodCall << "->" << methodInfo.sourceName << "(" << methodArgs.str() << ");";
+				methodCall << "->" << methodInfo.sourceName << "(" << methodArgs.str() << ")";
 			}
 		}
 		else
 		{
 			std::string fullMethodName = methodInfo.externalClass + "::" + methodInfo.sourceName;
 			if (isStatic)
-				methodCall << fullMethodName << "(" << methodArgs.str() << ");";
+				methodCall << fullMethodName << "(" << methodArgs.str() << ")";
 			else
 			{
 				methodCall << fullMethodName << "(" << generateGetInternalLine(sourceClassName, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
@@ -2800,7 +2807,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 				if (!methodArgsStr.empty())
 					methodCall << ", " << methodArgsStr;
 
-				methodCall << ");";
+				methodCall << ")";
 			}
 		}
 
@@ -2820,7 +2827,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		else
 			call = methodCall.str();
 
-		output << "\t\t" << returnAssignment << call << "\n";
+		output << "\t\t" << returnAssignment << call << ";\n";
 	}
 
 	std::string postCallActionsStr = postCallActions.str();
@@ -2881,13 +2888,13 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 
 	std::stringstream fieldAccess;
 	if (isStatic)
-		fieldAccess << classInfo.name << "::" << fieldInfo.name << ";"; 
+		fieldAccess << classInfo.name << "::" << fieldInfo.name; 
 	else if(isModule)
-		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name << ";";
+		fieldAccess << classInfo.name << "::instance()." << fieldInfo.name;
 	else
 	{
 		fieldAccess << generateGetInternalLine(classInfo.name, "thisPtr", classType, isBase ? (int)TypeFlags::ReferencesBase : 0);
-		fieldAccess << "->" << fieldInfo.name << ";";
+		fieldAccess << "->" << fieldInfo.name;
 	}
 
 	// Dereference input if needed
@@ -2900,7 +2907,7 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 
 	std::string access = getAsCppToInteropArgument(fieldAccess.str(), returnTypeInfo.type, methodInfo.returnInfo.flags, "return");
 
-	output << "\t\t" << returnAssignment << access << "\n";
+	output << "\t\t" << returnAssignment << access << ";\n";
 
 	std::string postCallActionsStr = postCallActions.str();
 	if (!postCallActionsStr.empty())

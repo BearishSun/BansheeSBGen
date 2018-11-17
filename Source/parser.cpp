@@ -233,6 +233,31 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 				realType = specType->getArg(0).getAsType();
 				typeFlags |= (int)TypeFlags::Vector;
 			}
+			else if(sourceTypeName == "ComponentOrActor")
+			{
+				bool foundUnderlying = false;
+				const DeclContext* context = dyn_cast<DeclContext>(recordDecl);
+				for (auto I = context->decls_begin(); I != context->decls_end(); ++I)
+				{
+					if (TypeAliasDecl* typeAliasDecl = dyn_cast<TypeAliasDecl>(*I))
+					{
+						if(typeAliasDecl->getName() == "HandleType")
+						{
+							realType = typeAliasDecl->getUnderlyingType();
+							foundUnderlying = true;
+							break;
+						}
+					}
+				}
+
+				if(!foundUnderlying)
+				{
+					outs() << "Error: Cannot find underlying component type for ComponentOrActor<T>.\n";
+					return false;
+				}
+
+				typeFlags |= (int)TypeFlags::ComponentOrActor;
+			}
 			else
 			{
 				const TemplateDecl* templateDecl = specType->getTemplateName().getAsTemplateDecl();

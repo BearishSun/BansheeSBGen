@@ -47,6 +47,12 @@ typedef basic_string<wchar_t> wstring;
 
 namespace bs
 {
+	class Component
+	{
+	public:
+		virtual ~Component() {}
+	};
+	
 	// START TEST CORE VARIANTS
 	template<class T>
 	struct CoreThreadType
@@ -82,6 +88,60 @@ namespace bs
 		BS_SCRIPT_EXPORT() CoreVariantType<ParticleVectorFieldSettings, false> vectorField;
 	};
 	// END TEST CORE VARIANTS
+	
+	// START TEST ComponentOrActor
+	template<class T>
+	struct GameObjectHandle { };
+
+	template<class T>
+	struct ComponentType { };
+
+	class BS_SCRIPT_EXPORT() Renderable {};
+	class BS_SCRIPT_EXPORT() CRenderable : public Component {};
+	template<> struct ComponentType<Renderable> { typedef CRenderable Type; };
+
+	template<class T>
+	struct ComponentOrActor
+	{
+		using ComponentType = typename ComponentType<T>::Type;
+		using HandleType = GameObjectHandle<ComponentType>;
+		
+		ComponentOrActor() = default;
+
+		ComponentOrActor(const GameObjectHandle<ComponentType>& component)
+			:mComponent(component)
+		{ }
+
+		ComponentOrActor(const std::shared_ptr<T>& actor)
+			:mActor(actor)
+		{ }
+
+		/** Returns true if both the component and the actor fields are not assigned. */
+		bool empty() const
+		{
+			return !mActor && !mComponent;
+		}
+
+		/** Returns the assigned value as a scene actor. */
+		std::shared_ptr<T> getActor() const
+		{
+			if(mActor)
+				return mActor;
+
+			return mComponent->_getInternal();
+		}
+
+	private:
+		GameObjectHandle<ComponentType> mComponent;
+		std::shared_ptr<T> mActor;
+	};
+
+	class BS_SCRIPT_EXPORT() ComponentOrActorTest
+	{
+		BS_SCRIPT_EXPORT() ComponentOrActor<Renderable> renderable;
+	};
+	
+	// END TEST ComponentOrActor
 	
 	
 template <class T>
@@ -287,12 +347,6 @@ struct BS_SCRIPT_EXPORT(pl:true) LimitAngularRange
 	};
 }
 
-class Component
-{
-public:
-	virtual ~Component() {}
-};
-
 ////////////////////////////////////////
 
 enum class __attribute__((annotate("se,pl:true,f:TestOutput"))) MyEnum
@@ -459,7 +513,7 @@ struct BS_SCRIPT_EXPORT(pl:true) Str2 : public Str1
 	std::wstring cdc;
 };
 
-class BS_SCRIPT_EXPORT() Cmp1 : public Component
+class BS_SCRIPT_EXPORT() Cmp1 : public bs::Component
 {
 
 };

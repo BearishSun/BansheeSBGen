@@ -66,7 +66,8 @@ enum class TypeFlags
 	Array = 1 << 14,
 	MonoObject = 1 << 15,
 	VarParams = 1 << 16,
-	AsResourceRef = 1 << 17
+	AsResourceRef = 1 << 17,
+	ComponentOrActor = 1 << 18
 };
 
 enum class MethodFlags
@@ -736,6 +737,11 @@ inline bool isVarParam(int flags)
 inline bool getPassAsResourceRef(int flags)
 {
 	return (flags & (int)TypeFlags::AsResourceRef) != 0;
+}
+
+inline bool getIsComponentOrActor(int flags)
+{
+	return (flags & (int)TypeFlags::ComponentOrActor) != 0;
 }
 
 inline bool isStruct(int flags)
