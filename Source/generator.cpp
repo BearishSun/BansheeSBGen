@@ -485,16 +485,32 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 		auto iterFind = output.includes.find(typeName);
 		if (iterFind == output.includes.end())
 		{
-			// If enum or passed by value or by resource reference we need to include the header for the source type
-			bool sourceInclude = typeInfo.type == ParsedType::Enum || isSrcValue(flags) || getPassAsResourceRef(flags);
-			bool declOnly = getPassAsResourceRef(flags);
+			uint32_t sourceIncludeType = 0;
+			uint32_t interopIncludeType = typeInfo.type != ParsedType::Enum ? IT_IMPL : 0;
+			bool isStruct = false;
+
+			if(getPassAsResourceRef(flags))
+			{
+				sourceIncludeType = IT_IMPL;
+				interopIncludeType = 0;
+			}
+			
+			if(typeInfo.type == ParsedType::Struct && !isComplexStruct(flags))
+			{
+				sourceIncludeType = IT_HEADER;
+				isStruct = true;
+			}
+
+			// If enum or passed by value we need to include the header for the source type
+			if(typeInfo.type == ParsedType::Enum || isSrcValue(flags))
+				sourceIncludeType = IT_HEADER;
 
 			// If a class is being passed by reference or a raw pointer then we need the declaration because we perform
 			// assignment copy
-			if (!sourceInclude)
-				sourceInclude = typeInfo.type == ParsedType::Class && !isSrcSPtr(flags);
+			if (typeInfo.type == ParsedType::Class && !isSrcSPtr(flags))
+				sourceIncludeType = IT_HEADER;
 
-			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceInclude, declOnly);
+			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceIncludeType, interopIncludeType, isStruct);
 		}
 	}
 
@@ -527,7 +543,7 @@ void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
 		if (iterFind == output.includes.end())
 		{
 			UserTypeInfo typeInfo = getTypeInfo(methodInfo.externalClass, 0);
-			output.includes[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, true, true);
+			output.includes[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, IT_FWD_AND_IMPL, 0);
 		}
 	}
 }
@@ -545,7 +561,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 	{
 		bool complexStruct = isComplexStruct(fieldInfo.flags);
 
-		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, true, false, complexStruct);
+		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0);
 	}
 
 	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
@@ -557,7 +573,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 		if (!fieldTypeInfo.destFile.empty() || isRRef)
 		{
 			std::string name = "__" + fieldInfo.type;
-			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, isRRef);
+			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_IMPL, IT_IMPL);
 		}
 
 		if (fieldTypeInfo.type == ParsedType::Resource)
@@ -1478,6 +1494,8 @@ void postProcessFileInfos()
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptResource.h");
 				else if (typeInfo.type == ParsedType::Component)
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptComponent.h");
+				else if (typeInfo.type == ParsedType::SceneObject)
+					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptSceneObject.h");
 				else if (typeInfo.type == ParsedType::GUIElement)
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/GUI/BsScriptGUIElement.h");
 				else // Class
@@ -1518,30 +1536,34 @@ void postProcessFileInfos()
 
 			for (auto& entry : includesInfo.includes)
 			{
-				if (entry.second.sourceInclude)
+				uint32_t originFlags = entry.second.originIncludeFlags;
+				uint32_t interopFlags = entry.second.interopIncludeFlags;
+
+				if (originFlags != 0)
 				{
 					std::string include = entry.second.typeInfo.declFile;
 
-					if (entry.second.declOnly)
-					{
+					if((originFlags & IT_FWD) != 0)
+						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, entry.second.isStruct });
+
+					if((originFlags & IT_IMPL) != 0)
 						fileInfo.second.referencedSourceIncludes.push_back(include);
-						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, false });
-					}
 					else
 						fileInfo.second.referencedHeaderIncludes.push_back(include);
 				}
 
-				if(entry.second.destInclude)
+				if (interopFlags != 0)
 				{
-					if (!entry.second.typeInfo.destFile.empty())
-						fileInfo.second.referencedHeaderIncludes.push_back(entry.second.typeInfo.destFile);
-				}
-				else if (!entry.second.declOnly)
-				{
-					if (entry.second.typeInfo.type != ParsedType::Enum)
+					std::string include = entry.second.typeInfo.destFile;
+					if((interopFlags & IT_FWD) != 0)
+						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, false });
+
+					if(!include.empty())
 					{
-						if (!entry.second.typeInfo.destFile.empty())
-							fileInfo.second.referencedSourceIncludes.push_back(entry.second.typeInfo.destFile);
+						if ((interopFlags & IT_IMPL) != 0)
+							fileInfo.second.referencedSourceIncludes.push_back(include);
+						else
+							fileInfo.second.referencedHeaderIncludes.push_back(include);
 					}
 				}
 			}
@@ -2321,7 +2343,14 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 
 			if(toInterop)
 			{
-				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "value." + name);
+				std::string argName;
+				
+				if(!getIsComponentOrActor(flags))
+					argName = "value." + name;
+				else
+					argName = "value." + name + ".getComponent()";
+
+				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
 
 				preActions << "\t\tMonoObject* " << arg << ";\n";
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
