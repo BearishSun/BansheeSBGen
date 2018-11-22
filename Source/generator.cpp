@@ -166,33 +166,28 @@ std::string generateManagedToScriptObjectLine(const std::string& indent, const s
 	return output.str();
 }
 
+std::string getAsManagedToCppArgumentPlain (const std::string& name, int flags, bool isPtr, const std::string& methodName)
+{
+	if (isSrcPointer(flags))
+		return (isPtr ? "" : "&") + name;
+	else if (isSrcReference(flags) || isSrcValue(flags))
+		return (isPtr ? "*" : "") + name;
+	else
+		return name;
+}
+
 std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, int flags, const std::string& methodName)
 {
-	auto getArgumentPlain = [&](bool isPtr)
-	{
-		assert(!isSrcRHandle(flags) && !isSrcGHandle(flags) && !isSrcSPtr(flags));
-
-		if (isSrcPointer(flags))
-			return (isPtr ? "" : "&") + name;
-		else if (isSrcReference(flags) || isSrcValue(flags))
-			return (isPtr ? "*" : "") + name;
-		else
-		{
-			outs() << "Error: Unsure how to pass parameter \"" << name << "\" to method \"" << methodName << "\".\n";
-			return name;
-		}
-	};
-
 	switch (type)
 	{
 	case ParsedType::Builtin:
 	case ParsedType::Enum: // Input type is either value or pointer depending if output or not
-		return getArgumentPlain(isOutput(flags));
+		return getAsManagedToCppArgumentPlain(name, flags, isOutput(flags), methodName);
 	case ParsedType::Struct: // Input type is always a pointer
 		if (isComplexStruct(flags))
-			return getArgumentPlain(false);
+			return getAsManagedToCppArgumentPlain(name, flags, false, methodName);
 		else
-			return getArgumentPlain(true);
+			return getAsManagedToCppArgumentPlain(name, flags, true, methodName);
 	case ParsedType::MonoObject: // Input type is either a pointer or a pointer to pointer, depending if output or not
 		{
 			if (isOutput(flags))
@@ -202,9 +197,9 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 		}
 	case ParsedType::String:
 	case ParsedType::WString: // Input type is always a value
-		return getArgumentPlain(false);
+		return getAsManagedToCppArgumentPlain(name, flags, false, methodName);
 	case ParsedType::GUIElement: // Input type is always a pointer
-		return getArgumentPlain(true);
+		return getAsManagedToCppArgumentPlain(name, flags, true, methodName);
 	case ParsedType::Component: // Input type is always a handle
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
@@ -2751,7 +2746,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 			methodArgs << getAsManagedToCppArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
 		}
 		else
-			methodArgs << getAsManagedToCppArgument(argName, ParsedType::Builtin, I->flags, methodInfo.sourceName);
+			methodArgs << getAsManagedToCppArgumentPlain(argName, I->flags, isOutput(I->flags), methodInfo.sourceName);
 
 		if (!isLast)
 			methodArgs << ", ";

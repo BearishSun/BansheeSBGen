@@ -177,6 +177,20 @@ namespace bs
 	
 	// END TEST ComponentOrActor
 	
+	// START TEST GameObjectHandle array
+	
+	class SceneObject;
+	typedef GameObjectHandle<SceneObject> HSceneObject;
+	
+	class BS_SCRIPT_EXPORT() GOHandleArray
+	{
+		BS_SCRIPT_EXPORT() 
+		void doSomething(std::vector<HSceneObject> stuff);
+	};
+		
+	
+	// END TEST GameObjectHandle array
+	
 	
 template <class T>
 class TCtorBase : public GUIElement
