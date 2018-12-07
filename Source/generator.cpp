@@ -1231,6 +1231,7 @@ void postProcessFileInfos()
 				propertyInfo.documentation = methodInfo.documentation;
 				propertyInfo.isStatic = (methodInfo.flags & (int)MethodFlags::Static);
 				propertyInfo.visibility = methodInfo.visibility;
+				propertyInfo.style = methodInfo.style;
 
 				if (isGetter)
 				{
@@ -4272,12 +4273,41 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		properties << generateXMLComments(entry.documentation, "\t\t");
 
-		// Expose public properties on components to the inspector
-		if(typeInfo.type == ParsedType::Component)
+		if (entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private)
 		{
-			if(entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private)
+			if ((entry.style.flags & (int)StyleFlags::ForceHide) == 0)
 				properties << "\t\t[ShowInInspector]" << std::endl;
 		}
+		else
+		{
+			if ((entry.style.flags & (int)StyleFlags::ForceShow) != 0)
+				properties << "\t\t[ShowInInspector]" << std::endl;
+		}
+
+		if(((entry.style.flags & (int)StyleFlags::AsLayerMask) != 0) && isInt64(propTypeInfo))
+			properties << "\t\t[LayerMask]\n";
+
+		if((isInteger(propTypeInfo) || isReal(propTypeInfo)))
+		{
+			if ((entry.style.flags & (int)StyleFlags::Step) != 0)
+				properties << "\t\t[Step(" << entry.style.step << "f)]\n";
+
+			if ((entry.style.flags & (int)StyleFlags::Range) != 0)
+			{
+				std::string isSlider = ((entry.style.flags & (int)StyleFlags::AsSlider) != 0) ? "true" : "false";
+				properties << "\t\t[Range(" << entry.style.rangeMin << "f, " << entry.style.rangeMax << "f, " << isSlider << ")]\n";
+			}
+			else if((entry.style.flags & (int)StyleFlags::AsSlider) != 0)
+			{
+				properties << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
+			}
+		}
+
+		if(((entry.style.flags & (int)StyleFlags::Order) != 0))
+			properties << "\t\t[Order(" << entry.style.order << ")]\n";
+
+		if(((entry.style.flags & (int)StyleFlags::Category) != 0))
+			properties << "\t\t[Category(" << entry.style.category << ", " << entry.style.category << ")]\n";
 
 		if (entry.visibility == CSVisibility::Internal)
 			properties << "\t\tinternal ";
@@ -4343,7 +4373,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	{
 		bool isStatic = (entry.flags & (int)MethodFlags::Static) != 0;
 		bool isCallback = (entry.flags & (int)MethodFlags::Callback) != 0;
-        bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+		bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 
 		events << generateXMLComments(entry.documentation, "\t\t");
 		events << "\t\t";
@@ -4400,6 +4430,10 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	}
 
 	output << generateXMLComments(input.documentation, "\t");
+
+	// Force non-resource and non-component types to show in inspector, except explicitly hidden
+	if (typeInfo.type == ParsedType::Class || (input.flags & (int)ClassFlags::HideInInspector) == 0)
+		output << "\t[ShowInInspector]\n";
 
 	if (input.visibility == CSVisibility::Internal)
 		output << "\tinternal ";

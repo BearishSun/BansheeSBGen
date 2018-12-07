@@ -80,7 +80,7 @@ enum class MethodFlags
 	InteropOnly = 1 << 5,
 	Callback = 1 << 6,
 	FieldWrapper = 1 << 7,
-	CSOnly = 1 << 8
+	CSOnly = 1 << 8,
 };
 
 enum class CSVisibility
@@ -99,7 +99,7 @@ enum class ExportFlags
 	ExternalConstructor = 1 << 4,
 	Editor = 1 << 5,
 	Exclude = 1 << 6,
-	InteropOnly = 1 << 7
+	InteropOnly = 1 << 7,
 };
 
 enum class ClassFlags
@@ -108,7 +108,31 @@ enum class ClassFlags
 	IsBase = 1 << 1,
 	IsModule = 1 << 2,
 	IsTemplateInst = 1 << 3,
-	IsStruct = 1 << 4
+	IsStruct = 1 << 4,
+	HideInInspector = 1 << 5
+};
+
+enum class StyleFlags
+{
+	ForceHide = 1 << 0,
+	ForceShow = 1 << 1,
+	AsSlider = 1 << 2,
+	AsLayerMask = 1 << 3,
+	Range = 1 << 4,
+	Step = 1 << 5,
+	Category = 1 << 6,
+	Order = 1 << 7
+};
+
+struct Style
+{
+	float rangeMin;
+	float rangeMax;
+	float step;
+	int order;
+	std::string category;
+	int categoryOrder;
+	int flags = 0;
 };
 
 struct UserTypeInfo
@@ -174,6 +198,7 @@ struct CommentEntry
 struct FieldInfo : VarInfo
 {
 	CommentEntry documentation;
+	Style style;
 };
 
 struct TemplateParamInfo
@@ -194,6 +219,7 @@ struct MethodInfo
 
 	std::string externalClass;
 	int flags;
+	Style style;
 };
 
 struct PropertyInfo
@@ -207,6 +233,7 @@ struct PropertyInfo
 	CSVisibility visibility;
 	int typeFlags;
 	bool isStatic;
+	Style style;
 	CommentEntry documentation;
 };
 
@@ -656,6 +683,26 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 	}
 
 	return iterFind->second;
+}
+
+inline bool isInt64(const UserTypeInfo& typeInfo)
+{
+	return typeInfo.type == ParsedType::Builtin && (typeInfo.scriptName == "long" || typeInfo.scriptName == "ulong");
+}
+
+inline bool isInteger(const UserTypeInfo& typeInfo)
+{
+	return typeInfo.type == ParsedType::Builtin && 
+		(typeInfo.scriptName == "int" || typeInfo.scriptName == "uint" ||
+			typeInfo.scriptName == "long" || typeInfo.scriptName == "ulong" ||
+			typeInfo.scriptName == "short" || typeInfo.scriptName == "ushort" ||
+			typeInfo.scriptName == "byte");
+}
+
+inline bool isReal(const UserTypeInfo& typeInfo)
+{
+	return typeInfo.type == ParsedType::Builtin && 
+		(typeInfo.scriptName == "float" || typeInfo.scriptName == "double");
 }
 
 inline bool isOutput(int flags)

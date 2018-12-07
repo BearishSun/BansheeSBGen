@@ -524,24 +524,190 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 struct ParsedDeclInfo
 {
 	std::string exportName;
-	StringRef exportFile;
-	StringRef externalClass;
+	std::string exportFile;
+	std::string externalClass;
 	CSVisibility visibility;
 	int exportFlags;
-	StringRef moduleName;
+	std::string moduleName;
+
+	Style style;
 };
+
+void parseAttributeToken(const std::string& name, const std::string& value, StringRef sourceName, ParsedDeclInfo& output)
+{
+	if (name == "n" || name == "name")
+		output.exportName = value;
+	else if (name == "v" || name == "visibility")
+	{
+		if (value == "public")
+			output.visibility = CSVisibility::Public;
+		else if (value == "internal")
+			output.visibility = CSVisibility::Internal;
+		else if (value == "private")
+			output.visibility = CSVisibility::Private;
+		else
+			outs() << "Warning: Unrecognized value for \"v\" option: \"" + value + "\" for type \"" <<
+			sourceName << "\".\n";
+	}
+	else if (name == "f" || name == "file")
+	{
+		output.exportFile = value;
+	}
+	else if (name == "pl" || name == "plain")
+	{
+		output.exportFlags |= (int)ExportFlags::Plain;
+	}
+	else if (name == "pr" || name == "property")
+	{
+		if (value == "getter")
+			output.exportFlags |= (int)ExportFlags::PropertyGetter;
+		else if (value == "setter")
+			output.exportFlags |= (int)ExportFlags::PropertySetter;
+		else
+		{
+			outs() << "Warning: Unrecognized value for \"pr\" option: \"" + value + "\" for type \"" <<
+				sourceName << "\".\n";
+		}
+	}
+	else if (name == "e")
+	{
+		output.exportFlags |= (int)ExportFlags::External;
+
+		output.externalClass = value;
+	}
+	else if (name == "ec")
+	{
+		output.exportFlags |= (int)ExportFlags::ExternalConstructor;
+
+		output.externalClass = value;
+	}
+	else if (name == "ed")
+	{
+		if (value == "true")
+			output.exportFlags |= (int)ExportFlags::Editor;
+		else if (value != "false")
+		{
+			outs() << "Warning: Unrecognized value for \"ed\" option: \"" + value + "\" for type \"" <<
+				sourceName << "\".\n";
+		}
+	}
+	else if (name == "ex")
+	{
+		if (value == "true")
+			output.exportFlags |= (int)ExportFlags::Exclude;
+		else if (value != "false")
+		{
+			outs() << "Warning: Unrecognized value for \"ex\" option: \"" + value + "\" for type \"" <<
+				sourceName << "\".\n";
+		}
+	}
+	else if (name == "in")
+	{
+		if (value == "true")
+			output.exportFlags |= (int)ExportFlags::InteropOnly;
+		else if (value != "false")
+		{
+			outs() << "Warning: Unrecognized value for \"in\" option: \"" + value + "\" for type \"" <<
+				sourceName << "\".\n";
+		}
+	}
+	else if (name == "m")
+		output.moduleName = value;
+	else if (name == "hide")
+	{
+		output.style.flags |= (int)StyleFlags::ForceHide;
+	}
+	else if (name == "show")
+	{
+		output.style.flags |= (int)StyleFlags::ForceShow;
+	}
+	else if (name == "layerMask")
+	{
+		output.style.flags |= (int)StyleFlags::AsLayerMask;
+	}
+	else if (name == "slider")
+	{
+		output.style.flags |= (int)StyleFlags::AsSlider;
+	}
+	else if (name == "step")
+	{
+		if(value.empty())
+			outs() << "Warning: Empty value for \"step\" option for type \"" << sourceName << "\".\n";
+		else
+		{
+			output.style.flags |= (int)StyleFlags::Step;
+			output.style.step = atof(value.c_str());
+		}
+	}
+	else if (name == "range")
+	{
+		if(value.empty())
+			outs() << "Warning: Empty value for \"range\" option for type \"" << sourceName << "\".\n";
+		else
+		{
+			std::vector<float> args;
+
+			std::istringstream toParse(value);
+			std::string arg;
+			while(std::getline(toParse, arg, ','))
+				args.push_back(atof(arg.c_str()));
+
+			if(args.size() != 2)
+				outs() << "Warning: Invalid number of arguments for \"range\" option for type \"" << sourceName << "\".\n";
+			else
+			{
+				output.style.flags |= (int)StyleFlags::Range;
+				output.style.rangeMin = args[0];
+				output.style.rangeMax = args[1];
+			}
+		}
+	}
+	else if (name == "order")
+	{
+		if(value.empty())
+			outs() << "Warning: Empty value for \"order\" option for type \"" << sourceName << "\".\n";
+		else
+		{
+			output.style.flags |= (int)StyleFlags::Order;
+			output.style.order = atoi(value.c_str());
+		}
+	}
+	else if (name == "category")
+	{
+		if(value.empty())
+			outs() << "Warning: Empty value for \"category\" option for type \"" << sourceName << "\".\n";
+		else
+		{
+			std::vector<std::string> args;
+
+			std::istringstream toParse(value);
+			std::string arg;
+			while(std::getline(toParse, arg, ','))
+				args.push_back(arg);
+
+			if(args.size() != 2)
+				outs() << "Warning: Invalid number of arguments for \"category\" option for type \"" << sourceName << "\".\n";
+			else
+			{
+				StringRef trimmedName = args[0];
+				trimmedName = trimmedName.trim();
+
+				output.style.flags |= (int)StyleFlags::Category;
+				output.style.category = trimmedName;
+				output.style.categoryOrder = atoi(args[1].c_str());
+			}
+		}
+	}
+	else
+		outs() << "Warning: Unrecognized annotation attribute option: \"" + name + "\" for type \"" <<
+		sourceName << "\".\n";
+}
 
 bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclInfo& output)
 {
-	SmallVector<StringRef, 4> annotEntries;
-	attr->getAnnotation().split(annotEntries, ',');
+	StringRef annotation = attr->getAnnotation();
 
-	if (annotEntries.size() == 0)
-		return false;
-
-	StringRef exportTypeStr = annotEntries[0];
-
-	if (exportTypeStr != "se")
+	if(!annotation.startswith("se,"))
 		return false;
 
 	output.exportName = sourceName;
@@ -553,100 +719,73 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 	output.visibility = CSVisibility::Public;
 	output.exportFlags = 0;
 
-	for (size_t i = 1; i < annotEntries.size(); i++)
+	std::stringstream ssParamName;
+	std::stringstream ssParamValue;
+
+	bool isInScope = false;
+	bool gotParamName = false;
+
+	for (auto iter = annotation.begin() + 3; iter != annotation.end(); ++iter)
 	{
-		if (annotEntries[i].empty())
+		if(*iter == ' ' || *iter == '\t')
 			continue;
 
-		auto annotParam = annotEntries[i].split(':');
-		if (annotParam.first == "n")
-			output.exportName = annotParam.second;
-		else if (annotParam.first == "v")
+		if(*iter == '(')
 		{
-			if (annotParam.second == "public")
-				output.visibility = CSVisibility::Public;
-			else if (annotParam.second == "internal")
-				output.visibility = CSVisibility::Internal;
-			else if (annotParam.second == "private")
-				output.visibility = CSVisibility::Private;
+			if(isInScope)
+				outs() << "Error: Attribute parameter parsing error. Nested scopes not allowed.";
+			else if(!gotParamName)
+				outs() << "Error: Attribute parameter parsing error. Scopes not allowed for parameter names.";
 			else
-				outs() << "Warning: Unrecognized value for \"v\" option: \"" + annotParam.second + "\" for type \"" <<
-				sourceName << "\".\n";
+				isInScope = true;
+
+			continue;
 		}
-		else if (annotParam.first == "f")
+
+		if(*iter == ')')
 		{
-			output.exportFile = annotParam.second;
+			isInScope = false;
+			continue;
 		}
-		else if (annotParam.first == "pl")
+
+		if(*iter == ',')
 		{
-			if (annotParam.second == "true")
-				output.exportFlags |= (int)ExportFlags::Plain;
-			else if (annotParam.second != "false")
-			{
-				outs() << "Warning: Unrecognized value for \"pl\" option: \"" + annotParam.second + "\" for type \"" <<
-					sourceName << "\".\n";
-			}
-		}
-		else if (annotParam.first == "pr")
-		{
-			if (annotParam.second == "getter")
-				output.exportFlags |= (int)ExportFlags::PropertyGetter;
-			else if (annotParam.second == "setter")
-				output.exportFlags |= (int)ExportFlags::PropertySetter;
+			if(isInScope)
+				ssParamValue << ",";
 			else
 			{
-				outs() << "Warning: Unrecognized value for \"pr\" option: \"" + annotParam.second + "\" for type \"" <<
-					sourceName << "\".\n";
-			}
-		}
-		else if (annotParam.first == "e")
-		{
-			output.exportFlags |= (int)ExportFlags::External;
+				parseAttributeToken(ssParamName.str(), ssParamValue.str(), sourceName, output);
+				
+				ssParamName.str("");
+				ssParamName.clear();
 
-			output.externalClass = annotParam.second;
-		}
-		else if (annotParam.first == "ec")
-		{
-			output.exportFlags |= (int)ExportFlags::ExternalConstructor;
+				ssParamValue.str("");
+				ssParamValue.clear();
 
-			output.externalClass = annotParam.second;
-		}
-		else if (annotParam.first == "ed")
-		{
-			if (annotParam.second == "true")
-				output.exportFlags |= (int)ExportFlags::Editor;
-			else if (annotParam.second != "false")
-			{
-				outs() << "Warning: Unrecognized value for \"ed\" option: \"" + annotParam.second + "\" for type \"" <<
-					sourceName << "\".\n";
+				gotParamName = false;
 			}
+
+			continue;
 		}
-		else if (annotParam.first == "ex")
+
+		if(*iter == ':')
 		{
-			if (annotParam.second == "true")
-				output.exportFlags |= (int)ExportFlags::Exclude;
-			else if (annotParam.second != "false")
-			{
-				outs() << "Warning: Unrecognized value for \"ex\" option: \"" + annotParam.second + "\" for type \"" <<
-					sourceName << "\".\n";
-			}
+			if(gotParamName)
+				outs() << "Error: Attribute parameter parsing error. Found value separator while parsing value.";
+			else
+				gotParamName = true;
+
+			continue;
 		}
-		else if (annotParam.first == "in")
-		{
-			if (annotParam.second == "true")
-				output.exportFlags |= (int)ExportFlags::InteropOnly;
-			else if (annotParam.second != "false")
-			{
-				outs() << "Warning: Unrecognized value for \"in\" option: \"" + annotParam.second + "\" for type \"" <<
-					sourceName << "\".\n";
-			}
-		}
-		else if(annotParam.first == "m")
-			output.moduleName = annotParam.second;
+
+		if(!gotParamName)
+			ssParamName << *iter;
 		else
-			outs() << "Warning: Unrecognized annotation attribute option: \"" + annotParam.first + "\" for type \"" <<
-			sourceName << "\".\n";
+			ssParamValue << *iter;
 	}
+
+	if(!ssParamName.str().empty())
+		parseAttributeToken(ssParamName.str(), ssParamValue.str(), sourceName, output);
 
 	return true;
 }
@@ -1605,7 +1744,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	if (!parseExportAttribute(attr, sourceClassName, parsedEnumInfo))
 		return true;
 
-	FileInfo& fileInfo = outputFileInfos[parsedEnumInfo.exportFile.str()];
+	FileInfo& fileInfo = outputFileInfos[parsedEnumInfo.exportFile];
 	auto iterFind = std::find_if(fileInfo.enumInfos.begin(), fileInfo.enumInfos.end(), 
 		[&sourceClassName](const EnumInfo& ei)
 	{
@@ -1639,7 +1778,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		mapBuiltinTypeToCSType(builtinType->getKind(), enumEntry.explicitType);
 
 	std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-	std::string destFile = "BsScript" + parsedEnumInfo.exportFile.str() + ".generated.h";
+	std::string destFile = "BsScript" + parsedEnumInfo.exportFile + ".generated.h";
 
 	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, destFile);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
@@ -1770,7 +1909,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		templatedDecl = specDecl->getSpecializedTemplate()->getTemplatedDecl();
 	}
 
-	FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile.str()];
+	FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile];
 	if ((parsedClassInfo.exportFlags & (int)ExportFlags::Plain) != 0)
 	{
 		auto iterFind = std::find_if(fileInfo.structInfos.begin(), fileInfo.structInfos.end(), 
@@ -2118,7 +2257,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			structInfo.ctors.push_back(SimpleConstructorInfo());
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
+		std::string destFile = "BsScript" + parsedClassInfo.exportFile + ".generated.h";
 		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, destFile);
 
 		fileInfo.structInfos.push_back(structInfo);
@@ -2153,6 +2292,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
 			classInfo.flags |= (int)ClassFlags::Editor;
 
+		if ((parsedClassInfo.style.flags & (int)StyleFlags::ForceHide) != 0)
+			classInfo.flags |= (int)ClassFlags::HideInInspector;
+
 		if (specDecl != nullptr)
 			classInfo.flags |= (int)ClassFlags::IsTemplateInst;
 
@@ -2166,7 +2308,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		std::string destFile = "BsScript" + parsedClassInfo.exportFile.str() + ".generated.h";
+		std::string destFile = "BsScript" + parsedClassInfo.exportFile + ".generated.h";
 
 		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, destFile);
 
@@ -2305,6 +2447,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				methodInfo.flags = methodFlags;
 				methodInfo.externalClass = srcClassName;
 				methodInfo.visibility = parsedMethodInfo.visibility;
+				parsedMethodInfo.style = parsedMethodInfo.style;
 				parseJavadocComments(methodDecl, methodInfo.documentation);
 
 				bool isProperty = (parsedMethodInfo.exportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));
@@ -2469,6 +2612,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					if (fieldDecl->getAccess() != AS_public)
 						outs() << "Error: Exported field \"" + fieldInfo.name + "\" isn't public. This will likely result in invalid code generation.";
 
+					fieldInfo.style = parsedFieldInfo.style;
+
 					parseJavadocComments(fieldDecl, fieldInfo.documentation);
 					clearParamRefComments(fieldInfo.documentation);
 
@@ -2552,7 +2697,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		// External classes are just containers for external methods, we don't need to process them directly
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::External) == 0)
 		{
-			FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile.str()];
+			FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile];
 			fileInfo.classInfos.push_back(classInfo);
 
 			if ((classInfo.flags & (int)ClassFlags::Editor) != 0)
