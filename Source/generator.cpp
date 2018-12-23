@@ -4298,9 +4298,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				properties << "\t\t[Range(" << entry.style.rangeMin << "f, " << entry.style.rangeMax << "f, " << isSlider << ")]\n";
 			}
 			else if((entry.style.flags & (int)StyleFlags::AsSlider) != 0)
-			{
 				properties << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
-			}
 		}
 
 		if(((entry.style.flags & (int)StyleFlags::Order) != 0))
@@ -4308,6 +4306,17 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		if(((entry.style.flags & (int)StyleFlags::Category) != 0))
 			properties << "\t\t[Category(" << entry.style.category << ", " << entry.style.category << ")]\n";
+
+		if(((entry.style.flags & (int)StyleFlags::NotNull) != 0))
+			properties << "\t\t[NotNull]\n";
+
+		if(((entry.style.flags & (int)StyleFlags::PassByCopy) != 0))
+			properties << "\t\t[PassByCopy]\n";
+
+		if(((entry.style.flags & (int)StyleFlags::ApplyOnDirty) != 0))
+			properties << "\t\t[ApplyOnDirty]\n";
+
+		properties << "\t\t[NativeWrapper]\n";
 
 		if (entry.visibility == CSVisibility::Internal)
 			properties << "\t\tinternal ";

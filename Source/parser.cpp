@@ -629,6 +629,18 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 	{
 		output.style.flags |= (int)StyleFlags::AsSlider;
 	}
+	else if (name == "notNull")
+	{
+		output.style.flags |= (int)StyleFlags::NotNull;
+	}
+	else if (name == "passByCopy")
+	{
+		output.style.flags |= (int)StyleFlags::PassByCopy;
+	}
+	else if (name == "applyOnDirty")
+	{
+		output.style.flags |= (int)StyleFlags::ApplyOnDirty;
+	}
 	else if (name == "step")
 	{
 		if(value.empty())

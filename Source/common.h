@@ -121,7 +121,10 @@ enum class StyleFlags
 	Range = 1 << 4,
 	Step = 1 << 5,
 	Category = 1 << 6,
-	Order = 1 << 7
+	Order = 1 << 7,
+	NotNull = 1 << 8,
+	PassByCopy = 1 << 9,
+	ApplyOnDirty = 1 << 10
 };
 
 struct Style
