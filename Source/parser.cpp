@@ -2459,7 +2459,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				methodInfo.flags = methodFlags;
 				methodInfo.externalClass = srcClassName;
 				methodInfo.visibility = parsedMethodInfo.visibility;
-				parsedMethodInfo.style = parsedMethodInfo.style;
+				methodInfo.style = parsedMethodInfo.style;
 				parseJavadocComments(methodDecl, methodInfo.documentation);
 
 				bool isProperty = (parsedMethodInfo.exportFlags & ((int)ExportFlags::PropertyGetter | (int)ExportFlags::PropertySetter));

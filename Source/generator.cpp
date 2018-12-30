@@ -1925,7 +1925,8 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
 					paramTypeInfo.type, flags);
-				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
+				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
 					paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 		}
@@ -1952,7 +1953,8 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
 					paramTypeInfo.type, flags);
-				preCallActions << "\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
+				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
 					paramTypeInfo.type, flags) << ";" << std::endl;
 			}
 		}
@@ -4307,10 +4309,19 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if(((entry.style.flags & (int)StyleFlags::Category) != 0))
 			properties << "\t\t[Category(" << entry.style.category << ", " << entry.style.category << ")]\n";
 
-		if(((entry.style.flags & (int)StyleFlags::NotNull) != 0))
+		bool notNull = (entry.style.flags & (int)StyleFlags::NotNull) != 0;
+		bool passByCopy = (entry.style.flags & (int)StyleFlags::PassByCopy) != 0;
+
+		if(propTypeInfo.type == ParsedType::Class && isPassedByValue(entry.typeFlags))
+		{
+			notNull = true;
+			passByCopy = true;
+		}
+
+		if(notNull)
 			properties << "\t\t[NotNull]\n";
 
-		if(((entry.style.flags & (int)StyleFlags::PassByCopy) != 0))
+		if(passByCopy)
 			properties << "\t\t[PassByCopy]\n";
 
 		if(((entry.style.flags & (int)StyleFlags::ApplyOnDirty) != 0))
