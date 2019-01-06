@@ -124,7 +124,8 @@ enum class StyleFlags
 	Order = 1 << 7,
 	NotNull = 1 << 8,
 	PassByCopy = 1 << 9,
-	ApplyOnDirty = 1 << 10
+	ApplyOnDirty = 1 << 10,
+	AsQuaternion = 1 << 11
 };
 
 struct Style

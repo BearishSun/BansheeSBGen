@@ -4327,6 +4327,9 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if(((entry.style.flags & (int)StyleFlags::ApplyOnDirty) != 0))
 			properties << "\t\t[ApplyOnDirty]\n";
 
+		if(((entry.style.flags & (int)StyleFlags::AsQuaternion) != 0))
+			properties << "\t\t[AsQuaternion]\n";
+
 		properties << "\t\t[NativeWrapper]\n";
 
 		if (entry.visibility == CSVisibility::Internal)
