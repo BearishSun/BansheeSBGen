@@ -20,6 +20,7 @@ std::array<std::string, FT_COUNT> fileTypeFolders =
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
 std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
+std::unordered_map<std::string, BaseClassInfo> baseClassLookup;
 
 std::vector<CommentInfo> commentInfos;
 std::unordered_map<std::string, int> commentFullLookup;

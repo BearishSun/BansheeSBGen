@@ -378,6 +378,7 @@ struct IncludesInfo
 	bool requiresResourceManager = false;
 	bool requiresGameObjectManager = false;
 	bool requiresRRef = false;
+	bool requiresRTTI = false;
 	std::unordered_map<std::string, IncludeInfo> includes;
 	std::unordered_map<std::string, ForwardDeclInfo> fwdDecls;
 };
@@ -400,6 +401,11 @@ struct CommentInfo
 	bool isFunction;
 };
 
+struct BaseClassInfo
+{
+	std::vector<std::string> childClasses;
+};
+
 enum FileType
 {
 	FT_ENGINE_H,
@@ -416,6 +422,7 @@ extern std::array<std::string, FT_COUNT> fileTypeFolders;
 extern std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 extern std::unordered_map<std::string, FileInfo> outputFileInfos;
 extern std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
+extern std::unordered_map<std::string, BaseClassInfo> baseClassLookup;
 extern std::vector<CommentInfo> commentInfos;
 extern std::unordered_map<std::string, int> commentFullLookup;
 extern std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
@@ -949,6 +956,21 @@ inline std::string getRelativeTo(const StringRef& path, const StringRef& relativ
 
 	llvm::sys::path::native(output, llvm::sys::path::Style::posix);
 	return std::string(output.data(), output.size());
+}
+
+inline void getDerivedClasses(const std::string& typeName, std::vector<std::string>& output, bool onlyDirect = false)
+{
+	auto iterFind = baseClassLookup.find(typeName);
+	if(iterFind == baseClassLookup.end())
+		return;
+
+	for(auto& entry : iterFind->second.childClasses)
+	{
+		output.push_back(entry);
+
+		if(!onlyDirect)
+			getDerivedClasses(entry, output);
+	}
 }
 
 void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder);

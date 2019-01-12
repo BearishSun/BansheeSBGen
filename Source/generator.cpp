@@ -507,6 +507,21 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 
 			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceIncludeType, interopIncludeType, isStruct);
 		}
+
+		if (typeInfo.type == ParsedType::Class)
+		{
+			bool isBase = isBaseParam(flags);
+			if (isBase)
+			{
+				std::vector<std::string> derivedClasses;
+				getDerivedClasses(typeName, derivedClasses);
+
+				for (auto& entry : derivedClasses)
+					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL);
+
+				output.requiresRTTI = true;
+			}
+		}
 	}
 
 	if (typeInfo.type == ParsedType::Struct && isComplexStruct(flags))
@@ -580,6 +595,20 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 		}
 		else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
 			output.requiresGameObjectManager = true;
+		else if(fieldTypeInfo.type == ParsedType::Class)
+		{
+			bool isBase = isBaseParam(fieldInfo.flags);
+			if (isBase)
+			{
+				std::vector<std::string> derivedClasses;
+				getDerivedClasses(fieldInfo.type, derivedClasses);
+
+				for(auto& entry : derivedClasses)
+					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL);
+
+				output.requiresRTTI = true;
+			}
+		}
 	}
 }
 
@@ -1299,6 +1328,7 @@ void postProcessFileInfos()
 			}
 
 			baseClassInfo->flags |= (int)ClassFlags::IsBase;
+			baseClassLookup[baseClassInfo->name].childClasses.push_back(classInfo.name);
 		}
 	}
 
@@ -1530,6 +1560,9 @@ void postProcessFileInfos()
 			if(includesInfo.requiresGameObjectManager)
 				fileInfo.second.referencedSourceIncludes.push_back("BsScriptGameObjectManager.h");
 
+			if(includesInfo.requiresRTTI)
+				fileInfo.second.referencedSourceIncludes.push_back("Reflection/BsRTTIType.h");
+
 			for (auto& entry : includesInfo.includes)
 			{
 				uint32_t originFlags = entry.second.originIncludeFlags;
@@ -1740,6 +1773,57 @@ std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 	return output.str();
 }
 
+std::string generateClassNativeToScriptObjectLine(int flags, const std::string& typeName, const std::string& outputName, 
+	const std::string& scriptType, const std::string& argName, bool asRef = false, const std::string& indent = "\t\t")
+{
+	std::stringstream output;
+
+	auto generateCreateLine = [&output, &outputName, asRef](const std::string& scriptType, const std::string& argName, const std::string& indent)
+	{
+		if (asRef)
+			output << indent << "MonoUtil::referenceCopy(" << outputName << ", " << scriptType << "::create(" << argName << "));\n";
+		else
+			output << indent << outputName << " = " << scriptType << "::create(" << argName << ");\n";
+	};
+
+	if(isBaseParam(flags))
+	{
+		std::vector<std::string> derivedClasses;
+		getDerivedClasses(typeName, derivedClasses);
+
+		if(!derivedClasses.empty())
+		{
+			output << indent << "if(" << argName << ")\n";
+			output << indent << "{\n";
+
+			output << indent << "\tif(rtti_is_of_type<" << derivedClasses[0] << ">(" << argName << "))\n";
+			generateCreateLine(getScriptInteropType(derivedClasses[0]), 
+				"std::static_pointer_cast<" + derivedClasses[0] + ">(" + argName + ")", indent + "\t\t");
+
+			for(uint32_t i = 1; i < (uint32_t)derivedClasses.size(); i++)
+			{
+				output << indent << "\telse if(rtti_is_of_type<" << derivedClasses[i] << ">(" << argName << "))\n";
+				generateCreateLine(getScriptInteropType(derivedClasses[i]),
+					"std::static_pointer_cast<" + derivedClasses[i] + ">(" + argName + ")", indent + "\t\t");
+			}
+
+			output << indent << "\telse\n";
+			generateCreateLine(scriptType, argName, indent + "\t\t");
+
+
+			output << indent << "}\n";
+			output << indent << "else\n";
+			generateCreateLine(scriptType, argName, indent + "\t");
+
+			return output.str();
+		}
+	}
+	else
+		generateCreateLine(scriptType, argName, indent);
+
+	return output.str();
+}
+
 std::string generateNativeToScriptObjectLine(ParsedType type, int flags, const std::string& scriptName,
 	const std::string& argName, const std::string& indent = "\t\t")
 {
@@ -1944,9 +2028,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << ";\n";
 
 			if (returnValue)
-				postCallActions << "\t\t" << name << " = " << scriptType << "::create(" << argName << ");\n";
+				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, name, scriptType, argName);
 			else if (isOutput(flags))
-				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << scriptType << "::create(" << argName << "));" << std::endl;
+				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, name, scriptType, argName, true);
 			else
 			{
 				std::string scriptName = "script" + name;
@@ -2150,8 +2234,15 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
-				postCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << argName << "[i]));" << std::endl;
+			{
+				std::string elemName = "arrayElem" + name;
+				postCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
+				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
+					entryType, argName + "[i]", false, "\t\t\t");
+
+				postCallActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
 				break;
+			}
 			case ParsedType::GUIElement:
 				outs() << "Error: GUIElement cannot be used as parameter outputs or return values. Ignoring. \n";
 				break;
@@ -2303,10 +2394,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 					else
 						preActions << "\t\t" << arg << "copy = bs_shared_ptr_new<" << typeName << ">(value." << name << ");\n";
 
-					preActions << "\t\t" << arg << " = " << scriptType << "::create(" << arg << "copy);" << std::endl;
+					preActions << generateClassNativeToScriptObjectLine(flags, typeName, arg, scriptType, arg + "copy");
 				}
 				else if(isSrcSPtr(flags))
-					preActions << "\t\t" << arg << " = " << scriptType << "::create(value." << name << ");" << std::endl;
+					preActions << generateClassNativeToScriptObjectLine(flags, typeName, arg, scriptType, "value." + name);
 				else
 					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
 			}
@@ -2492,7 +2583,13 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
-				preActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(value." << name << "[i]));" << std::endl;
+			{
+				std::string elemName = "arrayElem" + name;
+				preActions << "\t\t\tMonoObject* " << elemName << ";\n";
+				preActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
+					entryType, "value." + name + "[i]", false, "\t\t\t");
+				preActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
+			}
 			break;
 			case ParsedType::GUIElement:
 				// Unsupported as output
@@ -2587,8 +2684,8 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			argName = "tmp" + name;
 			std::string scriptType = getScriptInteropType(typeName);
 
-			preCallActions << "\t\tMonoObject* " << argName << " = ";
-			preCallActions << scriptType << "::create(" << name << ");" << std::endl;
+			preCallActions << "\t\tMonoObject* " << argName << ";\n";
+			preCallActions << generateClassNativeToScriptObjectLine(flags, typeName, argName, scriptType, name);
 		}
 			break;
 		default: // Some resource or game object type
@@ -2678,7 +2775,13 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\t\t\t" << arrayName << ".set(i, " << name << "[i]);" << std::endl;
 			break;
 		case ParsedType::Class:
-			preCallActions << "\t\t\t" << arrayName << ".set(i, " << entryType << "::create(" << name << "[i]));" << std::endl;
+		{
+			std::string elemName = "arrayElem" + name;
+			preCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
+			preCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName,
+				entryType, name + "[i]", false, "\t\t\t");
+			preCallActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
+		}
 		break;
 		default: // Some resource or game object type
 		{
