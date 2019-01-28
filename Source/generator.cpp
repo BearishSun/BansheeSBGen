@@ -1624,6 +1624,23 @@ void postProcessFileInfos()
 	}
 }
 
+std::string generateFileHeader(bool isBanshee)
+{
+	std::stringstream output;
+	if(isBanshee)
+	{
+		output << "//********************************** Banshee Engine (www.banshee3d.com) **************************************************//\n";
+		output << "//************** Copyright (c) 2016-2019 Marko Pintera (marko.pintera@gmail.com). All rights reserved. *******************//\n";
+	}
+	else
+	{
+		output << "//********************************* bs::framework - Copyright 2018-2019 Marko Pintera ************************************//\n";
+		output << "//*********** Licensed under the MIT license. See LICENSE.md for full terms. This notice is not to be removed. ***********//\n";
+	}	
+
+	return output.str();
+}
+
 std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& thisPtrType, const std::string& nestedName, bool isModule)
 {
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
@@ -3257,9 +3274,9 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\tpublic:" << std::endl;
 
 	if (!inEditor)
-		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"" << csEngineNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
 	else
-		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"" << csEditorNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
 
 	output << std::endl;
 
@@ -3874,9 +3891,9 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 	output << "\tpublic:" << std::endl;
 
 	if (!structInfo.inEditor)
-		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"BansheeEngine\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"" << csEngineNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
 	else
-		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"BansheeEditor\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"" << csEditorNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
 
 	output << std::endl;
 
@@ -4882,9 +4899,7 @@ void cleanAndPrepareFolder(const StringRef& folder)
 
 std::ofstream createFile(const std::string& filename, FileType type, StringRef outputFolder)
 {
-	const std::string& folder = fileTypeFolders[(int)type];
-
-	std::string relativePath = folder + "/" + filename;
+	std::string relativePath = "/" + filename;
 	StringRef filenameRef(relativePath.data(), relativePath.size());
 
 	SmallString<128> filepath = outputFolder;
@@ -4896,20 +4911,13 @@ std::ofstream createFile(const std::string& filename, FileType type, StringRef o
 	return output;
 }
 
-void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder)
+void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolder, StringRef csEngineOutputFolder, 
+	StringRef csEditorOutputFolder)
 {
 	postProcessFileInfos();
 
-	for(int i = 0; i < 4;  i++)
-	{
-		std::string folderName = fileTypeFolders[i];
-		StringRef filenameRef(folderName.data(), folderName.size());
-
-		SmallString<128> folderPath = cppOutputFolder;
-		sys::path::append(folderPath, filenameRef);
-
-		cleanAndPrepareFolder(folderPath);
-	}
+	cleanAndPrepareFolder(cppEngineOutputFolder);
+	cleanAndPrepareFolder(cppEditorOutputFolder);
 
 	cleanAndPrepareFolder(csEngineOutputFolder);
 	cleanAndPrepareFolder(csEditorOutputFolder);
@@ -4962,7 +4970,11 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		}
 
 		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_H : FT_ENGINE_H;
+		StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
 		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.h", fileType, cppOutputFolder);
+
+		// License/copyright header
+		output << generateFileHeader(false);
 
 		output << "#pragma once" << std::endl;
 		output << std::endl;
@@ -5042,7 +5054,11 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		}
 
 		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CPP : FT_ENGINE_CPP;
+		StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
 		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.cpp", fileType, cppOutputFolder);
+
+		// License/copyright header
+		output << generateFileHeader(fileInfo.second.inEditor);
 
 		// Output includes
 		for (auto& include : fileInfo.second.referencedSourceIncludes)
@@ -5098,20 +5114,23 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 		}
 
 		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CS : FT_ENGINE_CS;
-		StringRef outputFolder = fileInfo.second.inEditor ? csEditorOutputFolder : csEngineOutputFolder;
-		std::ofstream output = createFile(fileInfo.first + ".generated.cs", fileType, outputFolder);
+		StringRef csOutputFolder = fileInfo.second.inEditor ? csEditorOutputFolder : csEngineOutputFolder;
+		std::ofstream output = createFile(fileInfo.first + ".generated.cs", fileType, csOutputFolder);
+
+		// License/copyright header
+		output << generateFileHeader(fileInfo.second.inEditor);
 
 		output << "using System;" << std::endl;
 		output << "using System.Runtime.CompilerServices;" << std::endl;
 		output << "using System.Runtime.InteropServices;" << std::endl;
 
 		if (fileInfo.second.inEditor)
-			output << "using BansheeEngine;" << std::endl;
+			output << "using " << csEngineNs << ";" << std::endl;
 
 		output << std::endl;
 
 		if (!fileInfo.second.inEditor)
-			output << "namespace BansheeEngine" << std::endl;
+			output << "namespace " << csEngineNs << std::endl;
 		else
 			output << "namespace BansheeEditor" << std::endl;
 
@@ -5132,6 +5151,7 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 			if (classInfos.empty())
 				continue;
 
+			StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
 			bool hasAComponent = false;
 			for (auto& classInfo : classInfos)
 			{
@@ -5151,7 +5171,10 @@ void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, Stri
 				includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
 		}
 
-		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppOutputFolder);
+		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppEngineOutputFolder);
+
+		// License/copyright header
+		output << generateFileHeader(false);
 
 		output << "#pragma once" << std::endl;
 		output << std::endl;

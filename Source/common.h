@@ -417,8 +417,6 @@ enum FileType
 	FT_COUNT // Keep at end
 };
 
-extern std::array<std::string, FT_COUNT> fileTypeFolders;
-
 extern std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 extern std::unordered_map<std::string, FileInfo> outputFileInfos;
 extern std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
@@ -426,6 +424,8 @@ extern std::unordered_map<std::string, BaseClassInfo> baseClassLookup;
 extern std::vector<CommentInfo> commentInfos;
 extern std::unordered_map<std::string, int> commentFullLookup;
 extern std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
+extern std::string csEngineNs;
+extern std::string csEditorNs;
 
 inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 {
@@ -947,10 +947,6 @@ inline std::string getRelativeTo(const StringRef& path, const StringRef& relativ
 	for(; iterRelativePath != llvm::sys::path::end(absRelativeTo); ++iterRelativePath)
 		llvm::sys::path::append(output, "..");
 
-	// Extra for folder for file type (not part of relativeTo)
-	llvm::sys::path::append(output, "..");
-	llvm::sys::path::append(output, "..");
-
 	for (; iterPath != llvm::sys::path::end(path); ++iterPath)
 		llvm::sys::path::append(output, *iterPath);
 
@@ -973,4 +969,5 @@ inline void getDerivedClasses(const std::string& typeName, std::vector<std::stri
 	}
 }
 
-void generateAll(StringRef cppOutputFolder, StringRef csEngineOutputFolder, StringRef csEditorOutputFolder);
+void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolder, StringRef csEngineOutputFolder, 
+	StringRef csEditorOutputFolder);

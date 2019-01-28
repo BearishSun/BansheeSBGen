@@ -7,16 +7,6 @@ const char* BUILTIN_RESOURCE_TYPE = "Resource";
 const char* BUILTIN_MODULE_TYPE = "Module";
 const char* BUILTIN_GUIELEMENT_TYPE = "GUIElement";
 
-std::array<std::string, FT_COUNT> fileTypeFolders =
-{
-	"SBansheeEngine/Generated",
-	"SBansheeEngine/Generated",
-	"SBansheeEditor/Generated",
-	"SBansheeEditor/Generated",
-	"",
-	""
-};
-
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
 std::unordered_map<std::string, ExternalClassInfos> externalClassInfos;
@@ -26,25 +16,37 @@ std::vector<CommentInfo> commentInfos;
 std::unordered_map<std::string, int> commentFullLookup;
 std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
 
+std::string csEngineNs = "BansheeEngine";
+std::string csEditorNs = "BansheeEditor";
+
 static cl::OptionCategory OptCategory("Script binding options");
 static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 static cl::extrahelp CustomHelp("\nAdd \"-- <compiler arguments>\" at the end to setup the compiler "
 	"invocation\n");
 
-static cl::opt<std::string> OutputCppOption(
+static cl::opt<std::string> OutputCppEngineOption(
 	"output-cpp",
-	cl::desc("Specify output directory. Generated CPP files will be placed relative to that folder in /Include"
-		"and /Source folders.\n"),
+	cl::desc("Specify output directory. Generated non-editor CPP files will be placed into that folder.\n"),
+	cl::cat(OptCategory));
+
+static cl::opt<std::string> OutputCppEditorOption(
+	"output-cpp-editor",
+	cl::desc("Specify output directory. Generated editor CPP files will be placed into that folder.\n"),
 	cl::cat(OptCategory));
 
 static cl::opt<std::string> OutputCSEngineOption(
-	"output-cs-engine",
-	cl::desc("Specify output directory. Generated engine CS files will be placed relative to that folder.\n"),
+	"output-cs",
+	cl::desc("Specify output directory. Generated non-editor CS files will be placed relative to that folder.\n"),
 	cl::cat(OptCategory));
 
 static cl::opt<std::string> OutputCSEditorOption(
 	"output-cs-editor",
 	cl::desc("Specify output directory. Generated editor CS files will be placed relative to that folder.\n"),
+	cl::cat(OptCategory));
+
+static cl::opt<std::string> NamespaceOption(
+	"cs-namespace",
+	cl::desc("Determines the default namespace for non-editor code.\n"),
 	cl::cat(OptCategory));
 
 
@@ -108,12 +110,15 @@ int main(int argc, const char** argv)
 	std::unique_ptr<FrontendActionFactory> factory = newFrontendActionFactory<ScriptExportFrontendAction>();
 	int output = Tool.run(factory.get());
 
-	// Generate code
-	StringRef cppOutputFolder = OutputCppOption.getValue();
-	StringRef csEngineOutputFolder = OutputCSEngineOption.getValue();
-	StringRef csEditorOutputFolder = OutputCSEditorOption.getValue();
+	if(!NamespaceOption.empty())
+		csEngineNs = NamespaceOption.getValue();
 
-	generateAll(cppOutputFolder, csEngineOutputFolder, csEditorOutputFolder);
+	// Generate code
+	generateAll(
+		OutputCppEngineOption.getValue(), 
+		OutputCppEditorOption.getValue(),
+		OutputCSEngineOption.getValue(),
+		OutputCSEditorOption.getValue());
 
 	//system("pause");
 	return output;
