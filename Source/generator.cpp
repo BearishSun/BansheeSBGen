@@ -3274,9 +3274,9 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\tpublic:" << std::endl;
 
 	if (!inEditor)
-		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"" << csEngineNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, ENGINE_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
 	else
-		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"" << csEditorNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, EDITOR_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
 
 	output << std::endl;
 
@@ -3891,9 +3891,9 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 	output << "\tpublic:" << std::endl;
 
 	if (!structInfo.inEditor)
-		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, \"" << csEngineNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, ENGINE_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
 	else
-		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, \"" << csEditorNs << "\", \"" << typeInfo.scriptName << "\")" << std::endl;
+		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, EDITOR_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
 
 	output << std::endl;
 
@@ -3998,6 +3998,60 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 		output << "\t\treturn output;\n";
 		output << "\t}\n\n";
 	}
+
+	return output.str();
+}
+
+std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& typeInfo, int typeFlags, bool isStruct)
+{
+	std::stringstream output;
+	
+	if(((style.flags & (int)StyleFlags::AsLayerMask) != 0) && isInt64(typeInfo))
+		output << "\t\t[LayerMask]\n";
+
+	if((isInteger(typeInfo) || isReal(typeInfo)))
+	{
+		if ((style.flags & (int)StyleFlags::Step) != 0)
+			output << "\t\t[Step(" << style.step << "f)]\n";
+
+		if ((style.flags & (int)StyleFlags::Range) != 0)
+		{
+			std::string isSlider = ((style.flags & (int)StyleFlags::AsSlider) != 0) ? "true" : "false";
+			output << "\t\t[Range(" << style.rangeMin << "f, " << style.rangeMax << "f, " << isSlider << ")]\n";
+		}
+		else if((style.flags & (int)StyleFlags::AsSlider) != 0)
+			output << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
+	}
+
+	if(((style.flags & (int)StyleFlags::Order) != 0))
+		output << "\t\t[Order(" << style.order << ")]\n";
+
+	if(((style.flags & (int)StyleFlags::Category) != 0))
+		output << "\t\t[Category(" << style.category << ")]\n";
+
+	if(((style.flags & (int)StyleFlags::Inline) != 0))
+		output << "\t\t[Inline(" << style.category << ")]\n";
+
+	bool notNull = (style.flags & (int)StyleFlags::NotNull) != 0;
+	bool passByCopy = (style.flags & (int)StyleFlags::PassByCopy) != 0;
+
+	if(!isStruct && (typeInfo.type == ParsedType::Class && isPassedByValue(typeFlags)))
+	{
+		notNull = true;
+		passByCopy = true;
+	}
+
+	if(notNull)
+		output << "\t\t[NotNull]\n";
+
+	if(passByCopy)
+		output << "\t\t[PassByCopy]\n";
+
+	if(((style.flags & (int)StyleFlags::ApplyOnDirty) != 0))
+		output << "\t\t[ApplyOnDirty]\n";
+
+	if(((style.flags & (int)StyleFlags::AsQuaternion) != 0))
+		output << "\t\t[AsQuaternion]\n";
 
 	return output.str();
 }
@@ -4395,7 +4449,9 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		properties << generateXMLComments(entry.documentation, "\t\t");
 
-		if (entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private)
+		bool defaultVisible = entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private &&
+			!entry.setter.empty();
+		if (defaultVisible)
 		{
 			if ((entry.style.flags & (int)StyleFlags::ForceHide) == 0)
 				properties << "\t\t[ShowInInspector]" << std::endl;
@@ -4406,49 +4462,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				properties << "\t\t[ShowInInspector]" << std::endl;
 		}
 
-		if(((entry.style.flags & (int)StyleFlags::AsLayerMask) != 0) && isInt64(propTypeInfo))
-			properties << "\t\t[LayerMask]\n";
-
-		if((isInteger(propTypeInfo) || isReal(propTypeInfo)))
-		{
-			if ((entry.style.flags & (int)StyleFlags::Step) != 0)
-				properties << "\t\t[Step(" << entry.style.step << "f)]\n";
-
-			if ((entry.style.flags & (int)StyleFlags::Range) != 0)
-			{
-				std::string isSlider = ((entry.style.flags & (int)StyleFlags::AsSlider) != 0) ? "true" : "false";
-				properties << "\t\t[Range(" << entry.style.rangeMin << "f, " << entry.style.rangeMax << "f, " << isSlider << ")]\n";
-			}
-			else if((entry.style.flags & (int)StyleFlags::AsSlider) != 0)
-				properties << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
-		}
-
-		if(((entry.style.flags & (int)StyleFlags::Order) != 0))
-			properties << "\t\t[Order(" << entry.style.order << ")]\n";
-
-		if(((entry.style.flags & (int)StyleFlags::Category) != 0))
-			properties << "\t\t[Category(" << entry.style.category << ", " << entry.style.category << ")]\n";
-
-		bool notNull = (entry.style.flags & (int)StyleFlags::NotNull) != 0;
-		bool passByCopy = (entry.style.flags & (int)StyleFlags::PassByCopy) != 0;
-
-		if(propTypeInfo.type == ParsedType::Class && isPassedByValue(entry.typeFlags))
-		{
-			notNull = true;
-			passByCopy = true;
-		}
-
-		if(notNull)
-			properties << "\t\t[NotNull]\n";
-
-		if(passByCopy)
-			properties << "\t\t[PassByCopy]\n";
-
-		if(((entry.style.flags & (int)StyleFlags::ApplyOnDirty) != 0))
-			properties << "\t\t[ApplyOnDirty]\n";
-
-		if(((entry.style.flags & (int)StyleFlags::AsQuaternion) != 0))
-			properties << "\t\t[AsQuaternion]\n";
+		properties << generateCSStyleAttributes(entry.style, propTypeInfo, entry.typeFlags, false);
 
 		properties << "\t\t[NativeWrapper]\n";
 
@@ -4809,6 +4823,11 @@ std::string generateCSStruct(StructInfo& input)
 		}
 
 		output << generateXMLComments(fieldInfo.documentation, "\t\t");
+		output << generateCSStyleAttributes(fieldInfo.style, typeInfo, fieldInfo.flags, true);
+
+		if ((fieldInfo.style.flags & (int)StyleFlags::ForceHide) != 0)
+			output << "\t\t[HideInInspector]" << std::endl;
+
 		output << "\t\tpublic ";
 
 		output << typeInfo.scriptName;
@@ -4974,7 +4993,7 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.h", fileType, cppOutputFolder);
 
 		// License/copyright header
-		output << generateFileHeader(false);
+		output << generateFileHeader(fileInfo.second.inEditor);
 
 		output << "#pragma once" << std::endl;
 		output << std::endl;
@@ -5125,14 +5144,20 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 		output << "using System.Runtime.InteropServices;" << std::endl;
 
 		if (fileInfo.second.inEditor)
-			output << "using " << csEngineNs << ";" << std::endl;
+			output << "using BansheeEngine;" << std::endl;
 
 		output << std::endl;
 
 		if (!fileInfo.second.inEditor)
-			output << "namespace " << csEngineNs << std::endl;
+		{
+			output << "#if IS_B3D\n";
+			output << "namespace BansheeEngine\n";
+			output << "#else\n";
+			output << "namespace bs\n";
+			output << "#endif\n";
+		}
 		else
-			output << "namespace BansheeEditor" << std::endl;
+			output << "namespace BansheeEditor\n";
 
 		output << "{" << std::endl;
 		output << body.str();

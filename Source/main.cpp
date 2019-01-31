@@ -16,9 +16,6 @@ std::vector<CommentInfo> commentInfos;
 std::unordered_map<std::string, int> commentFullLookup;
 std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
 
-std::string csEngineNs = "BansheeEngine";
-std::string csEditorNs = "BansheeEditor";
-
 static cl::OptionCategory OptCategory("Script binding options");
 static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 static cl::extrahelp CustomHelp("\nAdd \"-- <compiler arguments>\" at the end to setup the compiler "
@@ -43,12 +40,6 @@ static cl::opt<std::string> OutputCSEditorOption(
 	"output-cs-editor",
 	cl::desc("Specify output directory. Generated editor CS files will be placed relative to that folder.\n"),
 	cl::cat(OptCategory));
-
-static cl::opt<std::string> NamespaceOption(
-	"cs-namespace",
-	cl::desc("Determines the default namespace for non-editor code.\n"),
-	cl::cat(OptCategory));
-
 
 class ScriptExportConsumer : public ASTConsumer 
 {
@@ -109,9 +100,6 @@ int main(int argc, const char** argv)
 	// Parse C++ into an easy to read format
 	std::unique_ptr<FrontendActionFactory> factory = newFrontendActionFactory<ScriptExportFrontendAction>();
 	int output = Tool.run(factory.get());
-
-	if(!NamespaceOption.empty())
-		csEngineNs = NamespaceOption.getValue();
 
 	// Generate code
 	generateAll(

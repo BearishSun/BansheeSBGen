@@ -125,7 +125,8 @@ enum class StyleFlags
 	NotNull = 1 << 8,
 	PassByCopy = 1 << 9,
 	ApplyOnDirty = 1 << 10,
-	AsQuaternion = 1 << 11
+	AsQuaternion = 1 << 11,
+	Inline = 1 << 12,
 };
 
 struct Style
@@ -135,7 +136,6 @@ struct Style
 	float step;
 	int order;
 	std::string category;
-	int categoryOrder;
 	int flags = 0;
 };
 
@@ -313,6 +313,7 @@ struct EnumInfo
 
 	CommentEntry documentation;
 	std::string module;
+	bool inEditor : 1;
 };
 
 struct ForwardDeclInfo
@@ -424,8 +425,6 @@ extern std::unordered_map<std::string, BaseClassInfo> baseClassLookup;
 extern std::vector<CommentInfo> commentInfos;
 extern std::unordered_map<std::string, int> commentFullLookup;
 extern std::unordered_map<std::string, SmallVector<int, 2>> commentSimpleLookup;
-extern std::string csEngineNs;
-extern std::string csEditorNs;
 
 inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 {

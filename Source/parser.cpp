@@ -701,7 +701,7 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 			while(std::getline(toParse, arg, ','))
 				args.push_back(arg);
 
-			if(args.size() != 2)
+			if(args.size() != 1)
 				outs() << "Warning: Invalid number of arguments for \"category\" option for type \"" << sourceName << "\".\n";
 			else
 			{
@@ -710,9 +710,12 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 
 				output.style.flags |= (int)StyleFlags::Category;
 				output.style.category = trimmedName;
-				output.style.categoryOrder = atoi(args[1].c_str());
 			}
 		}
+	}
+	else if (name == "inline")
+	{
+		output.style.flags |= (int)StyleFlags::Inline;
 	}
 	else
 		outs() << "Warning: Unrecognized annotation attribute option: \"" + name + "\" for type \"" <<
@@ -1782,6 +1785,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	enumEntry.scriptName = parsedEnumInfo.exportName;
 	enumEntry.visibility = parsedEnumInfo.visibility;
 	enumEntry.module = parsedEnumInfo.moduleName;
+	enumEntry.inEditor = (parsedEnumInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 	parseJavadocComments(decl, enumEntry.documentation);
 	clearParamRefComments(enumEntry.documentation);
 
@@ -1837,6 +1841,9 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	}
 
 	fileInfo.enumInfos.push_back(enumEntry);
+
+	if (enumEntry.inEditor)
+		fileInfo.inEditor = true;
 
 	return true;
 }
@@ -2202,6 +2209,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						structInfo.requiresInterop = true;
 						continue;
 					}
+
+					fieldInfo.style = parsedFieldInfo.style;
 				}
 
 				auto iterFind = defaultFieldValues.find(fieldDecl);
