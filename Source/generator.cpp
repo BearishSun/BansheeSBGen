@@ -2039,7 +2039,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			std::string scriptType = getScriptInteropType(typeName);
 
 			preCallActions << "\t\t" << tmpType << " " << argName;
-			if ((returnValue || isOutput(flags)) && isPassedByValue(flags))
+			if ((returnValue || isOutput(flags)) && willBeDereferenced(flags))
 				preCallActions << " = bs_shared_ptr_new<" << typeName << ">()";
 
 			preCallActions << ";\n";

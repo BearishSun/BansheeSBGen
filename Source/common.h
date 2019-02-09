@@ -461,16 +461,16 @@ inline bool mapBuiltinTypeToCSType(BuiltinType::Kind kind, std::string& output)
 		output = "byte";
 		return true;
 	case BuiltinType::UShort:
-		output = "ushort";
+		output = "short";
 		return true;
 	case BuiltinType::UInt:
-		output = "uint";
+		output = "int";
 		return true;
 	case BuiltinType::ULong:
-		output = "ulong";
+		output = "long";
 		return true;
 	case BuiltinType::ULongLong:
-		output = "ulong";
+		output = "long";
 		return true;
 	case BuiltinType::Float:
 		output = "float";
@@ -816,6 +816,11 @@ inline bool isPlainStruct(ParsedType type, int flags)
 inline bool isPassedByValue(int flags)
 {
 	return (isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
+}
+
+inline bool willBeDereferenced(int flags)
+{
+	return (isSrcReference(flags) || isSrcValue(flags) || isSrcPointer(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
 }
 
 inline bool isReferenceType(ParsedType type, int flags)
