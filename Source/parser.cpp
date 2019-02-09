@@ -722,12 +722,19 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 		sourceName << "\".\n";
 }
 
-bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclInfo& output)
+bool isExportAttribute(AnnotateAttr* attr)
 {
 	StringRef annotation = attr->getAnnotation();
 
-	if(!annotation.startswith("se,"))
+	return annotation.startswith("se,");
+}
+
+bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclInfo& output)
+{
+	if(!isExportAttribute(attr))
 		return false;
+
+	StringRef annotation = attr->getAnnotation();
 
 	output.exportName = sourceName;
 	
@@ -2618,12 +2625,20 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					FieldInfo fieldInfo;
 					fieldInfo.name = fieldDecl->getName();
 
-					AnnotateAttr* fieldAttr = fieldDecl->getAttr<AnnotateAttr>();
-					if (fieldAttr == nullptr)
-						continue;
-
 					ParsedDeclInfo parsedFieldInfo;
-					if (!parseExportAttribute(fieldAttr, fieldInfo.name, parsedFieldInfo))
+					bool foundExportAttrib = false;
+					for(const auto& entry : fieldDecl->specific_attrs<AnnotateAttr>())
+					{
+						if(isExportAttribute(entry))
+						{
+							if (parseExportAttribute(entry, fieldInfo.name, parsedFieldInfo))
+								foundExportAttrib = true;
+
+							break;
+						}
+					}
+
+					if(!foundExportAttrib)
 						continue;
 
 					std::string typeName;

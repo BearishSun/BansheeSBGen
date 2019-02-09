@@ -514,7 +514,7 @@ inline std::string mapCppTypeToCSType(const std::string& cppType)
 		return "int";
 
 	if (cppType == "uint32_t")
-		return "uint";
+		return "int";
 
 	if (cppType == "int64_t")
 		return "long";
