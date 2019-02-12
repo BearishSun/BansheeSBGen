@@ -1260,6 +1260,7 @@ void postProcessFileInfos()
 				propertyInfo.documentation = methodInfo.documentation;
 				propertyInfo.isStatic = (methodInfo.flags & (int)MethodFlags::Static);
 				propertyInfo.visibility = methodInfo.visibility;
+				propertyInfo.api = methodInfo.api;
 				propertyInfo.style = methodInfo.style;
 
 				if (isGetter)
@@ -1639,6 +1640,34 @@ std::string generateFileHeader(bool isBanshee)
 	}	
 
 	return output.str();
+}
+
+std::string generateCppApiCheckBegin(ApiFlags api)
+{
+	if(api == ApiFlags::BSF)
+		return "#if !BS_IS_BANSHEE3D\n";
+	else if(api == ApiFlags::B3D)
+		return "#if BS_IS_BANSHEE3D\n";
+
+	return "";
+}
+
+std::string generateCsApiCheckBegin(ApiFlags api)
+{
+	if(api == ApiFlags::BSF)
+		return "#if !IS_B3D\n";
+	else if(api == ApiFlags::B3D)
+		return "#if IS_B3D\n";
+
+	return "";
+}
+
+std::string generateApiCheckEnd(ApiFlags api)
+{
+	if(api == ApiFlags::BSF && api == ApiFlags::B3D)
+		return "#endif";
+
+	return "";
 }
 
 std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::string& thisPtrType, const std::string& nestedName, bool isModule)
@@ -3194,6 +3223,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	std::string interopBaseClassName;
 
 	std::stringstream output;
+	output << generateCppApiCheckBegin(classInfo.api);
 
 	// Generate a common base class if required
 	// (GUIElements already have one by default)
@@ -3339,7 +3369,11 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	// Event callback methods
 	for (auto& eventInfo : classInfo.eventInfos)
+	{
+		output << generateCppApiCheckBegin(eventInfo.api);
 		output << "\t\t" << generateCppEventCallbackSignature(eventInfo, "", isModule) << ";" << std::endl;
+		output << generateApiCheckEnd(eventInfo.api);
+	}
 
 	if(!classInfo.eventInfos.empty())
 		output << std::endl;
@@ -3353,7 +3387,11 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	// Event thunks
 	for (auto& eventInfo : classInfo.eventInfos)
+	{
+		output << generateCppApiCheckBegin(eventInfo.api);
 		output << generateCppEventThunk(eventInfo, isModule);
+		output << generateApiCheckEnd(eventInfo.api);
+	}
 
 	if(!classInfo.eventInfos.empty())
 		output << std::endl;
@@ -3364,7 +3402,11 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
 		bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
 		if(!isCallback && (isStatic || isModule))
+		{
+			output << generateCppApiCheckBegin(eventInfo.api);
 			output << "\t\tstatic HEvent " << eventInfo.sourceName << "Conn;" << std::endl;
+			output << generateApiCheckEnd(eventInfo.api);
+		}
 	}
 
 	if(hasStaticEvents)
@@ -3391,7 +3433,9 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		if (isCSOnly(methodInfo.flags))
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
+		output << generateApiCheckEnd(methodInfo.api);
 	}
 
 	for (auto& methodInfo : classInfo.methodInfos)
@@ -3399,10 +3443,14 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		if (isCSOnly(methodInfo.flags))
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t\tstatic " << generateCppMethodSignature(methodInfo, interopClassThisPtrType, "", isModule) << ";" << std::endl;
+		output << generateApiCheckEnd(methodInfo.api);
 	}
 
 	output << "\t};" << std::endl;
+	output << generateApiCheckEnd(classInfo.api);
+
 	return output.str();
 }
 
@@ -3436,6 +3484,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	}
 
 	std::stringstream output;
+	output << generateCppApiCheckBegin(classInfo.api);
 
 	// Base class constructor
 	if (isBase && typeInfo.type != ParsedType::GUIElement)
@@ -3466,7 +3515,11 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	// Event thunks
 	for (auto& eventInfo : classInfo.eventInfos)
+	{
+		output << generateCppApiCheckBegin(eventInfo.api);
 		output << "\t" << interopClassName << "::" << eventInfo.sourceName << "ThunkDef " << interopClassName << "::" << eventInfo.sourceName << "Thunk; \n";
+		output << generateApiCheckEnd(eventInfo.api);
+	}
 
 	if (!classInfo.eventInfos.empty())
 		output << "\n";
@@ -3522,6 +3575,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
 			if (!isStatic)
 			{
+				output << generateCppApiCheckBegin(eventInfo.api);
+
 				if (!isCallback)
 					output << "\t\tvalue->" << eventInfo.sourceName << ".connect(";
 				else
@@ -3536,6 +3591,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 					output << ")";
 
 				output << ");\n";
+				output << generateApiCheckEnd(eventInfo.api);
 			}
 		}
 	}
@@ -3580,8 +3636,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		if (isCSOnly(methodInfo.flags))
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
+		output << generateApiCheckEnd(methodInfo.api);
 	}
 
 	for (auto& methodInfo : classInfo.methodInfos)
@@ -3589,14 +3647,17 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		if (isCSOnly(methodInfo.flags))
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t\tmetaData.scriptClass->addInternalCall(\"Internal_" << methodInfo.interopName << "\", (void*)&" <<
 			interopClassName << "::Internal_" << methodInfo.interopName << ");" << std::endl;
+		output << generateApiCheckEnd(methodInfo.api);
 	}
 
 	output << std::endl;
 
 	for(auto& eventInfo : classInfo.eventInfos)
 	{
+		output << generateCppApiCheckBegin(eventInfo.api);
 		output << "\t\t" << eventInfo.sourceName << "Thunk = ";
 		output << "(" << eventInfo.sourceName << "ThunkDef)metaData.scriptClass->getMethodExact(";
 		output << "\"Internal_" << eventInfo.interopName << "\", \"";
@@ -3642,6 +3703,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		}
 
 		output << "\")->getThunk();" << std::endl;
+		output << generateApiCheckEnd(eventInfo.api);
 	}
 
 	output << "\t}" << std::endl;
@@ -3754,8 +3816,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	{
 		const MethodInfo& eventInfo = *I;
 
+		output << generateCppApiCheckBegin(eventInfo.api);
 		output << "\t" << generateCppEventCallbackSignature(eventInfo, interopClassName, isModule) << std::endl;
 		output << generateCppEventCallbackBody(eventInfo, isModule);
+		output << generateApiCheckEnd(eventInfo.api);
 
 		if ((I + 1) != classInfo.eventInfos.end())
 			output << std::endl;
@@ -3790,8 +3854,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		if (isCSOnly(methodInfo.flags))
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppMethodBody(classInfo, methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
+		output << generateApiCheckEnd(methodInfo.api);
 
 		if ((I + 1) != classInfo.methodInfos.end())
 			output << std::endl;
@@ -3808,8 +3874,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		if ((methodInfo.flags & (int)MethodFlags::FieldWrapper) != 0)
 			continue;
 
+		output << generateCppApiCheckBegin(methodInfo.api);
 		output << "\t" << generateCppMethodSignature(methodInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppMethodBody(classInfo, methodInfo, classInfo.name, interopClassName, typeInfo.type, isModule);
+		output << generateApiCheckEnd(methodInfo.api);
 
 		if ((I + 1) != classInfo.methodInfos.end())
 			output << std::endl;
@@ -3839,17 +3907,23 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 
 		assert(getterInfo && setterInfo);
 
+		output << generateCppApiCheckBegin(getterInfo->api);
 		output << "\t" << generateCppMethodSignature(*getterInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppFieldGetterBody(classInfo, *I, *getterInfo, typeInfo.type, isModule);
+		output << generateApiCheckEnd(getterInfo->api);
 		
 		output << std::endl;
 
+		output << generateCppApiCheckBegin(setterInfo->api);
 		output << "\t" << generateCppMethodSignature(*setterInfo, interopClassThisPtrType, interopClassName, isModule) << std::endl;
 		output << generateCppFieldSetterBody(classInfo, *I, *setterInfo, typeInfo.type, isModule);
+		output << generateApiCheckEnd(setterInfo->api);
 			
 		if ((I + 1) != classInfo.fieldInfos.end())
 			output << std::endl;
 	}
+
+	output << generateApiCheckEnd(classInfo.api);
 
 	return output.str();
 }
@@ -3859,6 +3933,8 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 	UserTypeInfo typeInfo = getTypeInfo(structInfo.name, 0);
 
 	std::stringstream output;
+	output << generateCppApiCheckBegin(structInfo.api);
+
 	if(structInfo.requiresInterop)
 	{
 		output << "\tstruct " << structInfo.interopName << "\n";
@@ -3914,6 +3990,8 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 	output << std::endl;
 
 	output << "\t};" << std::endl;
+	output << generateApiCheckEnd(structInfo.api);
+
 	return output.str();
 }
 
@@ -3923,6 +4001,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 	std::string interopClassName = getScriptInteropType(structInfo.name);
 
 	std::stringstream output;
+	output << generateCppApiCheckBegin(structInfo.api);
 
 	// Constructor
 	output << "\t" << interopClassName << "::" << interopClassName << "(MonoObject* managedInstance)" << std::endl;
@@ -3999,6 +4078,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 		output << "\t}\n\n";
 	}
 
+	output << generateApiCheckEnd(structInfo.api);
 	return output.str();
 }
 
@@ -4272,6 +4352,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		if (!isCSOnly(entry.flags))
 		{
 			// Generate interop
+			interops << generateCsApiCheckBegin(entry.api);
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
 			interops << "\t\tprivate static extern void Internal_" << entry.interopName << "(" << typeInfo.scriptName << " managedInstance";
 
@@ -4279,12 +4360,14 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				interops << ", " << generateCSMethodParams(entry, true);
 
 			interops << ");\n";
+			interops << generateApiCheckEnd(entry.api);
 		}
 
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 		if (interopOnly)
 			continue;
 
+		ctors << generateCsApiCheckBegin(entry.api);
 		ctors << generateXMLComments(entry.documentation, "\t\t");
 
 		if (entry.visibility == CSVisibility::Internal)
@@ -4304,6 +4387,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		ctors << ");" << std::endl;
 		ctors << "\t\t}" << std::endl;
+		ctors << generateApiCheckEnd(entry.api);
 		ctors << std::endl;
 	}
 
@@ -4331,9 +4415,11 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		// Generate interop
 		if (!isCSOnly(entry.flags))
 		{
+			interops << generateCsApiCheckBegin(entry.api);
 			interops << "\t\t[MethodImpl(MethodImplOptions.InternalCall)]" << std::endl;
 			interops << "\t\tprivate static extern " << generateCSInteropMethodSignature(entry, typeInfo.scriptName, isModule) << ";";
 			interops << std::endl;
+			interops << generateApiCheckEnd(entry.api);
 		}
 
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
@@ -4345,6 +4431,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		if (isConstructor)
 		{
+			ctors << generateCsApiCheckBegin(entry.api);
 			ctors << generateXMLComments(entry.documentation, "\t\t");
 
 			if (entry.visibility == CSVisibility::Internal)
@@ -4364,6 +4451,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 			ctors << ");" << std::endl;
 			ctors << "\t\t}" << std::endl;
+			ctors << generateApiCheckEnd(entry.api);
 			ctors << std::endl;
 		}
 		else
@@ -4381,6 +4469,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 					returnType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, entry.returnInfo.flags, false, true, false);
 				}
 
+				methods << generateCsApiCheckBegin(entry.api);
 				methods << generateXMLComments(entry.documentation, "\t\t");
 
 				if (entry.visibility == CSVisibility::Internal)
@@ -4436,6 +4525,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 					methods << "\t\t\treturn temp;" << std::endl;
 
 				methods << "\t\t}" << std::endl;
+				methods << generateApiCheckEnd(entry.api);
 				methods << std::endl;
 			}
 		}
@@ -4447,6 +4537,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		UserTypeInfo propTypeInfo = getTypeInfo(entry.type, entry.typeFlags);
 		std::string propTypeName = getCSVarType(propTypeInfo.scriptName, propTypeInfo.type, entry.typeFlags, false, true, false);
 
+		properties << generateCsApiCheckBegin(entry.api);
 		properties << generateXMLComments(entry.documentation, "\t\t");
 
 		bool defaultVisible = entry.visibility != CSVisibility::Internal && entry.visibility != CSVisibility::Private &&
@@ -4522,6 +4613,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		}
 
 		properties << "\t\t}" << std::endl;
+		properties << generateApiCheckEnd(entry.api);
 		properties << std::endl;
 	}
 
@@ -4532,6 +4624,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		bool isCallback = (entry.flags & (int)MethodFlags::Callback) != 0;
 		bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 
+		events << generateCsApiCheckBegin(entry.api);
 		events << generateXMLComments(entry.documentation, "\t\t");
 		events << "\t\t";
 
@@ -4564,10 +4657,13 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 			if (!entry.paramInfos.empty())
 				events << generateCSMethodParams(entry, false);
 		
-			events << ");\n\n";
+			events << ");\n";
+			events << generateApiCheckEnd(entry.api);
+			events << "\n";
 		}		
 
 		// Event interop
+		interops << generateCsApiCheckBegin(entry.api);
 		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
 		interops << "\t\t{" << std::endl;
 		if (!isCallback && !isInternal)
@@ -4575,9 +4671,12 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		else
 			interops << "\t\t\t" << entry.scriptName << "(" << generateCSEventArgs(entry) << ");\n";
 		interops << "\t\t}" << std::endl;
+		interops << generateApiCheckEnd(entry.api);
 	}
 
 	std::stringstream output;
+	output << generateCsApiCheckBegin(input.api);
+
 	if(!input.module.empty())
 	{
 		output << "\t/** @addtogroup " << input.module << "\n";
@@ -4635,12 +4734,15 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		output << "\t/** @} */\n";
 	}
 
+	output << generateApiCheckEnd(input.api);
+
 	return output.str();
 }
 
 std::string generateCSStruct(StructInfo& input)
 {
 	std::stringstream output;
+	output << generateCsApiCheckBegin(input.api);
 
 	if(!input.module.empty())
 	{
@@ -4848,12 +4950,14 @@ std::string generateCSStruct(StructInfo& input)
 		output << "\t/** @} */\n";
 	}
 
+	output << generateApiCheckEnd(input.api);
 	return output.str();
 }
 
 std::string generateCSEnum(EnumInfo& input)
 {
 	std::stringstream output;
+	output << generateCsApiCheckBegin(input.api);
 
 	if(!input.module.empty())
 	{
@@ -4901,6 +5005,7 @@ std::string generateCSEnum(EnumInfo& input)
 		output << "\t/** @} */\n";
 	}
 
+	output << generateApiCheckEnd(input.api);
 	return output.str();
 }
 

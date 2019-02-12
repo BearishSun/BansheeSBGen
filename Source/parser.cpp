@@ -569,6 +569,18 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 				sourceName << "\".\n";
 		}
 	}
+	else if (name == "api")
+	{
+		if (value == "bsf")
+			output.exportFlags |= (int)ExportFlags::ApiBSF;
+		else if (value == "b3d")
+			output.exportFlags |= (int)ExportFlags::ApiB3D;
+		else
+		{
+			outs() << "Warning: Unrecognized value for \"pr\" option: \"" + value + "\" for type \"" <<
+				sourceName << "\".\n";
+		}
+	}
 	else if (name == "e")
 	{
 		output.exportFlags |= (int)ExportFlags::External;
@@ -1707,6 +1719,7 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 	eventInfo.flags = eventFlags;
 	eventInfo.externalClass = className;
 	eventInfo.visibility = parsedEventInfo.visibility;
+	eventInfo.api = apiFromExportFlags(parsedEventInfo.exportFlags);
 	parseJavadocComments(decl, eventInfo.documentation);
 	clearParamRefComments(eventInfo.documentation);
 
@@ -1791,6 +1804,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	enumEntry.name = sourceClassName;
 	enumEntry.scriptName = parsedEnumInfo.exportName;
 	enumEntry.visibility = parsedEnumInfo.visibility;
+	enumEntry.api = apiFromExportFlags(parsedEnumInfo.exportFlags);
 	enumEntry.module = parsedEnumInfo.moduleName;
 	enumEntry.inEditor = (parsedEnumInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 	parseJavadocComments(decl, enumEntry.documentation);
@@ -1961,6 +1975,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.module = parsedClassInfo.moduleName;
 		structInfo.isTemplateInst = specDecl != nullptr;
 		structInfo.templParams = templParams;
+		structInfo.api = apiFromExportFlags(parsedClassInfo.exportFlags);
 
 		parseJavadocComments(templatedDecl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
@@ -2205,12 +2220,9 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				FieldInfo fieldInfo;
 				fieldInfo.name = fieldDecl->getName();
 
-				AnnotateAttr* fieldAttr = fieldDecl->getAttr<AnnotateAttr>();
-				if (fieldAttr != nullptr)
+				ParsedDeclInfo parsedFieldInfo;
+				if (parseExportAttribute(fieldDecl, srcClassName, parsedFieldInfo))
 				{
-					ParsedDeclInfo parsedFieldInfo;
-					parseExportAttribute(fieldAttr, srcClassName, parsedFieldInfo);
-
 					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::Exclude) != 0)
 					{
 						structInfo.requiresInterop = true;
@@ -2312,6 +2324,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		classInfo.name = srcClassName;
 		classInfo.cleanName = declName;
 		classInfo.visibility = parsedClassInfo.visibility;
+		classInfo.api = apiFromExportFlags(parsedClassInfo.exportFlags);
 		classInfo.flags = 0;
 		classInfo.baseClass = parseExportableBaseClass(decl);
 		classInfo.module = parsedClassInfo.moduleName;
@@ -2373,6 +2386,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					methodInfo.scriptName = parsedClassInfo.exportName;
 					methodInfo.flags = (int)MethodFlags::Constructor;
 					methodInfo.visibility = parsedMethodInfo.visibility;
+					methodInfo.api = apiFromExportFlags(parsedMethodInfo.exportFlags);
 					parseJavadocComments(ctorDecl, methodInfo.documentation);
 
 					if ((parsedMethodInfo.exportFlags & (int)ExportFlags::InteropOnly))
@@ -2479,6 +2493,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				methodInfo.flags = methodFlags;
 				methodInfo.externalClass = srcClassName;
 				methodInfo.visibility = parsedMethodInfo.visibility;
+				methodInfo.api = apiFromExportFlags(parsedMethodInfo.exportFlags);
 				methodInfo.style = parsedMethodInfo.style;
 				parseJavadocComments(methodDecl, methodInfo.documentation);
 
@@ -2664,6 +2679,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					getterInfo.sourceName = "get" + fieldInfo.name;
 					getterInfo.scriptName = parsedFieldInfo.exportName;
 					getterInfo.visibility = parsedFieldInfo.visibility;
+					getterInfo.api = apiFromExportFlags(parsedFieldInfo.exportFlags);
 					getterInfo.flags = (int)MethodFlags::PropertyGetter | (int)MethodFlags::FieldWrapper;
 
 					getterInfo.returnInfo.flags = fieldInfo.flags;
@@ -2688,6 +2704,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					setterInfo.documentation = fieldInfo.documentation;
 					setterInfo.paramInfos.push_back(paramInfo);
 					setterInfo.visibility = parsedFieldInfo.visibility;
+					setterInfo.api = apiFromExportFlags(parsedFieldInfo.exportFlags);
 					setterInfo.flags = (int)MethodFlags::PropertySetter | (int)MethodFlags::FieldWrapper;
 
 					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)

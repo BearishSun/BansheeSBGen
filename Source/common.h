@@ -100,6 +100,8 @@ enum class ExportFlags
 	Editor = 1 << 5,
 	Exclude = 1 << 6,
 	InteropOnly = 1 << 7,
+	ApiBSF = 1 << 8,
+	ApiB3D = 1 << 9
 };
 
 enum class ClassFlags
@@ -127,6 +129,13 @@ enum class StyleFlags
 	ApplyOnDirty = 1 << 10,
 	AsQuaternion = 1 << 11,
 	Inline = 1 << 12,
+};
+
+enum class ApiFlags : uint8_t
+{
+	BSF = 1 << 0,
+	B3D = 1 << 1,
+	Any = BSF | B3D
 };
 
 struct Style
@@ -216,6 +225,7 @@ struct MethodInfo
 	std::string interopName;
 	std::string scriptName;
 	CSVisibility visibility;
+	ApiFlags api;
 
 	ReturnInfo returnInfo;
 	std::vector<VarInfo> paramInfos;
@@ -235,6 +245,7 @@ struct PropertyInfo
 	std::string setter;
 
 	CSVisibility visibility;
+	ApiFlags api;
 	int typeFlags;
 	bool isStatic;
 	Style style;
@@ -246,6 +257,7 @@ struct ClassInfo
 	std::string name;
 	std::string cleanName;
 	CSVisibility visibility;
+	ApiFlags api;
 	int flags;
 	SmallVector<std::string, 4> ns;
 	SmallVector<TemplateParamInfo, 0> templParams;
@@ -280,6 +292,7 @@ struct StructInfo
 	std::string interopName;
 	std::string baseClass;
 	CSVisibility visibility;
+	ApiFlags api;
 	SmallVector<std::string, 4> ns;
 	SmallVector<TemplateParamInfo, 0> templParams;
 
@@ -306,6 +319,7 @@ struct EnumInfo
 	std::string name;
 	std::string scriptName;
 	CSVisibility visibility;
+	ApiFlags api;
 	SmallVector<std::string, 4> ns;
 
 	std::string explicitType;
@@ -816,6 +830,22 @@ inline bool isPlainStruct(ParsedType type, int flags)
 inline bool isPassedByValue(int flags)
 {
 	return (isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
+}
+
+inline ApiFlags apiFromExportFlags(int flags)
+{
+	int output = 0;
+
+	if((flags & (int)ExportFlags::ApiB3D) != 0)
+		output |= (int)ApiFlags::B3D;
+
+	if((flags & (int)ExportFlags::ApiBSF) != 0)
+		output |= (int)ApiFlags::BSF;
+
+	if((int)output == 0)
+		output = (int)ApiFlags::Any;
+
+	return (ApiFlags)output;
 }
 
 inline bool willBeDereferenced(int flags)
