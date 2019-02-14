@@ -427,6 +427,10 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 					return false;
 				}
 			}
+			else if(sourceTypeName == "Path")
+			{
+				typeFlags |= (int)TypeFlags::Path;
+			}
 		}
 
 		// Its a user-defined type
@@ -1130,6 +1134,12 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 		if(name == "bs::StringUtil::BLANK" || name == "bs::StringUtil::WBLANK")
 		{
 			evalValue = "\"\"";
+			valType = "";
+			return true;
+		}
+		else if(name == "bs::UUID::EMPTY")
+		{
+			evalValue = "UUID.Empty";
 			valType = "";
 			return true;
 		}

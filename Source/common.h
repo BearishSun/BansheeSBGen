@@ -44,6 +44,7 @@ enum class ParsedType
 	Builtin,
 	String,
 	WString,
+	Path,
 	MonoObject
 };
 
@@ -67,7 +68,8 @@ enum class TypeFlags
 	MonoObject = 1 << 15,
 	VarParams = 1 << 16,
 	AsResourceRef = 1 << 17,
-	ComponentOrActor = 1 << 18
+	ComponentOrActor = 1 << 18,
+	Path = 1 << 19
 };
 
 enum class MethodFlags
@@ -655,6 +657,15 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 		return outType;
 	}
 
+	if ((flags & (int)TypeFlags::Path) != 0)
+	{
+		UserTypeInfo outType;
+		outType.scriptName = "string";
+		outType.type = ParsedType::Path;
+
+		return outType;
+	}
+
 	if ((flags & (int)TypeFlags::MonoObject) != 0)
 	{
 		UserTypeInfo outType;
@@ -853,6 +864,14 @@ inline bool willBeDereferenced(int flags)
 	return (isSrcReference(flags) || isSrcValue(flags) || isSrcPointer(flags)) && !isSrcSPtr(flags) && !isSrcRHandle(flags) && !isSrcGHandle(flags);
 }
 
+inline bool needsIntermediateArray(ParsedType type, int flags = 0)
+{
+	if(type == ParsedType::Class)
+		return !isSrcSPtr(flags);
+
+	return false;
+}
+
 inline bool isReferenceType(ParsedType type, int flags)
 {
 	if (isArrayOrVector(flags))
@@ -867,6 +886,7 @@ inline bool isReferenceType(ParsedType type, int flags)
 	case ParsedType::Class:
 	case ParsedType::String:
 	case ParsedType::WString:
+	case ParsedType::Path:
 	case ParsedType::MonoObject:
 		return true;
 	case ParsedType::Struct:
@@ -945,7 +965,7 @@ inline std::string getDefaultValue(const std::string& typeName, const UserTypeIn
 		return "(" + typeInfo.scriptName + ")0";
 	else if (typeInfo.type == ParsedType::Struct)
 		return "new " + typeInfo.scriptName + "()";
-	else if (typeInfo.type == ParsedType::String || typeInfo.type == ParsedType::WString)
+	else if (typeInfo.type == ParsedType::String || typeInfo.type == ParsedType::WString || typeInfo.type == ParsedType::Path)
 		return "\"\"";
 	else // Some class type
 		return "null";

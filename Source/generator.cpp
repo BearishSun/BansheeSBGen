@@ -45,6 +45,7 @@ std::string getInteropCppVarType(const std::string& typeName, ParsedType type, i
 		}
 	case ParsedType::String:
 	case ParsedType::WString:
+	case ParsedType::Path:
 		if (isOutput(flags) && !forStruct)
 			return "MonoString**";
 		else
@@ -57,18 +58,32 @@ std::string getInteropCppVarType(const std::string& typeName, ParsedType type, i
 	}
 }
 
-std::string getCppVarType(const std::string& typeName, ParsedType type, int flags = 0)
+std::string getCppVarType(const std::string& typeName, ParsedType type, int flags = 0, bool assumeDefaultTypes = true)
 {
 	if (type == ParsedType::Resource)
 		return "ResourceHandle<" + typeName + ">";
 	else if (type == ParsedType::SceneObject || type == ParsedType::Component)
 		return "GameObjectHandle<" + typeName + ">";
 	else if (type == ParsedType::Class)
-		return "SPtr<" + typeName + ">";
+	{
+		if(assumeDefaultTypes || isSrcSPtr(flags))
+			return "SPtr<" + typeName + ">";
+		else
+		{
+			if(isSrcPointer(flags))
+				return typeName + "*";
+			else if(isSrcReference(flags))
+				return typeName + "&";
+			else
+				return typeName;
+		}
+	}
 	else if (type == ParsedType::String)
 		return "String";
 	else if (type == ParsedType::WString)
 		return "WString";
+	else if (type == ParsedType::Path)
+		return "Path";
 	else if (type == ParsedType::Enum && isFlagsEnum(flags))
 		return "Flags<" + typeName + ">";
 	else if(type == ParsedType::GUIElement)
@@ -195,8 +210,9 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 			else
 				return name;
 		}
-	case ParsedType::String:
-	case ParsedType::WString: // Input type is always a value
+	case ParsedType::String: // Input type is always a value
+	case ParsedType::WString: 
+	case ParsedType::Path:
 		return getAsManagedToCppArgumentPlain(name, flags, false, methodName);
 	case ParsedType::GUIElement: // Input type is always a pointer
 		return getAsManagedToCppArgumentPlain(name, flags, true, methodName);
@@ -273,6 +289,7 @@ std::string getAsCppToManagedArgument(const std::string& name, ParsedType type, 
 	case ParsedType::MonoObject: // Always passed as a pointer, input must always be a pointer
 	case ParsedType::String:
 	case ParsedType::WString:
+	case ParsedType::Path:
 	case ParsedType::Component:
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
@@ -292,6 +309,7 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 	case ParsedType::Enum: 
 	case ParsedType::String:
 	case ParsedType::WString:
+	case ParsedType::Path:
 	case ParsedType::Struct:
 	{
 		if (isSrcPointer(flags))
@@ -356,7 +374,8 @@ std::string getScriptInteropType(const std::string& name, bool resourceRef = fal
 	bool isValidInteropType = iterFind->second.type != ParsedType::Builtin &&
 		iterFind->second.type != ParsedType::Enum &&
 		iterFind->second.type != ParsedType::String &&
-		iterFind->second.type != ParsedType::WString;
+		iterFind->second.type != ParsedType::WString &&
+		iterFind->second.type != ParsedType::Path;
 
 	if (!isValidInteropType)
 		outs() << "Error: Type \"" << name << "\" referenced as a script interop type, but script interop object cannot be generated for this object type.\n";
@@ -563,7 +582,8 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 	UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
 
 	// These types never require additional includes
-	if (fieldTypeInfo.type == ParsedType::Builtin || fieldTypeInfo.type == ParsedType::String || fieldTypeInfo.type == ParsedType::WString)
+	if (fieldTypeInfo.type == ParsedType::Builtin || fieldTypeInfo.type == ParsedType::String || 
+		fieldTypeInfo.type == ParsedType::WString || fieldTypeInfo.type == ParsedType::Path)
 		return;
 
 	// If passed by value, we needs its header in our header
@@ -1664,8 +1684,8 @@ std::string generateCsApiCheckBegin(ApiFlags api)
 
 std::string generateApiCheckEnd(ApiFlags api)
 {
-	if(api == ApiFlags::BSF && api == ApiFlags::B3D)
-		return "#endif";
+	if(api == ApiFlags::BSF || api == ApiFlags::B3D)
+		return "#endif\n";
 
 	return "";
 }
@@ -1765,7 +1785,7 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 		if (isVector(I->flags))
 			output << "std::vector<";
 
-		output << getCppVarType(I->type, paramTypeInfo.type, I->flags);
+		output << getCppVarType(I->type, paramTypeInfo.type, I->flags, false);
 
 		if(!isSrcValue(I->flags))
 		{
@@ -2007,6 +2027,19 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
 		}
 		break;
+		case ParsedType::Path:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tPath " << argName << ";" << std::endl;
+
+			if (returnValue)
+				postCallActions << "\t\t" << name << " = MonoUtil::stringToMono(" << argName << ".toString());" << std::endl;
+			else if (isOutput(flags))
+				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ",  (MonoObject*)MonoUtil::stringToMono(" << argName << ".toString()));" << std::endl;
+			else
+				preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
+		}
+		break;
 		case ParsedType::WString:
 		{
 			argName = "tmp" + name;
@@ -2135,6 +2168,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		case ParsedType::Builtin:
 		case ParsedType::String:
 		case ParsedType::WString:
+		case ParsedType::Path:
 		case ParsedType::Enum:
 			entryType = typeName;
 			break;
@@ -2149,16 +2183,16 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		std::string argType;
 		
 		if (isVector(flags))
-			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags) + ">";
+			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
 		else
-			argType = getCppVarType(typeName, paramTypeInfo.type, flags);
+			argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
 
 		std::string argName = "vec" + name;
 
 		preCallActions << "\t\t" << argType << " " << argName;
 		if (isArray(flags))
 			preCallActions << "[" << arraySize << "]";
-		preCallActions << ";" << std::endl;
+		preCallActions << ";\n";
 
 		if (!isOutput(flags) && !returnValue)
 		{
@@ -2180,6 +2214,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
+			case ParsedType::Path:
 				preCallActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
 				break;
 			case ParsedType::MonoObject:
@@ -2214,9 +2249,31 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string scriptName = "script" + name;
 
 				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
-				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, flags) << ";" << std::endl;
+				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
+				preCallActions << "\t\t\t\t{\n";
+
+				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrName = "arrayElemPtr" + name;
+
+				preCallActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
+					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
+
+				if(paramTypeInfo.type == ParsedType::Class)
+				{
+					if(isSrcPointer(flags))
+						preCallActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
+					else if((isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags))
+					{
+						preCallActions << "\t\t\t\t\tif(" << elemPtrName << ")\n";
+						preCallActions << "\t\t\t\t\t\t" << argName << "[i] = *" << elemPtrName << ";\n";
+					}
+					else
+						preCallActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ";\n";
+				}
+				else
+					preCallActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ";\n";
+
+				preCallActions << "\t\t\t\t}\n";
 			}
 			break;
 			}
@@ -2249,6 +2306,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
+			case ParsedType::Path:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]);" << std::endl;
 				break;
 			case ParsedType::Enum:
@@ -2282,9 +2340,33 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::Class:
 			{
 				std::string elemName = "arrayElem" + name;
+
+				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrName = "arrayElemPtr" + name;
+
+				postCallActions << "\t\t\t" << elemPtrType << " " << elemPtrName;
+				if(willBeDereferenced(flags))
+				{
+					postCallActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+
+					if (isSrcPointer(flags))
+					{
+						postCallActions << "\t\t\tif(" << argName << "[i])\n";
+						postCallActions << "\t\t\t\t*" << elemPtrName << " = *";
+					}
+					else
+					{
+						postCallActions << "\t\t\t*" << elemPtrName << " = ";
+					}
+
+					postCallActions << argName << "[i];\n";
+				}
+				else
+					postCallActions << " = " << argName << "[i];\n";
+
 				postCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
 				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
-					entryType, argName + "[i]", false, "\t\t\t");
+					entryType, elemPtrName, false, "\t\t\t");
 
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
 				break;
@@ -2381,6 +2463,22 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			{
 				preActions << "\t\tWString " << arg << ";" << std::endl;
 				preActions << "\t\t" << arg << " = MonoUtil::monoToWString(value." << name << ");" << std::endl;
+			}
+		}
+		break;
+		case ParsedType::Path:
+		{
+			arg = "tmp" + name;
+
+			if(toInterop)
+			{
+				preActions << "\t\tMonoString* " << arg << ";" << std::endl;
+				preActions << "\t\t" << arg << " = MonoUtil::stringToMono(value." << name << ".toString());" << std::endl;
+			}
+			else
+			{
+				preActions << "\t\tPath " << arg << ";" << std::endl;
+				preActions << "\t\t" << arg << " = MonoUtil::monoToString(value." << name << ");" << std::endl;
 			}
 		}
 		break;
@@ -2519,6 +2617,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		case ParsedType::Builtin:
 		case ParsedType::String:
 		case ParsedType::WString:
+		case ParsedType::Path:
 		case ParsedType::Enum:
 			entryType = typeName;
 			break;
@@ -2532,9 +2631,9 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 
 		std::string argType;
 		if(isVector(flags))
-			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags) + ">";
+			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
 		else
-			argType = getCppVarType(typeName, paramTypeInfo.type, flags);
+			argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
 
 		std::string argName = "vec" + name;
 
@@ -2561,6 +2660,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
+			case ParsedType::Path:
 				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << entryType << ">(i);" << std::endl;
 				break;
 			case ParsedType::MonoObject:
@@ -2581,8 +2681,32 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			{
 				std::string scriptName = "script" + name;
 				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
-				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preActions << "\t\t\t\t\t" << argName << "[i] = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
+				
+				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
+				preActions << "\t\t\t\t{\n";
+
+				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrName = "arrayElemPtr" + name;
+
+				preActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
+					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
+
+				if(paramTypeInfo.type == ParsedType::Class)
+				{
+					if(isSrcPointer(flags))
+						preActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
+					else if((isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags))
+					{
+						preActions << "\t\t\t\t\tif(" << elemPtrName << ")\n";
+						preActions << "\t\t\t\t\t\t" << argName << "[i] = *" << elemPtrName << ";\n";
+					}
+					else
+						preActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ";\n";
+				}
+				else
+					preActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ";\n";
+
+				preActions << "\t\t\t\t}\n";
 			}
 			break;
 			}
@@ -2612,6 +2736,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			case ParsedType::Builtin:
 			case ParsedType::String:
 			case ParsedType::WString:
+			case ParsedType::Path:
 				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]);" << std::endl;
 				break;
 			case ParsedType::Enum:
@@ -2631,9 +2756,34 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			case ParsedType::Class:
 			{
 				std::string elemName = "arrayElem" + name;
+
+				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrName = "arrayElemPtr" + name;
+
+				preActions << "\t\t\t" << elemPtrType << " " << elemPtrName;
+				if(willBeDereferenced(flags))
+				{
+					preActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+
+					if (isSrcPointer(flags))
+					{
+						preActions << "\t\t\tif(value." << name << "[i])\n";
+						preActions << "\t\t\t\t*" << elemPtrName << " = *";
+					}
+					else
+					{
+						preActions << "\t\t\t*" << elemPtrName << " = ";
+					}
+
+					preActions << "value." << name << "[i];\n";
+				}
+				else
+					preActions << " = value." << name << "[i];\n";
+
 				preActions << "\t\t\tMonoObject* " << elemName << ";\n";
 				preActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
-					entryType, "value." + name + "[i]", false, "\t\t\t");
+					entryType, elemPtrName, false, "\t\t\t");
+
 				preActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
 			}
 			break;
@@ -2719,6 +2869,13 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\t" << argName << " = MonoUtil::wstringToMono(" << name << ");" << std::endl;
 		}
 		break;
+		case ParsedType::Path:
+		{
+			argName = "tmp" + name;
+			preCallActions << "\t\tMonoString* " << argName << ";" << std::endl;
+			preCallActions << "\t\t" << argName << " = MonoUtil::stringToMono(" << name << ".toString());" << std::endl;
+		}
+		break;
 		case ParsedType::MonoObject:
 		{
 			argName = "tmp" + name;
@@ -2759,6 +2916,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		case ParsedType::Builtin:
 		case ParsedType::String:
 		case ParsedType::WString:
+		case ParsedType::Path:
 		case ParsedType::Enum:
 			entryType = typeName;
 			break;
@@ -2791,6 +2949,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		case ParsedType::Builtin:
 		case ParsedType::String:
 		case ParsedType::WString:
+		case ParsedType::Path:
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << name << "[i]);" << std::endl;
 			break;
 		case ParsedType::Enum:
@@ -3113,7 +3272,11 @@ std::string generateCppFieldSetterBody(const ClassInfo& classInfo, const FieldIn
 		preCallActions, postCallActions);
 
 	UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
-	argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
+
+	if(!isArrayOrVector(paramInfo.flags))
+		argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
+	else
+		argValue << argName;
 
 	std::stringstream output;
 	output << "\t{" << std::endl;
