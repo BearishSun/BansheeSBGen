@@ -489,7 +489,7 @@ bool hasParameterlessConstructor(const ClassInfo& classInfo)
 	return false;
 }
 
-void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output)
+void gatherIncludes(const std::string& typeName, int flags, bool isEditor, IncludesInfo& output)
 {
 	UserTypeInfo typeInfo = getTypeInfo(typeName, flags);
 	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Struct ||
@@ -524,7 +524,7 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 			if (typeInfo.type == ParsedType::Class && !isSrcSPtr(flags))
 				sourceIncludeType = IT_HEADER;
 
-			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceIncludeType, interopIncludeType, isStruct);
+			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceIncludeType, interopIncludeType, isStruct, isEditor);
 		}
 
 		if (typeInfo.type == ParsedType::Class)
@@ -536,7 +536,7 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 				getDerivedClasses(typeName, derivedClasses);
 
 				for (auto& entry : derivedClasses)
-					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL);
+					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL, false, isEditor);
 
 				output.requiresRTTI = true;
 			}
@@ -557,14 +557,14 @@ void gatherIncludes(const std::string& typeName, int flags, IncludesInfo& output
 		output.requiresGameObjectManager = true;
 }
 
-void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
+void gatherIncludes(const MethodInfo& methodInfo, bool isEditor, IncludesInfo& output)
 {
 	bool returnAsParameter = false;
 	if (!methodInfo.returnInfo.type.empty())
-		gatherIncludes(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, output);
+		gatherIncludes(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, isEditor, output);
 
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
-		gatherIncludes(I->type, I->flags, output);
+		gatherIncludes(I->type, I->flags, isEditor, output);
 
 	if((methodInfo.flags & (int)MethodFlags::External) != 0)
 	{
@@ -572,12 +572,12 @@ void gatherIncludes(const MethodInfo& methodInfo, IncludesInfo& output)
 		if (iterFind == output.includes.end())
 		{
 			UserTypeInfo typeInfo = getTypeInfo(methodInfo.externalClass, 0);
-			output.includes[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, IT_FWD_AND_IMPL, 0);
+			output.includes[methodInfo.externalClass] = IncludeInfo(methodInfo.externalClass, typeInfo, IT_FWD_AND_IMPL, 0, false, isEditor);
 		}
 	}
 }
 
-void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
+void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& output)
 {
 	UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
 
@@ -591,7 +591,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 	{
 		bool complexStruct = isComplexStruct(fieldInfo.flags);
 
-		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0);
+		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0, false, isEditor);
 	}
 
 	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
@@ -603,7 +603,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 		if (!fieldTypeInfo.destFile.empty() || isRRef)
 		{
 			std::string name = "__" + fieldInfo.type;
-			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_IMPL, IT_IMPL);
+			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_IMPL, IT_IMPL, false, isEditor);
 		}
 
 		if (fieldTypeInfo.type == ParsedType::Resource)
@@ -624,7 +624,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 				getDerivedClasses(fieldInfo.type, derivedClasses);
 
 				for(auto& entry : derivedClasses)
-					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL);
+					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL, false, isEditor);
 
 				output.requiresRTTI = true;
 			}
@@ -634,22 +634,26 @@ void gatherIncludes(const FieldInfo& fieldInfo, IncludesInfo& output)
 
 void gatherIncludes(const ClassInfo& classInfo, IncludesInfo& output)
 {
+	bool isEditor = hasAPIBED(classInfo.api);
+
 	for (auto& methodInfo : classInfo.ctorInfos)
-		gatherIncludes(methodInfo, output);
+		gatherIncludes(methodInfo, isEditor, output);
 
 	for (auto& methodInfo : classInfo.methodInfos)
-		gatherIncludes(methodInfo, output);
+		gatherIncludes(methodInfo, isEditor, output);
 
 	for (auto& eventInfo : classInfo.eventInfos)
-		gatherIncludes(eventInfo, output);
+		gatherIncludes(eventInfo, isEditor, output);
 }
 
 void gatherIncludes(const StructInfo& structInfo, IncludesInfo& output)
 {
+	bool isEditor = hasAPIBED(structInfo.api);
+
 	if (structInfo.requiresInterop)
 	{
 		for (auto& fieldInfo : structInfo.fields)
-			gatherIncludes(fieldInfo, output);
+			gatherIncludes(fieldInfo, isEditor, output);
 	}
 }
 
@@ -1124,14 +1128,20 @@ StructInfo* findStructInfo(const std::string& name)
 void postProcessFileInfos()
 {
 	// Inject external methods into their appropriate class infos
-	auto findClassInfo = [](const std::string& name) -> ClassInfo*
+	auto findClassInfo = [](const std::string& name, bool isEditor) -> ClassInfo*
 	{
 		for (auto& fileInfo : outputFileInfos)
 		{
 			for (auto& classInfo : fileInfo.second.classInfos)
 			{
-				if (classInfo.name == name)
-					return &classInfo;
+				if (classInfo.name != name)
+					continue;
+
+				// Two versions of editor and BSF class migth exist, make sure to pick the right one
+				if((isEditor && classInfo.api == ApiFlags::BSF) || (!isEditor &&  hasAPIBED(classInfo.api)))
+					continue;
+
+				return &classInfo;
 			}
 		}
 
@@ -1154,45 +1164,50 @@ void postProcessFileInfos()
 
 	for (auto& entry : externalClassInfos)
 	{
-		ClassInfo* classInfo = findClassInfo(entry.first);
-		if (classInfo == nullptr)
-			continue;
-
-		for (auto& method : entry.second.methods)
+		for (auto& fileInfo : outputFileInfos)
 		{
-			if (((int)method.flags & (int)MethodFlags::Constructor) != 0)
+			for (auto& classInfo : fileInfo.second.classInfos)
 			{
-				if (method.returnInfo.type.size() == 0)
-				{
-					outs() << "Error: Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
+				if (classInfo.name != entry.first)
 					continue;
-				}
 
-				if (method.returnInfo.type != entry.first)
+				for (auto& method : entry.second.methods)
 				{
-					outs() << "Error: Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
-					continue;
+					if (((int)method.flags & (int)MethodFlags::Constructor) != 0)
+					{
+						if (method.returnInfo.type.size() == 0)
+						{
+							outs() << "Error: Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
+							continue;
+						}
+
+						if (method.returnInfo.type != entry.first)
+						{
+							outs() << "Error: Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
+							continue;
+						}
+					}
+					else
+					{
+						if (method.paramInfos.size() == 0)
+						{
+							outs() << "Error: Found an external method \"" << method.sourceName << "\" with no parameters. This isn't supported, skipping.\n";
+							continue;
+						}
+
+						if (method.paramInfos[0].type != entry.first)
+						{
+							outs() << "Error: Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
+								" accept the class its operating on. This is not supported, skipping. \n";
+							continue;
+						}
+
+						method.paramInfos.erase(method.paramInfos.begin());
+					}
+
+					classInfo.methodInfos.push_back(method);
 				}
 			}
-			else
-			{
-				if (method.paramInfos.size() == 0)
-				{
-					outs() << "Error: Found an external method \"" << method.sourceName << "\" with no parameters. This isn't supported, skipping.\n";
-					continue;
-				}
-
-				if (method.paramInfos[0].type != entry.first)
-				{
-					outs() << "Error: Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
-						" accept the class its operating on. This is not supported, skipping. \n";
-					continue;
-				}
-
-				method.paramInfos.erase(method.paramInfos.begin());
-			}
-
-			classInfo->methodInfos.push_back(method);
 		}
 	}
 
@@ -1341,7 +1356,8 @@ void postProcessFileInfos()
 			if (classInfo.baseClass.empty())
 				continue;
 
-			ClassInfo* baseClassInfo = findClassInfo(classInfo.baseClass);
+			bool isEditor = hasAPIBED(classInfo.api);
+			ClassInfo* baseClassInfo = findClassInfo(classInfo.baseClass, isEditor);
 			if (baseClassInfo == nullptr)
 			{
 				assert(false);
@@ -1459,7 +1475,7 @@ void postProcessFileInfos()
 			if (typeInfo.type != ParsedType::Class && typeInfo.type != ParsedType::GUIElement && !isHandleType(typeInfo.type))
 				return;
 
-			ClassInfo* classInfo = findClassInfo(type);
+			ClassInfo* classInfo = findClassInfo(type, false);
 			if (classInfo != nullptr)
 			{
 				bool isBase = (classInfo->flags & (int)ClassFlags::IsBase) != 0;
@@ -1551,7 +1567,11 @@ void postProcessFileInfos()
 				if (!classInfo.baseClass.empty())
 				{
 					UserTypeInfo& baseTypeInfo = cppToCsTypeMap[classInfo.baseClass];
-					fileInfo.second.referencedHeaderIncludes.push_back(baseTypeInfo.destFile);
+
+					if(hasAPIBED(classInfo.api))
+						fileInfo.second.referencedHeaderIncludes.push_back(baseTypeInfo.destFileEditor);
+					else
+						fileInfo.second.referencedHeaderIncludes.push_back(baseTypeInfo.destFile);
 				}
 
 				if (classInfo.templParams.empty())
@@ -1604,7 +1624,12 @@ void postProcessFileInfos()
 
 				if (interopFlags != 0)
 				{
-					std::string include = entry.second.typeInfo.destFile;
+					std::string include;
+					if(entry.second.isEditor)
+						include = entry.second.typeInfo.destFileEditor;
+					else
+						include = entry.second.typeInfo.destFile;
+
 					if((interopFlags & IT_FWD) != 0)
 						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, false });
 
@@ -3357,7 +3382,7 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 
 std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeInfo& typeInfo)
 {
-	bool inEditor = (classInfo.flags & (int)ClassFlags::Editor) != 0;
+	bool inEditor = hasAPIBED (classInfo.api);
 	bool isBase = (classInfo.flags & (int)ClassFlags::IsBase) != 0;
 	bool isModule = (classInfo.flags & (int)ClassFlags::IsModule) != 0;
 	bool isRootBase = classInfo.baseClass.empty();
@@ -4117,7 +4142,8 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 
 	output << "\tclass ";
 
-	if (!structInfo.inEditor)
+	bool inEditor = hasAPIBED (structInfo.api);
+	if (!inEditor)
 		output << "BS_SCR_BE_EXPORT ";
 	else
 		output << "BS_SCR_BED_EXPORT ";
@@ -4129,7 +4155,7 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 	output << "\t{" << std::endl;
 	output << "\tpublic:" << std::endl;
 
-	if (!structInfo.inEditor)
+	if (!inEditor)
 		output << "\t\tSCRIPT_OBJ(ENGINE_ASSEMBLY, ENGINE_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
 	else
 		output << "\t\tSCRIPT_OBJ(EDITOR_ASSEMBLY, EDITOR_NS, \"" << typeInfo.scriptName << "\")" << std::endl;
@@ -5199,15 +5225,18 @@ std::ofstream createFile(const std::string& filename, FileType type, StringRef o
 }
 
 void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolder, StringRef csEngineOutputFolder, 
-	StringRef csEditorOutputFolder)
+	StringRef csEditorOutputFolder, bool genEditor)
 {
 	postProcessFileInfos();
 
 	cleanAndPrepareFolder(cppEngineOutputFolder);
-	cleanAndPrepareFolder(cppEditorOutputFolder);
-
 	cleanAndPrepareFolder(csEngineOutputFolder);
-	cleanAndPrepareFolder(csEditorOutputFolder);
+
+	if(genEditor)
+	{
+		cleanAndPrepareFolder(cppEditorOutputFolder);
+		cleanAndPrepareFolder(csEditorOutputFolder);
+	}
 
 	//{
 	//	std::string relativePath = "scriptBindings.timestamp";
@@ -5228,6 +5257,9 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	// Generate H
 	for (auto& fileInfo : outputFileInfos)
 	{
+		if(fileInfo.second.inEditor && !genEditor)
+			continue;
+
 		std::stringstream body;
 
 		auto& classInfos = fileInfo.second.classInfos;
@@ -5313,6 +5345,9 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	// Generate CPP
 	for (auto& fileInfo : outputFileInfos)
 	{
+		if(fileInfo.second.inEditor && !genEditor)
+			continue;
+
 		std::stringstream body;
 
 		auto& classInfos = fileInfo.second.classInfos;
@@ -5364,6 +5399,9 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	// Generate CS
 	for (auto& fileInfo : outputFileInfos)
 	{
+		if(fileInfo.second.inEditor && !genEditor)
+			continue;
+
 		std::stringstream body;
 
 		auto& classInfos = fileInfo.second.classInfos;

@@ -185,6 +185,48 @@ std::string getFullName(NamedDecl* decl)
 	return ss.str();
 }
 
+void registerUserTypeInfo(const std::string& className, ApiFlags api, const std::string declFile, const std::string& exportName, 
+	const std::string& exportFile, ParsedType type)
+{
+	std::string destFile = "BsScript" + exportFile + ".generated.h";
+	std::string destFileEditor = destFile;
+
+	// Going to need separate file for editor?
+	if (hasAPIBED(api) && hasAPIBSF(api))
+		destFileEditor = "BsScript" + exportFile + ".editor.generated.h";
+
+	cppToCsTypeMap[className] = UserTypeInfo(exportName, type, declFile, destFile, destFileEditor);
+}
+
+template<class T>
+void addEntryToFile(FileInfo& fileInfo, T& entry, const std::string& file, std::function<void(FileInfo&, const T&)> addEntry)
+{
+	if (hasAPIBED(entry.api))
+	{
+		// Editor only file
+		if(!hasAPIBSF(entry.api))
+		{
+			fileInfo.inEditor = true;
+			addEntry(fileInfo, entry);
+		}
+		else // Editor and bsf, add new file for editor
+		{
+			entry.api = ApiFlags::BSF;
+			addEntry(fileInfo, entry);
+
+			entry.api = ApiFlags::BED;
+
+			std::string editorFile = file + ".editor";
+
+			FileInfo& editorFileInfo = outputFileInfos[editorFile];
+			editorFileInfo.inEditor = true;
+			addEntry(editorFileInfo, entry);
+		}
+	}
+	else // Non-editor, bsf and/or b3d
+		addEntry(fileInfo, entry);
+}
+
 bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue)
 {
 	typeFlags = 0;
@@ -579,6 +621,8 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 			output.exportFlags |= (int)ExportFlags::ApiBSF;
 		else if (value == "b3d")
 			output.exportFlags |= (int)ExportFlags::ApiB3D;
+		else if (value == "bed")
+			output.exportFlags |= (int)ExportFlags::ApiBED;
 		else
 		{
 			outs() << "Warning: Unrecognized value for \"pr\" option: \"" + value + "\" for type \"" <<
@@ -596,16 +640,6 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 		output.exportFlags |= (int)ExportFlags::ExternalConstructor;
 
 		output.externalClass = value;
-	}
-	else if (name == "ed")
-	{
-		if (value == "true")
-			output.exportFlags |= (int)ExportFlags::Editor;
-		else if (value != "false")
-		{
-			outs() << "Warning: Unrecognized value for \"ed\" option: \"" + value + "\" for type \"" <<
-				sourceName << "\".\n";
-		}
 	}
 	else if (name == "ex")
 	{
@@ -755,7 +789,46 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 	output.exportName = sourceName;
 	
 	if (!output.exportName.empty())
-		output.exportName[0] = toupper(output.exportName[0]);
+	{
+		// Camel case to pascal case
+		if(islower(output.exportName[0]))
+			output.exportName[0] = toupper(output.exportName[0]);
+		else
+		{
+			// Screaming snake case to pascal case
+			bool isScreamingSnakeCase = true;
+			std::stringstream caseOutput;
+			bool nextUpper = true;
+			for(size_t i = 0; i < output.exportName.size(); i++)
+			{
+				if (isalpha(output.exportName[i]))
+				{
+					if(islower(output.exportName[i]))
+					{
+						isScreamingSnakeCase = false;
+						break;
+					}
+					else
+					{
+						if(!nextUpper)
+							caseOutput << (char)tolower(output.exportName[i]);
+						else
+						{
+							caseOutput << output.exportName[i];
+							nextUpper = false;
+						}
+					}
+				}
+				else if(output.exportName[i] == '_')
+					nextUpper = true;
+				else
+					caseOutput << output.exportName[i];
+			}
+
+			if(isScreamingSnakeCase)
+				output.exportName = caseOutput.str();
+		}
+	}
 
 	output.exportFile = sourceName;
 	output.visibility = CSVisibility::Public;
@@ -1816,7 +1889,6 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	enumEntry.visibility = parsedEnumInfo.visibility;
 	enumEntry.api = apiFromExportFlags(parsedEnumInfo.exportFlags);
 	enumEntry.module = parsedEnumInfo.moduleName;
-	enumEntry.inEditor = (parsedEnumInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 	parseJavadocComments(decl, enumEntry.documentation);
 	clearParamRefComments(enumEntry.documentation);
 
@@ -1830,10 +1902,12 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 
 	std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
 	std::string destFile = "BsScript" + parsedEnumInfo.exportFile + ".generated.h";
+	std::string destFileEditor = "BsScript" + parsedEnumInfo.exportFile + ".editor.generated.h";
 
-	cppToCsTypeMap[sourceClassName] = UserTypeInfo(parsedEnumInfo.exportName, ParsedType::Enum, declFile, destFile);
+	registerUserTypeInfo(sourceClassName, enumEntry.api, declFile, parsedEnumInfo.exportName, 
+		parsedEnumInfo.exportFile, ParsedType::Enum);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
-	
+
 	auto iter = decl->enumerator_begin();
 	while (iter != decl->enumerator_end())
 	{
@@ -1871,13 +1945,12 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 		++iter;
 	}
 
-	fileInfo.enumInfos.push_back(enumEntry);
-
-	if (enumEntry.inEditor)
-		fileInfo.inEditor = true;
+	addEntryToFile<EnumInfo>(fileInfo, enumEntry, parsedEnumInfo.exportFile, 
+		[](FileInfo& fileInfo, const EnumInfo& enumInfo) { fileInfo.enumInfos.push_back(enumInfo); });
 
 	return true;
 }
+
 
 std::string ScriptExportParser::parseTemplArguments(const std::string& className, const TemplateArgument* tmplArgs, unsigned numArgs, SmallVector<TemplateParamInfo, 0>* templParams)
 {
@@ -1980,7 +2053,6 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.cleanName = declName;
 		structInfo.baseClass = parseExportableBaseStruct(decl);
 		structInfo.visibility = parsedClassInfo.visibility;
-		structInfo.inEditor = (parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0;
 		structInfo.requiresInterop = false;
 		structInfo.module = parsedClassInfo.moduleName;
 		structInfo.isTemplateInst = specDecl != nullptr;
@@ -2311,13 +2383,11 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			structInfo.ctors.push_back(SimpleConstructorInfo());
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		std::string destFile = "BsScript" + parsedClassInfo.exportFile + ".generated.h";
-		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, ParsedType::Struct, declFile, destFile);
+		registerUserTypeInfo(srcClassName, structInfo.api, declFile, parsedClassInfo.exportName,
+			parsedClassInfo.exportFile, ParsedType::Struct);
 
-		fileInfo.structInfos.push_back(structInfo);
-
-		if (structInfo.inEditor)
-			fileInfo.inEditor = true;
+		addEntryToFile<StructInfo>(fileInfo, structInfo, parsedClassInfo.exportFile,
+			[](FileInfo& fileInfo, const StructInfo& structInfo) { fileInfo.structInfos.push_back(structInfo); });
 	}
 	else
 	{
@@ -2344,9 +2414,6 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		parseNamespace(decl, classInfo.ns);
 
-		if ((parsedClassInfo.exportFlags & (int)ExportFlags::Editor) != 0)
-			classInfo.flags |= (int)ClassFlags::Editor;
-
 		if ((parsedClassInfo.style.flags & (int)StyleFlags::ForceHide) != 0)
 			classInfo.flags |= (int)ClassFlags::HideInInspector;
 
@@ -2363,9 +2430,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		std::string destFile = "BsScript" + parsedClassInfo.exportFile + ".generated.h";
-
-		cppToCsTypeMap[srcClassName] = UserTypeInfo(parsedClassInfo.exportName, classType, declFile, destFile);
+		registerUserTypeInfo(srcClassName, classInfo.api, declFile, parsedClassInfo.exportName,
+			parsedClassInfo.exportFile, classType);
 
 		std::stack<const CXXRecordDecl*> todo;
 		todo.push(decl);
@@ -2764,11 +2830,8 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		// External classes are just containers for external methods, we don't need to process them directly
 		if ((parsedClassInfo.exportFlags & (int)ExportFlags::External) == 0)
 		{
-			FileInfo& fileInfo = outputFileInfos[parsedClassInfo.exportFile];
-			fileInfo.classInfos.push_back(classInfo);
-
-			if ((classInfo.flags & (int)ClassFlags::Editor) != 0)
-				fileInfo.inEditor = true;
+			addEntryToFile<ClassInfo>(fileInfo, classInfo, parsedClassInfo.exportFile,
+				[](FileInfo& fileInfo, const ClassInfo& classInfo) { fileInfo.classInfos.push_back(classInfo); });
 		}
 	}
 

@@ -99,21 +99,20 @@ enum class ExportFlags
 	PropertySetter = 1 << 2,
 	External = 1 << 3,
 	ExternalConstructor = 1 << 4,
-	Editor = 1 << 5,
-	Exclude = 1 << 6,
-	InteropOnly = 1 << 7,
-	ApiBSF = 1 << 8,
-	ApiB3D = 1 << 9
+	Exclude = 1 << 5,
+	InteropOnly = 1 << 6,
+	ApiBSF = 1 << 7,
+	ApiB3D = 1 << 8,
+	ApiBED = 1 << 9
 };
 
 enum class ClassFlags
 {
-	Editor = 1 << 0,
-	IsBase = 1 << 1,
-	IsModule = 1 << 2,
-	IsTemplateInst = 1 << 3,
-	IsStruct = 1 << 4,
-	HideInInspector = 1 << 5
+	IsBase = 1 << 0,
+	IsModule = 1 << 1,
+	IsTemplateInst = 1 << 2,
+	IsStruct = 1 << 3,
+	HideInInspector = 1 << 4
 };
 
 enum class StyleFlags
@@ -137,6 +136,7 @@ enum class ApiFlags : uint8_t
 {
 	BSF = 1 << 0,
 	B3D = 1 << 1,
+	BED = 1 << 2,
 	Any = BSF | B3D
 };
 
@@ -155,12 +155,18 @@ struct UserTypeInfo
 	UserTypeInfo() {}
 
 	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile)
-		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile)
+		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFile)
+	{ }
+
+	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile,
+		const std::string& destFileEditor)
+		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFileEditor)
 	{ }
 
 	std::string scriptName;
 	std::string declFile;
 	std::string destFile;
+	std::string destFileEditor;
 	ParsedType type;
 	BuiltinType::Kind underlyingType; // For enums
 };
@@ -300,7 +306,6 @@ struct StructInfo
 
 	std::vector<SimpleConstructorInfo> ctors;
 	std::vector<FieldInfo> fields;
-	bool inEditor : 1;
 	bool requiresInterop : 1;
 	bool isTemplateInst : 1;
 
@@ -329,7 +334,6 @@ struct EnumInfo
 
 	CommentEntry documentation;
 	std::string module;
-	bool inEditor : 1;
 };
 
 struct ForwardDeclInfo
@@ -378,9 +382,9 @@ struct IncludeInfo
 {
 	IncludeInfo() { }
 	IncludeInfo(const std::string& typeName, const UserTypeInfo& typeInfo, uint32_t originIncludeFlags, 
-		uint32_t interopIncludeFlags, bool isStruct = false)
+		uint32_t interopIncludeFlags, bool isStruct = false, bool isEditor = false)
 		: typeName(typeName), typeInfo(typeInfo), originIncludeFlags(originIncludeFlags)
-		, interopIncludeFlags(interopIncludeFlags), isStruct(isStruct)
+		, interopIncludeFlags(interopIncludeFlags), isStruct(isStruct), isEditor(isEditor)
 	{ }
 
 	std::string typeName;
@@ -388,6 +392,7 @@ struct IncludeInfo
 	uint32_t originIncludeFlags;
 	uint32_t interopIncludeFlags;
 	bool isStruct;
+	bool isEditor;
 };
 
 struct IncludesInfo
@@ -720,6 +725,21 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 	return iterFind->second;
 }
 
+inline bool hasAPIBED(ApiFlags api)
+{
+	return ((int)api & (int)ApiFlags::BED) != 0;
+}
+
+inline bool hasAPIB3D(ApiFlags api)
+{
+	return ((int)api & (int)ApiFlags::B3D) != 0;
+}
+
+inline bool hasAPIBSF(ApiFlags api)
+{
+	return ((int)api & (int)ApiFlags::BSF) != 0;
+}
+
 inline bool isInt64(const UserTypeInfo& typeInfo)
 {
 	return typeInfo.type == ParsedType::Builtin && (typeInfo.scriptName == "long" || typeInfo.scriptName == "ulong");
@@ -852,6 +872,9 @@ inline ApiFlags apiFromExportFlags(int flags)
 
 	if((flags & (int)ExportFlags::ApiBSF) != 0)
 		output |= (int)ApiFlags::BSF;
+
+	if((flags & (int)ExportFlags::ApiBED) != 0)
+		output |= (int)ApiFlags::BED;
 
 	if((int)output == 0)
 		output = (int)ApiFlags::Any;
@@ -1024,4 +1047,4 @@ inline void getDerivedClasses(const std::string& typeName, std::vector<std::stri
 }
 
 void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolder, StringRef csEngineOutputFolder, 
-	StringRef csEditorOutputFolder);
+	StringRef csEditorOutputFolder, bool genEditor);

@@ -41,6 +41,11 @@ static cl::opt<std::string> OutputCSEditorOption(
 	cl::desc("Specify output directory. Generated editor CS files will be placed relative to that folder.\n"),
 	cl::cat(OptCategory));
 
+static cl::opt<bool> GenerateEditorOption(
+	"gen-editor",
+	cl::desc("If enabled the script code marked with BED API will be generated as well.\n"),
+	cl::cat(OptCategory));
+
 class ScriptExportConsumer : public ASTConsumer 
 {
 public:
@@ -103,12 +108,15 @@ int main(int argc, const char** argv)
 	std::unique_ptr<FrontendActionFactory> factory = newFrontendActionFactory<ScriptExportFrontendAction>();
 	int output = Tool.run(factory.get());
 
+	bool genEditor = GenerateEditorOption.getValue();
+
 	// Generate code
 	generateAll(
 		OutputCppEngineOption.getValue(), 
 		OutputCppEditorOption.getValue(),
 		OutputCSEngineOption.getValue(),
-		OutputCSEditorOption.getValue());
+		OutputCSEditorOption.getValue(),
+		genEditor);
 
 	//system("pause");
 	return output;
