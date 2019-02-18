@@ -980,8 +980,11 @@ inline bool isValidStructType(UserTypeInfo& typeInfo, int flags)
 	return true;
 }
 
-inline std::string getDefaultValue(const std::string& typeName, const UserTypeInfo& typeInfo)
+inline std::string getDefaultValue(const std::string& typeName, int flags, const UserTypeInfo& typeInfo)
 {
+	if(isArrayOrVector(flags))
+		return "null";
+
 	if (typeInfo.type == ParsedType::Builtin)
 		return "0";
 	else if (typeInfo.type == ParsedType::Enum)

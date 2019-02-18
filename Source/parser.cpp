@@ -2061,6 +2061,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 		parseJavadocComments(templatedDecl, structInfo.documentation);
 		parseNamespace(decl, structInfo.ns);
+		clearParamRefComments(structInfo.documentation);
 
 		std::unordered_map<FieldDecl*, std::pair<std::string, std::string>> defaultFieldValues;
 

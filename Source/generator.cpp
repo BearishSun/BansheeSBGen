@@ -5042,7 +5042,7 @@ std::string generateCSStruct(StructInfo& input)
 				if (!fieldInfo.defaultValue.empty())
 					defaultValue = generateCSDefaultValueAssignment(fieldInfo);
 				else
-					defaultValue = getDefaultValue(fieldInfo.type, typeInfo);
+					defaultValue = getDefaultValue(fieldInfo.type, fieldInfo.flags, typeInfo);
 
 				output << "\t\t\t" << thisPtr << "." << fieldName << " = " << defaultValue << ";" << std::endl;
 			}
@@ -5450,20 +5450,14 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 		output << "using System.Runtime.InteropServices;" << std::endl;
 
 		if (fileInfo.second.inEditor)
-			output << "using BansheeEngine;" << std::endl;
+			output << "using bs;" << std::endl;
 
 		output << std::endl;
 
 		if (!fileInfo.second.inEditor)
-		{
-			output << "#if IS_B3D\n";
-			output << "namespace BansheeEngine\n";
-			output << "#else\n";
 			output << "namespace bs\n";
-			output << "#endif\n";
-		}
 		else
-			output << "namespace BansheeEditor\n";
+			output << "namespace bs.Editor\n";
 
 		output << "{" << std::endl;
 		output << body.str();
