@@ -2758,6 +2758,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					getterInfo.visibility = parsedFieldInfo.visibility;
 					getterInfo.api = apiFromExportFlags(parsedFieldInfo.exportFlags);
 					getterInfo.flags = (int)MethodFlags::PropertyGetter | (int)MethodFlags::FieldWrapper;
+					getterInfo.style = fieldInfo.style;
 
 					getterInfo.returnInfo.flags = fieldInfo.flags;
 					getterInfo.returnInfo.arraySize = fieldInfo.arraySize;
@@ -2783,6 +2784,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					setterInfo.visibility = parsedFieldInfo.visibility;
 					setterInfo.api = apiFromExportFlags(parsedFieldInfo.exportFlags);
 					setterInfo.flags = (int)MethodFlags::PropertySetter | (int)MethodFlags::FieldWrapper;
+					setterInfo.style = fieldInfo.style;
 
 					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)
 						setterInfo.flags |= (int)MethodFlags::InteropOnly;

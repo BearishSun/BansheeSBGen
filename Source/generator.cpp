@@ -4296,10 +4296,10 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 		output << "\t\t[Order(" << style.order << ")]\n";
 
 	if(((style.flags & (int)StyleFlags::Category) != 0))
-		output << "\t\t[Category(" << style.category << ")]\n";
+		output << "\t\t[Category(\"" << style.category << "\")]\n";
 
 	if(((style.flags & (int)StyleFlags::Inline) != 0))
-		output << "\t\t[Inline(" << style.category << ")]\n";
+		output << "\t\t[Inline]\n";
 
 	bool notNull = (style.flags & (int)StyleFlags::NotNull) != 0;
 	bool passByCopy = (style.flags & (int)StyleFlags::PassByCopy) != 0;
