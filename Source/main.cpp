@@ -6,6 +6,7 @@ const char* BUILTIN_SCENEOBJECT_TYPE = "SceneObject";
 const char* BUILTIN_RESOURCE_TYPE = "Resource";
 const char* BUILTIN_MODULE_TYPE = "Module";
 const char* BUILTIN_GUIELEMENT_TYPE = "GUIElement";
+const char* BUILTIN_REFLECTABLE_TYPE = "IReflectable";
 
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;

@@ -64,7 +64,7 @@ std::string getCppVarType(const std::string& typeName, ParsedType type, int flag
 		return "ResourceHandle<" + typeName + ">";
 	else if (type == ParsedType::SceneObject || type == ParsedType::Component)
 		return "GameObjectHandle<" + typeName + ">";
-	else if (type == ParsedType::Class)
+	else if (isClassType(type))
 	{
 		if(assumeDefaultTypes || isSrcSPtr(flags))
 			return "SPtr<" + typeName + ">";
@@ -127,7 +127,7 @@ std::string generateGetInternalLine(const std::string& sourceClassName, const st
 	bool isBase = isBaseParam(flags);
 
 	std::stringstream output;
-	if (classType == ParsedType::Class)
+	if (isClassType(classType))
 		output << obj << "->getInternal()";
 	else if(classType == ParsedType::GUIElement)
 		output << "static_cast<" << sourceClassName << "*>(" << obj << "->getGUIElement())";
@@ -235,6 +235,7 @@ std::string getAsManagedToCppArgument(const std::string& name, ParsedType type, 
 		}
 	}
 	case ParsedType::Class: // Input type is always a SPtr
+	case ParsedType::ReflectableClass:
 	{
 		assert(!isSrcRHandle(flags) && !isSrcGHandle(flags));
 
@@ -294,6 +295,7 @@ std::string getAsCppToManagedArgument(const std::string& name, ParsedType type, 
 	case ParsedType::SceneObject:
 	case ParsedType::Resource:
 	case ParsedType::Class:
+	case ParsedType::ReflectableClass:
 			return name;
 	default: // Some object type
 		assert(false);
@@ -344,6 +346,7 @@ std::string getAsCppToInteropArgument(const std::string& name, ParsedType type, 
 		}
 	}
 	case ParsedType::Class: // Always passed as a sptr, input can be a sptr, pointer, reference or value type
+	case ParsedType::ReflectableClass:
 	{
 		assert(!isSrcRHandle(flags) && !isSrcGHandle(flags));
 
@@ -492,9 +495,10 @@ bool hasParameterlessConstructor(const ClassInfo& classInfo)
 void gatherIncludes(const std::string& typeName, int flags, bool isEditor, IncludesInfo& output)
 {
 	UserTypeInfo typeInfo = getTypeInfo(typeName, flags);
-	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::Struct ||
-		typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject || 
-		typeInfo.type == ParsedType::Resource || typeInfo.type == ParsedType::Enum)
+	if (typeInfo.type == ParsedType::Class || typeInfo.type == ParsedType::ReflectableClass || 
+		typeInfo.type == ParsedType::Struct || typeInfo.type == ParsedType::Component || 
+		typeInfo.type == ParsedType::SceneObject || typeInfo.type == ParsedType::Resource || 
+		typeInfo.type == ParsedType::Enum)
 	{
 		auto iterFind = output.includes.find(typeName);
 		if (iterFind == output.includes.end())
@@ -521,13 +525,13 @@ void gatherIncludes(const std::string& typeName, int flags, bool isEditor, Inclu
 
 			// If a class is being passed by reference or a raw pointer then we need the declaration because we perform
 			// assignment copy
-			if (typeInfo.type == ParsedType::Class && !isSrcSPtr(flags))
+			if (isClassType(typeInfo.type) && !isSrcSPtr(flags))
 				sourceIncludeType = IT_HEADER;
 
 			output.includes[typeName] = IncludeInfo(typeName, typeInfo, sourceIncludeType, interopIncludeType, isStruct, isEditor);
 		}
 
-		if (typeInfo.type == ParsedType::Class)
+		if (isClassType(typeInfo.type))
 		{
 			bool isBase = isBaseParam(flags);
 			if (isBase)
@@ -594,9 +598,9 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0, false, isEditor);
 	}
 
-	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::Struct ||
-		fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject ||
-		fieldTypeInfo.type == ParsedType::Resource)
+	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::ReflectableClass ||
+		fieldTypeInfo.type == ParsedType::Struct || fieldTypeInfo.type == ParsedType::Component || 
+		fieldTypeInfo.type == ParsedType::SceneObject || fieldTypeInfo.type == ParsedType::Resource)
 	{
 		bool isRRef = getPassAsResourceRef(fieldInfo.flags);
 
@@ -615,7 +619,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 		}
 		else if (fieldTypeInfo.type == ParsedType::Component || fieldTypeInfo.type == ParsedType::SceneObject)
 			output.requiresGameObjectManager = true;
-		else if(fieldTypeInfo.type == ParsedType::Class)
+		else if(fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::ReflectableClass)
 		{
 			bool isBase = isBaseParam(fieldInfo.flags);
 			if (isBase)
@@ -1472,7 +1476,8 @@ void postProcessFileInfos()
 		auto markBaseType = [&findClassInfo](const std::string& type, int& flags)
 		{
 			UserTypeInfo typeInfo = getTypeInfo(type, flags);
-			if (typeInfo.type != ParsedType::Class && typeInfo.type != ParsedType::GUIElement && !isHandleType(typeInfo.type))
+			if (typeInfo.type != ParsedType::Class && typeInfo.type != ParsedType::ReflectableClass && 
+				typeInfo.type != ParsedType::GUIElement && !isHandleType(typeInfo.type))
 				return;
 
 			ClassInfo* classInfo = findClassInfo(type, false);
@@ -1561,6 +1566,8 @@ void postProcessFileInfos()
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptSceneObject.h");
 				else if (typeInfo.type == ParsedType::GUIElement)
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/GUI/BsScriptGUIElement.h");
+				else if (typeInfo.type == ParsedType::ReflectableClass)
+					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptReflectable.h");
 				else // Class
 					fileInfo.second.referencedHeaderIncludes.push_back("BsScriptObject.h");
 
@@ -1574,12 +1581,14 @@ void postProcessFileInfos()
 						fileInfo.second.referencedHeaderIncludes.push_back(baseTypeInfo.destFile);
 				}
 
-				if (classInfo.templParams.empty())
+				if (typeInfo.type != ParsedType::ReflectableClass && classInfo.templParams.empty())
 					fileInfo.second.referencedSourceIncludes.push_back(typeInfo.declFile);
 				else
 				{
 					// Templated classes need to be included in header, so the linker doesn't instantiate them multiple times for different libraries
 					// (in case template is exported).
+					// Reflectable classes need to be included in the header because they provide a getInternal<T>() method
+					// which requires information about T.
 					fileInfo.second.referencedHeaderIncludes.push_back(typeInfo.declFile);
 				}
 			}
@@ -2120,6 +2129,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		}
 			break;
 		case ParsedType::Class:
+		case ParsedType::ReflectableClass:
 		{
 			argName = "tmp" + name;
 			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
@@ -2283,7 +2293,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
 					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
 
-				if(paramTypeInfo.type == ParsedType::Class)
+				if(paramTypeInfo.type == ParsedType::Class || paramTypeInfo.type == ParsedType::ReflectableClass)
 				{
 					if(isSrcPointer(flags))
 						preCallActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
@@ -2363,6 +2373,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << argName << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
+			case ParsedType::ReflectableClass:
 			{
 				std::string elemName = "arrayElem" + name;
 
@@ -2540,6 +2551,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		}
 			break;
 		case ParsedType::Class:
+		case ParsedType::ReflectableClass:
 		{
 			arg = "tmp" + name;
 			std::string scriptType = getScriptInteropType(typeName);
@@ -2716,7 +2728,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
 					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
 
-				if(paramTypeInfo.type == ParsedType::Class)
+				if(paramTypeInfo.type == ParsedType::Class || paramTypeInfo.type == ParsedType::ReflectableClass)
 				{
 					if(isSrcPointer(flags))
 						preActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
@@ -2779,6 +2791,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]);" << std::endl;
 				break;
 			case ParsedType::Class:
+			case ParsedType::ReflectableClass:
 			{
 				std::string elemName = "arrayElem" + name;
 
@@ -2908,6 +2921,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		}
 		break;
 		case ParsedType::Class:
+		case ParsedType::ReflectableClass:
 		{
 			argName = "tmp" + name;
 			std::string scriptType = getScriptInteropType(typeName);
@@ -3005,6 +3019,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\t\t\t" << arrayName << ".set(i, " << name << "[i]);" << std::endl;
 			break;
 		case ParsedType::Class:
+		case ParsedType::ReflectableClass:
 		{
 			std::string elemName = "arrayElem" + name;
 			preCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
@@ -3105,7 +3120,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		bool isValid = false;
 		if (!isExternal)
 		{
-			if (classType == ParsedType::Class)
+			if (isClassType(classType))
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = bs_shared_ptr_new<" << sourceClassName << ">(" << methodArgs.str() << ");" << std::endl;
 				output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
@@ -3116,7 +3131,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		{
 			std::string fullMethodName = methodInfo.externalClass + "::" + methodInfo.sourceName;
 
-			if (classType == ParsedType::Class)
+			if (isClassType(classType))
 			{
 				output << "\t\tSPtr<" << sourceClassName << "> instance = " << fullMethodName << "(" << methodArgs.str() << ");" << std::endl;
 				output << "\t\tnew (bs_alloc<" << interopClassName << ">())" << interopClassName << "(managedInstance, instance);" << std::endl;
@@ -3175,7 +3190,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		if (!methodInfo.returnInfo.type.empty())
 		{
 			// Dereference input if needed
-			if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
+			if (isClassType(returnTypeInfo.type) && !isArrayOrVector(methodInfo.returnInfo.flags))
 			{
 				if ((isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || 
 					isSrcValue(methodInfo.returnInfo.flags)) && !isSrcSPtr(methodInfo.returnInfo.flags))
@@ -3258,7 +3273,7 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 	}
 
 	// Dereference input if needed
-	if (returnTypeInfo.type == ParsedType::Class && !isArrayOrVector(methodInfo.returnInfo.flags))
+	if (isClassType(returnTypeInfo.type) && !isArrayOrVector(methodInfo.returnInfo.flags))
 	{
 		if ((isSrcPointer(methodInfo.returnInfo.flags) || isSrcReference(methodInfo.returnInfo.flags) || 
 			isSrcValue(methodInfo.returnInfo.flags)) && !isSrcSPtr(methodInfo.returnInfo.flags))
@@ -3428,6 +3443,8 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 			{
 				if (typeInfo.type == ParsedType::Class)
 					output << "ScriptObjectBase";
+				if (typeInfo.type == ParsedType::ReflectableClass)
+					output << "ScriptReflectableBase";
 				else if (typeInfo.type == ParsedType::Component)
 					output << "ScriptComponentBase";
 				else if (typeInfo.type == ParsedType::Resource)
@@ -3445,16 +3462,24 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << "\t\t" << interopBaseClassName << "(MonoObject* instance);" << std::endl;
 			output << "\t\tvirtual ~" << interopBaseClassName << "() {}" << std::endl;
 
-			if (typeInfo.type == ParsedType::Class && !isModule)
+			if(!isModule)
 			{
-				output << std::endl;
-				output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
-
-				// Data member only present in the top-most base class
-				if (isRootBase)
+				if (typeInfo.type == ParsedType::ReflectableClass)
 				{
-					output << "\tprotected:" << std::endl;
-					output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
+					output << std::endl;
+					output << "\t\t" << wrappedDataType << " getInternal() const;\n";
+				}
+				else if (typeInfo.type == ParsedType::Class)
+				{
+					output << std::endl;
+					output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
+
+					// Data member only present in the top-most base class
+					if (isRootBase)
+					{
+						output << "\tprotected:" << std::endl;
+						output << "\t\t" << wrappedDataType << " mInternal;" << std::endl;
+					}
 				}
 			}
 
@@ -3479,6 +3504,8 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "TScriptComponent<" << interopClassName << ", " << classInfo.name;
 	else if (typeInfo.type == ParsedType::GUIElement)
 		output << "TScriptGUIElement<" << interopClassName;
+	else if (typeInfo.type == ParsedType::ReflectableClass)
+		output << "TScriptReflectable<" << interopClassName << ", " << classInfo.name;
 	else // Class
 		output << "ScriptObject<" << interopClassName;
 
@@ -3522,7 +3549,10 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << "\t\t" << wrappedDataType << " getInternal() const;\n";
 		else
 			output << "\t\t" << wrappedDataType << " getInternal() const { return mInternal; }" << std::endl;
+	}
 
+	if(isClassType(typeInfo.type) && !isModule)
+	{
 		// getManagedInstance() method (needed for events)
 		if (!classInfo.eventInfos.empty())
 			output << "\t\tMonoObject* getManagedInstance() const;\n";
@@ -3531,7 +3561,8 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "\t\tstatic MonoObject* create(const " << wrappedDataType << "& value);" << std::endl;
 		output << std::endl;
 	}
-	else if (typeInfo.type == ParsedType::Resource)
+
+	if (typeInfo.type == ParsedType::Resource)
 	{
 		// createInstance() method required by script resource manager
 		output << "\t\tstatic MonoObject* createInstance();" << std::endl;
@@ -3549,7 +3580,7 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << "\tprivate:" << std::endl;
 
 	// Handle (if required)
-	if (typeInfo.type == ParsedType::Class)
+	if (isClassType(typeInfo.type))
 	{
 		if (!classInfo.eventInfos.empty())
 			output << "\t\tuint32_t mGCHandle = 0;\n\n";
@@ -3674,9 +3705,9 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	std::stringstream output;
 	output << generateCppApiCheckBegin(classInfo.api);
 
-	// Base class constructor
 	if (isBase && typeInfo.type != ParsedType::GUIElement)
 	{
+		// Base class constructor
 		output << "\t" << interopBaseClassName << "::" << interopBaseClassName << "(MonoObject* managedInstance)\n";
 		output << "\t\t:";
 
@@ -3685,6 +3716,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		{
 			if (typeInfo.type == ParsedType::Class)
 				output << "ScriptObjectBase";
+			if (typeInfo.type == ParsedType::ReflectableClass)
+				output << "ScriptReflectableBase";
 			else if (typeInfo.type == ParsedType::Component)
 				output << "ScriptComponentBase";
 			else if (typeInfo.type == ParsedType::Resource)
@@ -3699,6 +3732,15 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "(managedInstance)\n";
 		output << "\t { }\n";
 		output << "\n";
+
+		// Base class getInternal() method
+		if(typeInfo.type == ParsedType::ReflectableClass)
+		{
+			output << "\t" << wrappedDataType << " " << interopBaseClassName << "::" << "getInternal() const\n";
+			output << "\t{\n";
+			output << "\t\treturn std::static_pointer_cast<" << classInfo.name << ">(mInternal);\n";
+			output << "\t}\n";
+		}
 	}
 
 	// Event thunks
@@ -3735,6 +3777,13 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "TScriptComponent(managedInstance, value)";
 	else if (typeInfo.type == ParsedType::GUIElement)
 		output << "TScriptGUIElement(managedInstance, value)";
+	else if (typeInfo.type == ParsedType::ReflectableClass)
+	{
+		if(!isModule)
+			output << "TScriptReflectable(managedInstance, value)";
+		else
+			output << "TScriptReflectable(managedInstance, nullptr)";
+	}
 	else // Class
 	{
 		if(!isModule && !isBase && classInfo.baseClass.empty())
@@ -3745,7 +3794,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << std::endl;
 	output << "\t{" << std::endl;
 
-	if (typeInfo.type == ParsedType::Class)
+	if (isClassType(typeInfo.type))
 	{
 		if (!classInfo.eventInfos.empty())
 			output << "\t\tmGCHandle = MonoUtil::newWeakGCHandle(managedInstance);\n";
@@ -3797,7 +3846,10 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << "\t\treturn std::static_pointer_cast<" << classInfo.name << ">(mInternal);\n";
 			output << "\t}\n\n";
 		}
+	}
 
+	if (isClassType(typeInfo.type))
+	{
 		// getManagedInstance() method (needed for events)
 		if (!classInfo.eventInfos.empty())
 		{
@@ -3898,7 +3950,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	output << std::endl;
 
 	// create() or createInstance() methods
-	if ((typeInfo.type == ParsedType::Class && !isModule) || typeInfo.type == ParsedType::Resource)
+	if ((isClassType(typeInfo.type) && !isModule) || typeInfo.type == ParsedType::Resource)
 	{
 		std::stringstream ctorSignature;
 		std::stringstream ctorParamsInit;
@@ -3923,7 +3975,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		ctorParamsInit << " };" << std::endl;
 		ctorParamsInit << std::endl;
 
-		if (typeInfo.type == ParsedType::Class)
+		if (isClassType(typeInfo.type))
 		{
 			output << "\tMonoObject* " << interopClassName << "::create(const " << wrappedDataType << "& value)" << std::endl;
 			output << "\t{" << std::endl;
@@ -4304,7 +4356,7 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 	bool notNull = (style.flags & (int)StyleFlags::NotNull) != 0;
 	bool passByCopy = (style.flags & (int)StyleFlags::PassByCopy) != 0;
 
-	if(!isStruct && (typeInfo.type == ParsedType::Class && isPassedByValue(typeFlags)))
+	if(!isStruct && (isClassType(typeInfo.type) && isPassedByValue(typeFlags)))
 	{
 		notNull = true;
 		passByCopy = true;
@@ -4877,7 +4929,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 	output << generateXMLComments(input.documentation, "\t");
 
 	// Force non-resource and non-component types to show in inspector, except explicitly hidden
-	if (typeInfo.type == ParsedType::Class || (input.flags & (int)ClassFlags::HideInInspector) == 0)
+	if (isClassType(typeInfo.type) || (input.flags & (int)ClassFlags::HideInInspector) == 0)
 		output << "\t[ShowInInspector]\n";
 
 	if (input.visibility == CSVisibility::Internal)
@@ -5224,6 +5276,76 @@ std::ofstream createFile(const std::string& filename, FileType type, StringRef o
 	return output;
 }
 
+void generateLookupFile(const std::string& tableName, ParsedType type, bool editor, 
+	const std::string& engineOutputFolder, const std::string& editorOutputFolder)
+{
+	StringRef cppOutputFolder = editor ? editorOutputFolder : engineOutputFolder;
+
+	std::stringstream body;
+	std::stringstream includes;
+	for (auto& fileInfo : outputFileInfos)
+	{
+		auto& classInfos = fileInfo.second.classInfos;
+		if (classInfos.empty())
+			continue;
+
+		if(fileInfo.second.inEditor != editor)
+			continue;
+
+		bool hasType = false;
+		for (auto& classInfo : classInfos)
+		{
+			UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
+			if (typeInfo.type != type)
+				continue;
+
+			includes << generateCppApiCheckBegin(classInfo.api);
+			includes << "#include \"" << getRelativeTo(typeInfo.declFile, cppOutputFolder) << "\"" << std::endl;
+			includes << generateApiCheckEnd(classInfo.api);
+
+			std::string interopClassName = getScriptInteropType(classInfo.name);
+			body << generateCppApiCheckBegin(classInfo.api);
+			body << "\t\tADD_ENTRY(" << classInfo.name << ", " << interopClassName << ")" << std::endl;
+			body << generateApiCheckEnd(classInfo.api);
+
+			hasType = true;
+		}
+
+		if(hasType)
+			includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
+	}
+
+	std::string prefix = editor ? "Editor" : "";
+	std::ofstream output = createFile("Bs" + prefix + tableName + "Lookup.generated.h", editor ? FT_EDITOR_H : FT_ENGINE_H, cppOutputFolder);
+
+	// License/copyright header
+	output << generateFileHeader(editor);
+
+	output << "#pragma once" << std::endl;
+	output << std::endl;
+
+	output << "#include \"Serialization/Bs" << tableName << "Lookup.h\"" << std::endl;
+	output << "#include \"Reflection/BsRTTIType.h\"" << std::endl;
+	output << includes.str();
+
+	output << std::endl;
+
+	output << "namespace bs" << std::endl;
+	output << "{" << std::endl;
+	output << "\tLOOKUP_BEGIN(" << prefix << tableName << ")" << std::endl;
+
+	output << body.str();
+
+	output << "\tLOOKUP_END" << std::endl;
+	output << "}" << std::endl;
+
+	output << "#undef LOOKUP_BEGIN" << std::endl;
+	output << "#undef ADD_ENTRY" << std::endl;
+	output << "#undef LOOKUP_END" << std::endl;
+
+	output.close();
+}
+
 void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolder, StringRef csEngineOutputFolder, 
 	StringRef csEditorOutputFolder, bool genEditor)
 {
@@ -5466,63 +5588,10 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 		output.close();
 	}
 
-	// Generate C++ component lookup file
-	{
-		std::stringstream body;
-		std::stringstream includes;
-		for (auto& fileInfo : outputFileInfos)
-		{
-			auto& classInfos = fileInfo.second.classInfos;
-			if (classInfos.empty())
-				continue;
+	// Generate builtin component lookup file
+	generateLookupFile("BuiltinComponent", ParsedType::Component, false, cppEngineOutputFolder, cppEditorOutputFolder);
 
-			StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
-			bool hasAComponent = false;
-			for (auto& classInfo : classInfos)
-			{
-				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
-				if (typeInfo.type != ParsedType::Component)
-					continue;
-
-				includes << "#include \"" << getRelativeTo(typeInfo.declFile, cppOutputFolder) << "\"" << std::endl;
-
-				std::string interopClassName = getScriptInteropType(classInfo.name);
-				body << "\t\tADD_ENTRY(" << classInfo.name << ", " << interopClassName << ")" << std::endl;
-
-				hasAComponent = true;
-			}
-
-			if(hasAComponent)
-				includes << "#include \"BsScript" + fileInfo.first + ".generated.h\"" << std::endl;
-		}
-
-		std::ofstream output = createFile("BsBuiltinComponentLookup.generated.h", FT_ENGINE_H, cppEngineOutputFolder);
-
-		// License/copyright header
-		output << generateFileHeader(false);
-
-		output << "#pragma once" << std::endl;
-		output << std::endl;
-
-		output << "#include \"Serialization/BsBuiltinComponentLookup.h\"" << std::endl;
-		output << "#include \"Reflection/BsRTTIType.h\"" << std::endl;
-		output << includes.str();
-
-		output << std::endl;
-
-		output << "namespace bs" << std::endl;
-		output << "{" << std::endl;
-		output << "\tLOOKUP_BEGIN" << std::endl;
-
-		output << body.str();
-
-		output << "\tLOOKUP_END" << std::endl;
-		output << "}" << std::endl;
-
-		output << "#undef LOOKUP_BEGIN" << std::endl;
-		output << "#undef ADD_ENTRY" << std::endl;
-		output << "#undef LOOKUP_END" << std::endl;
-
-		output.close();
-	}
+	// Generate C++ reflectable type lookup files
+	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, false, cppEngineOutputFolder, cppEditorOutputFolder);
+	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, true, cppEngineOutputFolder, cppEditorOutputFolder);
 }

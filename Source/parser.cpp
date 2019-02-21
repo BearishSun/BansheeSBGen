@@ -27,6 +27,8 @@ ParsedType getObjectType(const CXXRecordDecl* decl)
 				return ParsedType::SceneObject;
 			else if (className == BUILTIN_GUIELEMENT_TYPE)
 				return ParsedType::GUIElement;
+			else if (className == BUILTIN_REFLECTABLE_TYPE)
+				return ParsedType::ReflectableClass;
 
 			todo.push(baseDecl);
 			iter++;
@@ -949,6 +951,8 @@ bool isBase(const CXXRecordDecl* decl)
 	else if (className == BUILTIN_MODULE_TYPE)
 		return true;
 	else if (className == BUILTIN_GUIELEMENT_TYPE)
+		return true;
+	else if (className == BUILTIN_REFLECTABLE_TYPE)
 		return true;
 
 	return false;

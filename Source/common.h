@@ -31,6 +31,7 @@ extern const char* BUILTIN_SCENEOBJECT_TYPE;
 extern const char* BUILTIN_RESOURCE_TYPE;
 extern const char* BUILTIN_MODULE_TYPE;
 extern const char* BUILTIN_GUIELEMENT_TYPE;
+extern const char* BUILTIN_REFLECTABLE_TYPE;
 
 enum class ParsedType
 {
@@ -39,6 +40,7 @@ enum class ParsedType
 	Resource,
 	GUIElement,
 	Class,
+	ReflectableClass,
 	Struct,
 	Enum,
 	Builtin,
@@ -853,6 +855,11 @@ inline bool isHandleType(ParsedType type)
 	return type == ParsedType::Resource || type == ParsedType::SceneObject || type == ParsedType::Component;
 }
 
+inline bool isClassType(ParsedType type)
+{
+	return type == ParsedType::Class || type == ParsedType::ReflectableClass;
+}
+
 inline bool isPlainStruct(ParsedType type, int flags)
 {
 	return type == ParsedType::Struct && !isArrayOrVector(flags);
@@ -889,7 +896,7 @@ inline bool willBeDereferenced(int flags)
 
 inline bool needsIntermediateArray(ParsedType type, int flags = 0)
 {
-	if(type == ParsedType::Class)
+	if(type == ParsedType::Class || type == ParsedType::ReflectableClass)
 		return !isSrcSPtr(flags);
 
 	return false;
@@ -907,6 +914,7 @@ inline bool isReferenceType(ParsedType type, int flags)
 	case ParsedType::Resource:
 	case ParsedType::GUIElement:
 	case ParsedType::Class:
+	case ParsedType::ReflectableClass:
 	case ParsedType::String:
 	case ParsedType::WString:
 	case ParsedType::Path:
