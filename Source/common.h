@@ -998,7 +998,7 @@ inline std::string getDefaultValue(const std::string& typeName, int flags, const
 	else if (typeInfo.type == ParsedType::Enum)
 		return "(" + typeInfo.scriptName + ")0";
 	else if (typeInfo.type == ParsedType::Struct)
-		return "new " + typeInfo.scriptName + "()";
+		return typeInfo.scriptName + ".Default()";
 	else if (typeInfo.type == ParsedType::String || typeInfo.type == ParsedType::WString || typeInfo.type == ParsedType::Path)
 		return "\"\"";
 	else // Some class type

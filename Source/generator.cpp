@@ -1525,7 +1525,10 @@ void postProcessFileInfos()
 		for(auto& structInfo : fileInfo.second.structInfos)
 		{
 			for(auto& fieldInfo : structInfo.fields)
+			{
+				markComplexType(fieldInfo.type, fieldInfo.flags);
 				markParam(fieldInfo);
+			}
 		}
 	}
 
@@ -4385,7 +4388,11 @@ std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
 	{
 		// Constructor or cast, assuming constructor as cast implies a constructor accepting the type exists (and we don't export cast operators anyway)
 		UserTypeInfo defaultValTypeInfo = getTypeInfo(paramInfo.defaultValueType, 0);
-		return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + ")";
+
+		if(defaultValTypeInfo.type == ParsedType::Struct && paramInfo.defaultValue.empty())
+			return defaultValTypeInfo.scriptName + ".Default()";
+		else
+			return "new " + defaultValTypeInfo.scriptName + "(" + paramInfo.defaultValue + ")";
 	}
 }
 

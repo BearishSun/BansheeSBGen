@@ -2057,7 +2057,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		structInfo.cleanName = declName;
 		structInfo.baseClass = parseExportableBaseStruct(decl);
 		structInfo.visibility = parsedClassInfo.visibility;
-		structInfo.requiresInterop = false;
+		structInfo.requiresInterop = decl->isPolymorphic();
 		structInfo.module = parsedClassInfo.moduleName;
 		structInfo.isTemplateInst = specDecl != nullptr;
 		structInfo.templParams = templParams;
