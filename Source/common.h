@@ -742,6 +742,11 @@ inline bool hasAPIBSF(ApiFlags api)
 	return ((int)api & (int)ApiFlags::BSF) != 0;
 }
 
+inline bool isValidAPI(ApiFlags api, bool b3d)
+{
+   return (b3d && (hasAPIBED(api) || hasAPIB3D(api))) || (!b3d && (hasAPIBSF(api)));
+}
+
 inline bool isInt64(const UserTypeInfo& typeInfo)
 {
 	return typeInfo.type == ParsedType::Builtin && (typeInfo.scriptName == "long" || typeInfo.scriptName == "ulong");

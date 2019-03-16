@@ -933,6 +933,20 @@ std::string generateXMLCommentText(const CommentText& commentTextEntry)
 
 	return output.str();
 }
+ std::string generateXMLCommentText(const SmallVector<CommentText, 2>& input)
+ {
+	 std::stringstream output;
+	 for (auto I = input.begin(); I != input.end(); ++I)
+	 {
+		 if (I != input.begin())
+			 output << "\n";
+
+		 std::string text = generateXMLCommentText(*I);
+		 output << text;
+	 }
+
+	return output.str();
+ }
 
 std::string generateXMLComments(const CommentEntry& commentEntry, const std::string& indent)
 {
@@ -5257,6 +5271,216 @@ std::string generateCSEnum(EnumInfo& input)
 	return output.str();
 }
 
+std::string generateXMLParamInfo(const VarInfo& varInfo, const CommentEntry& methodDoc, const std::string& indent)
+{
+	std::stringstream output;
+	output << indent << "<param name=\"" << varInfo.name << "\" type=\"" << getTypeInfo(varInfo.type, varInfo.flags).scriptName << "\">\n";
+
+	auto iterFind = std::find_if(methodDoc.params.begin(), methodDoc.params.end(), 
+		[&varName = varInfo.name](const CommentParamEntry& entry) { return varName == entry.name; });
+	if (iterFind != methodDoc.params.end() && !iterFind->comments.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(iterFind->comments) << "</doc>\n";
+
+	output << indent << "</param>\n";
+	return output.str();
+}
+
+std::string generateXMLFieldInfo(const FieldInfo& fieldInfo, const std::string& indent)
+{
+	std::stringstream output;
+	output << indent << "<field name=\"" << fieldInfo.name << "\" type=\"" << getTypeInfo(fieldInfo.type, fieldInfo.flags).scriptName << "\">\n";
+
+	// TODO - Generate inspector visibility
+	if(!fieldInfo.documentation.brief.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(fieldInfo.documentation.brief) << "</doc>\n";
+
+	output << indent << "</field>\n";
+	return output.str();
+}
+
+std::string generateXMLMethodInfo(const MethodInfo& methodInfo, const std::string& indent, bool ctor)
+{
+	std::stringstream output;
+
+   std::string isStaticStr = "false";
+   bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
+   if(!ctor && isStatic)
+	   isStaticStr = "true";
+
+	if(!ctor)
+		output << indent << "<method native=\"" << methodInfo.sourceName << "\" script=\"" << methodInfo.scriptName << "\" static=\"" << isStaticStr << "\">\n";
+	else
+		output << indent << "<ctor>\n";
+
+	if(!methodInfo.documentation.brief.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(methodInfo.documentation.brief) << "</doc>\n";
+
+	for(auto& param : methodInfo.paramInfos)
+		output << generateXMLParamInfo(param, methodInfo.documentation, indent + "\t");
+
+	if(!ctor && !methodInfo.returnInfo.type.empty())
+	{
+		output << indent << "\t<returns type=\"" << getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags).scriptName << "\">\n";
+
+		if (!methodInfo.documentation.returns.empty())
+			output << indent << "\t\t<doc>" << generateXMLCommentText(methodInfo.documentation.returns) << "</doc>\n";
+
+		output << indent << "\t</returns>\n";
+	}
+
+	if(!ctor)
+		output << indent << "</method>\n";
+	else
+		output << indent << "</ctor>\n";
+
+	return output.str();
+}
+
+std::string generateXMLMethodInfo(const SimpleConstructorInfo& methodInfo, const std::string& indent)
+{
+	std::stringstream output;
+	output << indent << "<ctor>\n";
+	if(!methodInfo.documentation.brief.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(methodInfo.documentation.brief) << "</doc>\n";
+
+	for(auto& param : methodInfo.params)
+		output << generateXMLParamInfo(param, methodInfo.documentation, indent + "\t");
+
+	output << indent << "</ctor>\n";
+	return output.str();
+}
+
+std::string generateXMLPropertyInfo(const PropertyInfo& propertyInfo, const std::string& indent)
+{
+	std::string staticStr = propertyInfo.isStatic ? "true" : "false";
+
+	std::stringstream output;
+	output << indent << "<property name=\"" << propertyInfo.name << "\" type=\"" << getTypeInfo(propertyInfo.type, propertyInfo.typeFlags).scriptName << 
+		"\" getter=\"" << propertyInfo.getter << "\" setter=\"" << propertyInfo.setter << "\" static=\"" << staticStr << "\">\n";
+
+	// TODO - Generate inspector visibility
+	if(!propertyInfo.documentation.brief.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(propertyInfo.documentation.brief) << "</doc>\n";
+
+	output << indent << "</property>\n";
+	return output.str();
+}
+
+std::string generateXMLEventInfo(const MethodInfo& eventInfo, const std::string& indent)
+{
+   bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+   std::string staticStr = isStatic ? "true" : "false";
+
+	std::stringstream output;
+	output << indent << "<event native=\"" << eventInfo.sourceName << "\" script=\"" << eventInfo.scriptName << 
+		"\" static=\"" << staticStr << "\">\n";
+
+	// TODO - Generate inspector visibility
+	if (!eventInfo.documentation.brief.empty())
+		output << indent << "\t<doc>" << generateXMLCommentText(eventInfo.documentation.brief) << "</doc>\n";
+
+	for(auto& param : eventInfo.paramInfos)
+		output << generateXMLParamInfo(param, eventInfo.documentation, indent + "\t");
+
+	output << indent << "\t<returns type=\"" << getTypeInfo(eventInfo.returnInfo.type, eventInfo.returnInfo.flags).scriptName << "\">\n";
+
+	if (!eventInfo.documentation.returns.empty())
+		output << indent << "\t\t<doc>" << generateXMLCommentText(eventInfo.documentation.returns) << "</doc>\n";
+
+	output << indent << "\t</returns>\n";
+
+	output << indent << "</event>\n";
+	return output.str();
+}
+
+std::string generateXMLEnum(EnumInfo& input)
+{
+	std::stringstream output;
+
+	output << "<enum native=\"" << input.name << "\" script=\"" << input.scriptName << "\">\n";
+	if (!input.documentation.brief.empty())
+		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+	
+	for (auto I = input.entries.begin(); I != input.entries.end(); ++I)
+	{
+		const EnumEntryInfo& entryInfo = I->second;
+
+	   output << "\t<enumentry native=\"" << entryInfo.name << "\" script=\"" << entryInfo.scriptName << "\">\n";
+	   if (!entryInfo.documentation.brief.empty())
+		   output << "\t\t<doc>" << generateXMLCommentText(entryInfo.documentation.brief) << "</doc>\n";
+	   output << "\t</enumentry>\n";
+	}
+	
+	output << "</enum>\n";
+	return output.str();
+}
+
+std::string generateXMLStruct(StructInfo& input)
+{
+	std::stringstream output;
+
+	UserTypeInfo& typeInfo = cppToCsTypeMap[input.name];
+
+	output << "<struct native=\"" << input.name << "\" script=\"" << typeInfo.scriptName << "\">\n";
+	if (!input.documentation.brief.empty())
+		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+
+	for (auto& entry : input.ctors)
+		output << generateXMLMethodInfo(entry, "\t");
+
+	for(auto& entry : input.fields)
+	  output << generateXMLFieldInfo(entry, "\t");
+	
+	output << "</struct>\n";
+	return output.str();
+}
+
+std::string generateXMLClass(ClassInfo& input, bool b3d)
+{
+	std::stringstream output;
+
+	UserTypeInfo& typeInfo = cppToCsTypeMap[input.name];
+
+	output << "<class native=\"" << input.name << "\" script=\"" << typeInfo.scriptName << "\">\n";
+	if (!input.documentation.brief.empty())
+		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+
+	for (auto& entry : input.ctorInfos)
+	{
+		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+		if(isValidAPI(entry.api, b3d) && !interopOnly)
+			output << generateXMLMethodInfo(entry, "\t", true);
+	}
+
+	for(auto& entry : input.methodInfos)
+	{
+		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+		bool isConstructor = (entry.flags & (int)MethodFlags::Constructor) != 0;
+		bool isProperty = entry.flags & ((int)MethodFlags::PropertyGetter | (int)MethodFlags::PropertySetter);
+
+		if(isValidAPI(entry.api, b3d) && !interopOnly && !isProperty)
+			output << generateXMLMethodInfo(entry, "\t", isConstructor);
+	}
+
+   for(auto& entry : input.propertyInfos)
+   {
+		if(isValidAPI(entry.api, b3d))
+			output << generateXMLPropertyInfo(entry, "\t");
+   }
+
+   for(auto& entry : input.eventInfos)
+   {
+	   bool isCallback = (entry.flags & (int)MethodFlags::Callback) != 0;
+	   bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
+
+	  if(!isCallback && !isInternal)
+		  output << generateXMLEventInfo(entry, "\t");
+   }
+	
+	output << "</class>\n";
+	return output.str();
+}
+
 void cleanAndPrepareFolder(const StringRef& folder)
 {
 	if (sys::fs::exists(folder))
@@ -5281,6 +5505,40 @@ std::ofstream createFile(const std::string& filename, FileType type, StringRef o
 	output.open(filepath.str(), std::ios::out);
 
 	return output;
+}
+
+void generateMappingXMLFile(bool b3d, const std::string& outputFolder)
+{
+	std::stringstream body;
+	for (auto& fileInfo : outputFileInfos)
+	{
+		auto& enumInfos = fileInfo.second.enumInfos;
+		for (auto& entry : enumInfos)
+		{
+			if (isValidAPI(entry.api, b3d))
+				body << generateXMLEnum(entry);
+		}
+
+		auto& structInfos = fileInfo.second.structInfos;
+		for (auto& entry : structInfos)
+		{
+			if (isValidAPI(entry.api, b3d))
+				body << generateXMLStruct(entry);
+		}
+
+
+		auto& classInfos = fileInfo.second.classInfos;
+		for (auto& entry : classInfos)
+		{
+			if (isValidAPI(entry.api, b3d))
+				body << generateXMLClass(entry, b3d);
+		}
+	}
+
+	std::ofstream output = createFile("mapping.xml", FT_ENGINE_H, outputFolder);
+	output << "<?xml version='1.0' encoding='UTF-8' standalone='no'?>\n";
+	output << body.str();
+	output.close();
 }
 
 void generateLookupFile(const std::string& tableName, ParsedType type, bool editor, 
@@ -5601,4 +5859,7 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	// Generate C++ reflectable type lookup files
 	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, false, cppEngineOutputFolder, cppEditorOutputFolder);
 	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, true, cppEngineOutputFolder, cppEditorOutputFolder);
+
+	// Generate XML lookup
+	generateMappingXMLFile(genEditor, cppEngineOutputFolder);
 }
