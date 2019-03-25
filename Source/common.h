@@ -132,6 +132,7 @@ enum class StyleFlags
 	ApplyOnDirty = 1 << 10,
 	AsQuaternion = 1 << 11,
 	Inline = 1 << 12,
+	LoadOnAssign = 1 << 13,
 };
 
 enum class ApiFlags : uint8_t

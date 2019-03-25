@@ -697,6 +697,10 @@ void parseAttributeToken(const std::string& name, const std::string& value, Stri
 	{
 		output.style.flags |= (int)StyleFlags::AsQuaternion;
 	}
+	else if (name == "loadOnAssign")
+	{
+		output.style.flags |= (int)StyleFlags::LoadOnAssign;
+	}
 	else if (name == "step")
 	{
 		if(value.empty())

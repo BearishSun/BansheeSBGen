@@ -4391,6 +4391,9 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 	if(((style.flags & (int)StyleFlags::AsQuaternion) != 0))
 		output << "\t\t[AsQuaternion]\n";
 
+	if(((style.flags & (int)StyleFlags::LoadOnAssign) != 0))
+		output << "\t\t[LoadOnAssign]\n";
+
 	return output.str();
 }
 
@@ -5861,5 +5864,5 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, true, cppEngineOutputFolder, cppEditorOutputFolder);
 
 	// Generate XML lookup
-	generateMappingXMLFile(genEditor, cppEngineOutputFolder);
+	//generateMappingXMLFile(genEditor, cppEngineOutputFolder);
 }
