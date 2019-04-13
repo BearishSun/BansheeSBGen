@@ -302,6 +302,11 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 
 				typeFlags |= (int)TypeFlags::ComponentOrActor;
 			}
+			else if(sourceTypeName == "TAsyncOp")
+			{
+				realType = specType->getArg(0).getAsType();
+				typeFlags |= (int)TypeFlags::AsyncOp;
+			}
 			else
 			{
 				const TemplateDecl* templateDecl = specType->getTemplateName().getAsTemplateDecl();

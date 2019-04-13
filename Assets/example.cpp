@@ -12,6 +12,12 @@ class vector
 template<class T, class S = unsigned int>
 class Flags
 {
+	public:
+	Flags(T v)
+	{
+		this->v = static_cast<S>(v);
+	}
+	
 	S v;
 };
 
@@ -663,6 +669,17 @@ namespace bs
 	}; 
 }
 
+enum class BS_SCRIPT_EXPORT(m:Resources) ResourceLoadFlag
+{
+	None = 0,
+	LoadDependencies = 1 << 0, 
+	KeepInternalRef = 1 << 1,
+	KeepSourceData = 1 << 2,
+	Default = LoadDependencies | KeepInternalRef
+};
+
+typedef Flags<ResourceLoadFlag> ResourceLoadFlags;
+
 class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 {
 	public:
@@ -686,6 +703,8 @@ class BS_SCRIPT_EXPORT(f:TestOutput) MyClass
 	 * @returns						Mesh.
 	 */
 	BS_SCRIPT_EXPORT() int create(const int& initialData, const int& desc, unsigned long long superlong = 0xFFFFFFFFFFFFFFFF);
+	
+	BS_SCRIPT_EXPORT() void defParamTest(ResourceLoadFlags t = ResourceLoadFlag::Default);
 	
 	BS_SCRIPT_EXPORT() void strParamTest(String a = bs::StringUtil::BLANK);
 	

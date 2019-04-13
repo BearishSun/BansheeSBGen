@@ -101,6 +101,7 @@ int main(int argc, const char** argv)
 	cppToCsTypeMap["UUID"] = UserTypeInfo("UUID", ParsedType::Struct, "Utility/BsUUID.h", "");
 	cppToCsTypeMap["SceneObject"] = UserTypeInfo("SceneObject", ParsedType::SceneObject, "Scene/BsSceneObject.h", "Wrappers/BsScriptSceneObject.h");
 	cppToCsTypeMap["Resource"] = UserTypeInfo("Resource", ParsedType::Resource, "Resources/BsResource.h", "Wrappers/BsScriptResource.h");
+	cppToCsTypeMap["Any"] = UserTypeInfo("Any", ParsedType::Class, "Utility/BsAny.h", "");
 
 	CommonOptionsParser op(argc, argv, OptCategory);
 	ClangTool Tool(op.getCompilations(), op.getSourcePathList());

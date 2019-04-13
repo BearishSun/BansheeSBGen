@@ -71,7 +71,8 @@ enum class TypeFlags
 	VarParams = 1 << 16,
 	AsResourceRef = 1 << 17,
 	ComponentOrActor = 1 << 18,
-	Path = 1 << 19
+	Path = 1 << 19,
+	AsyncOp = 1 << 20
 };
 
 enum class MethodFlags
@@ -404,6 +405,7 @@ struct IncludesInfo
 	bool requiresGameObjectManager = false;
 	bool requiresRRef = false;
 	bool requiresRTTI = false;
+	bool requiresAsyncOp = false;
 	std::unordered_map<std::string, IncludeInfo> includes;
 	std::unordered_map<std::string, ForwardDeclInfo> fwdDecls;
 };
@@ -685,32 +687,55 @@ inline UserTypeInfo getTypeInfo(const std::string& sourceType, int flags)
 
 	if ((flags & (int)TypeFlags::AsResourceRef) != 0)
 	{
-		if(sourceType == "Resource")
+		UserTypeInfo outType;
+
+		if (sourceType == "Resource")
 		{
-			UserTypeInfo outType;
+			outType = cppToCsTypeMap.find("Resource")->second;
 			outType.scriptName = "RRefBase";
-			outType.type = ParsedType::Resource;
 		}
 		else
 		{
 			auto iterFind = cppToCsTypeMap.find(sourceType);
 			if (iterFind != cppToCsTypeMap.end())
 			{
-				UserTypeInfo outType = iterFind->second;
+				outType = iterFind->second;
 				outType.scriptName = "RRef<" + iterFind->second.scriptName + ">";
 				assert(outType.type == ParsedType::ParsedType::Resource);
-
-				return outType;
 			}
 			else
 			{
-				UserTypeInfo outType;
 				outType.scriptName = "RRefBase";
 				outType.type = ParsedType::Resource;
 
 				errs() << "Unable to map type \"" << sourceType << "\". Assuming generic resource.\n";
-				return outType;
 			}
+		}
+
+		if ((flags & (int)TypeFlags::AsyncOp) != 0)
+			outType.scriptName = "AsyncOp<" + outType.scriptName + ">";
+
+		return outType;
+	}
+
+	if ((flags & (int)TypeFlags::AsyncOp) != 0)
+	{
+		auto iterFind = cppToCsTypeMap.find(sourceType);
+		if (iterFind != cppToCsTypeMap.end())
+		{
+			UserTypeInfo outType = iterFind->second;
+			outType.scriptName = "AsyncOp<" + iterFind->second.scriptName + ">";
+
+			return outType;
+		}
+		else
+		{
+			UserTypeInfo outType;
+			outType.scriptName = "AsyncOp<" + sourceType + ">";
+			outType.type = ParsedType::Class;
+
+			errs() << "Unable to map type \"" << sourceType << "\". Assuming same name as source. \n";
+			return outType;
 		}
 	}
 
@@ -743,9 +768,35 @@ inline bool hasAPIBSF(ApiFlags api)
 	return ((int)api & (int)ApiFlags::BSF) != 0;
 }
 
-inline bool isValidAPI(ApiFlags api, bool b3d)
+inline bool isValidAPI(ApiFlags api, bool editor)
 {
-   return (b3d && (hasAPIBED(api) || hasAPIB3D(api))) || (!b3d && (hasAPIBSF(api)));
+   return (editor && hasAPIBED(api)) || (!editor && (hasAPIB3D(api) || hasAPIBSF(api)));
+}
+
+inline const std::string& escapeXML(const std::string& data) 
+{
+	std::string::size_type first = data.find_first_of("\"&<>", 0);
+	if (first == std::string::npos)
+		return data;
+
+	static std::string buffer;
+	buffer.reserve((size_t)(data.size() * 1.1f));
+	buffer.clear();
+
+	for (size_t pos = 0; pos != data.size(); ++pos)
+	{
+		switch (data[pos])
+		{
+		case '&':  buffer.append("&amp;");       break;
+		case '\"': buffer.append("&quot;");      break;
+		case '\'': buffer.append("&apos;");      break;
+		case '<':  buffer.append("&lt;");        break;
+		case '>':  buffer.append("&gt;");        break;
+		default:   buffer.append(&data[pos], 1); break;
+		}
+	}
+
+	return buffer;
 }
 
 inline bool isInt64(const UserTypeInfo& typeInfo)
@@ -849,6 +900,11 @@ inline bool getPassAsResourceRef(int flags)
 inline bool getIsComponentOrActor(int flags)
 {
 	return (flags & (int)TypeFlags::ComponentOrActor) != 0;
+}
+
+inline bool getIsAsyncOp(int flags)
+{
+	return (flags & (int)TypeFlags::AsyncOp) != 0;
 }
 
 inline bool isStruct(int flags)

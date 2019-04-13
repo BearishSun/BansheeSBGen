@@ -559,6 +559,9 @@ void gatherIncludes(const std::string& typeName, int flags, bool isEditor, Inclu
 	}
 	else if (typeInfo.type == ParsedType::Component || typeInfo.type == ParsedType::SceneObject)
 		output.requiresGameObjectManager = true;
+
+   if(getIsAsyncOp(flags))
+	   output.requiresAsyncOp = true;
 }
 
 void gatherIncludes(const MethodInfo& methodInfo, bool isEditor, IncludesInfo& output)
@@ -633,6 +636,9 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 				output.requiresRTTI = true;
 			}
 		}
+
+		if (getIsAsyncOp(fieldInfo.flags))
+			output.requiresAsyncOp = true;
 	}
 }
 
@@ -913,7 +919,7 @@ std::string generateXMLCommentText(const CommentText& commentTextEntry)
 		{
 			if(refEntry.index == idx)
 			{
-				output << "<paramref name=\"" << refEntry.name << "\"/>";
+				output << "<paramref name=\"" << escapeXML(refEntry.name) << "\"/>";
 				idx += refEntry.name.size();
 			}
 		}
@@ -922,12 +928,21 @@ std::string generateXMLCommentText(const CommentText& commentTextEntry)
 		{
 			if (refEntry.index == idx)
 			{
-				output << "<see cref=\"" << refEntry.name << "\"/>";
+				output << "<see cref=\"" << escapeXML(refEntry.name) << "\"/>";
 				idx += refEntry.name.size();
 			}
 		}
 
-		output << entry;
+		switch (entry)
+		{
+		case '&':  output << "&amp;";         break;
+		case '\"': output << "&quot;";        break;
+		case '\'': output << "&apos;";        break;
+		case '<':  output << "&lt;";          break;
+		case '>':  output << "&gt;";          break;
+		default:   output << entry;           break;
+		}
+
 		idx++;
 	}
 
@@ -1070,7 +1085,7 @@ void handleDefaultParams(MethodInfo& methodInfo, std::vector<MethodInfo>& newMet
 		if (!param.defaultValue.empty())
 			firstDefaultParam = i;
 
-		if (!param.defaultValueType.empty())
+		if (!param.defaultValueType.empty() && !isFlagsEnum(param.flags))
 			lastInvalidParam = i;
 	}
 
@@ -1624,6 +1639,9 @@ void postProcessFileInfos()
 			if (includesInfo.requiresRRef)
 				fileInfo.second.referencedSourceIncludes.push_back("Wrappers/BsScriptRRefBase.h");
 
+			if (includesInfo.requiresAsyncOp)
+				fileInfo.second.referencedSourceIncludes.push_back("Wrappers/BsScriptAsyncOp.h");
+
 			if(includesInfo.requiresGameObjectManager)
 				fileInfo.second.referencedSourceIncludes.push_back("BsScriptGameObjectManager.h");
 
@@ -1984,6 +2002,155 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 	bool isLast, bool returnValue, std::stringstream& preCallActions, std::stringstream& postCallActions)
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+
+	if(getIsAsyncOp(flags))
+	{
+		if (!isOutput(flags) && !returnValue)
+		{
+			outs() << "Error: AsyncOp type not supported as input parameter. \n";
+			return "";
+		}
+
+		if (paramTypeInfo.type != ParsedType::ReflectableClass && paramTypeInfo.type != ParsedType::Resource)
+		{
+			outs() << "Error: Type not supported as an AsyncOp return value. \n";
+			return "";
+		}
+
+		std::string argType;
+		std::string argName;
+		if (!isArrayOrVector(flags))
+		{
+			argName = "tmp" + name;
+			argType = getCppVarType(typeName, paramTypeInfo.type);
+
+			preCallActions << "\t\tTAsyncOp<" << argType << "> " << argName << ";\n";
+		}
+		else
+		{
+			if (isVector(flags))
+				argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
+			else
+				argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
+
+			argName = "vec" + name;
+
+			preCallActions << "\t\t" << argType << " " << argName;
+			if (isArray(flags))
+				preCallActions << "[" << arraySize << "]";
+			preCallActions << ";\n";
+		}
+
+		if(typeName != "Any")
+		{
+			std::string scriptType = getScriptInteropType(typeName,
+				paramTypeInfo.type == ParsedType::Resource && getPassAsResourceRef(flags));
+
+			postCallActions << "\t\tauto convertCallback = [](const Any& returnVal)\n";
+			postCallActions << "\t\t{\n";
+			postCallActions << "\t\t\t" << argType << " nativeObj = any_cast<" << argType << ">(returnVal);\n";
+			postCallActions << "\t\t\tMonoObject* monoObj;\n";
+
+			if (!isArrayOrVector(flags))
+			{
+				if (paramTypeInfo.type == ParsedType::ReflectableClass)
+					postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, "monoObj", scriptType, "nativeObj", false, "\t\t\t");
+				else // Resource
+				{
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, "scriptObj", "nativeObj", "\t\t\t");
+					postCallActions << "\t\t\tif(scriptObj != nullptr)" << std::endl;
+					postCallActions << "\t\t\\ttmonoObj = scriptObj->getManagedInstance();" << std::endl;
+					postCallActions << "\t\t\telse" << std::endl;
+					postCallActions << "\t\t\t\tmonoObj = nullptr;" << std::endl;
+				}
+
+			}
+			else
+			{
+				std::string arrayName = "scriptArray";
+
+				postCallActions << "\t\t\tint arraySize = ";
+				if (isVector(flags))
+					postCallActions << "(int)" << argName << ".size()";
+				else
+					postCallActions << arraySize;
+				postCallActions << ";\n";
+
+				postCallActions << "\t\t\tScriptArray " << arrayName;
+				postCallActions << " = " << "ScriptArray::create<" << scriptType << ">(arraySize);" << std::endl;
+				postCallActions << "\t\t\tfor(int i = 0; i < arraySize; i++)" << std::endl;
+				postCallActions << "\t\t\t{" << std::endl;
+
+				switch (paramTypeInfo.type)
+				{
+				case ParsedType::ReflectableClass:
+				{
+					std::string elemName = "arrayElem" + name;
+
+					std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+					std::string elemPtrName = "arrayElemPtr" + name;
+
+					postCallActions << "\t\t\t\t" << elemPtrType << " " << elemPtrName;
+					if (willBeDereferenced(flags))
+					{
+						postCallActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+
+						if (isSrcPointer(flags))
+						{
+							postCallActions << "\t\t\t\tif(nativeObj[i])\n";
+							postCallActions << "\t\t\t\t\t*" << elemPtrName << " = *";
+						}
+						else
+						{
+							postCallActions << "\t\t\t\t*" << elemPtrName << " = ";
+						}
+
+						postCallActions << "nativeObj[i];\n";
+					}
+					else
+						postCallActions << " = nativeObj[i];\n";
+
+					postCallActions << "\t\t\t\tMonoObject* " << elemName << ";\n";
+					postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName,
+						scriptType, elemPtrName, false, "\t\t\t\t");
+
+					postCallActions << "\t\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
+					break;
+				}
+				case ParsedType::Resource:
+				{
+					std::string scriptName = "scriptObj";
+
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "nativeObj[i]", "\t\t\t\t");
+					postCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
+					postCallActions << "\t\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
+					postCallActions << "\t\t\t\telse" << std::endl;
+					postCallActions << "\t\t\t\t\t" << arrayName << ".set(i, nullptr);" << std::endl;
+				}
+				break;
+				default:
+					outs() << "Error: Type not supported as an AsyncOp return value. \n";
+					break;
+				}
+
+				postCallActions << "\t\t\t}" << std::endl;
+				postCallActions << "\t\t\tmonoObj = " << arrayName << ".getInternal();" << std::endl;
+			}
+
+			postCallActions << "\t\t\treturn monoObj;\n";
+			postCallActions << "\t\t};\n";
+			postCallActions << "\n;";
+		}
+		else
+			postCallActions << "\t\tauto convertCallback = nullptr;\n";
+
+		if (returnValue)
+			postCallActions << "\t\t" << name << " = " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback);\n";
+		else
+			postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback));\n";
+
+		return argName;
+	}
 
 	if (!isArrayOrVector(flags))
 	{
@@ -2456,6 +2623,12 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
 
+	if (getIsAsyncOp(flags))
+	{
+		outs() << "Error: AsyncOp type not supported as a struct field. \n";
+		return "";
+	}
+
 	if (!isArrayOrVector(flags))
 	{
 		std::string arg;
@@ -2869,6 +3042,12 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 std::string generateEventCallbackBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, unsigned arraySize, std::stringstream& preCallActions)
 {
 	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+
+	if (getIsAsyncOp(flags))
+	{
+		outs() << "Error: AsyncOp type not supported as an event callback parameter. \n";
+		return "";
+	}
 
 	if (!isArrayOrVector(flags))
 	{
@@ -4399,7 +4578,7 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 
 std::string generateCSDefaultValueAssignment(const VarInfo& paramInfo)
 {
-	if (paramInfo.defaultValueType.empty())
+	if (paramInfo.defaultValueType.empty() || isFlagsEnum(paramInfo.flags))
 		return paramInfo.defaultValue;
 	else
 	{
@@ -4420,7 +4599,7 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 	{
 		const VarInfo& paramInfo = *I;
 
-		if(!forInterop && !paramInfo.defaultValueType.empty())
+		if(!forInterop && !paramInfo.defaultValueType.empty() && !isFlagsEnum(paramInfo.flags))
 		{
 			// We don't generate parameters that have complex default values (as they're not supported in C#).
 			// Instead the post-processor has generated different versions of this method, so we can just skip
@@ -4476,7 +4655,7 @@ std::string generateCSMethodDefaultParamAssignments(const MethodInfo& methodInfo
 	{
 		const VarInfo& paramInfo = *I;
 		
-		if (paramInfo.defaultValueType.empty())
+		if (paramInfo.defaultValueType.empty() || isFlagsEnum(paramInfo.flags))
 			continue;
 
 		if (paramInfo.defaultValueType == "null")
@@ -5063,7 +5242,7 @@ std::string generateCSStruct(StructInfo& input)
 			}
 
 			
-			if(!paramInfo.defaultValueType.empty())
+			if(!paramInfo.defaultValueType.empty() && !isFlagsEnum(paramInfo.flags))
 			{
 				// We don't generate parameters that have complex default values (as they're not supported in C#).
 				// Instead the post-processor has generated different versions of this method, so we can just skip
@@ -5277,7 +5456,8 @@ std::string generateCSEnum(EnumInfo& input)
 std::string generateXMLParamInfo(const VarInfo& varInfo, const CommentEntry& methodDoc, const std::string& indent)
 {
 	std::stringstream output;
-	output << indent << "<param name=\"" << varInfo.name << "\" type=\"" << getTypeInfo(varInfo.type, varInfo.flags).scriptName << "\">\n";
+	output << indent << "<param name=\"" << escapeXML(varInfo.name) << "\" type=\"" << 
+		escapeXML(getTypeInfo(varInfo.type, varInfo.flags).scriptName) << "\">\n";
 
 	auto iterFind = std::find_if(methodDoc.params.begin(), methodDoc.params.end(), 
 		[&varName = varInfo.name](const CommentParamEntry& entry) { return varName == entry.name; });
@@ -5291,7 +5471,8 @@ std::string generateXMLParamInfo(const VarInfo& varInfo, const CommentEntry& met
 std::string generateXMLFieldInfo(const FieldInfo& fieldInfo, const std::string& indent)
 {
 	std::stringstream output;
-	output << indent << "<field name=\"" << fieldInfo.name << "\" type=\"" << getTypeInfo(fieldInfo.type, fieldInfo.flags).scriptName << "\">\n";
+	output << indent << "<field name=\"" << escapeXML(fieldInfo.name) << "\" type=\"" << 
+		escapeXML(getTypeInfo(fieldInfo.type, fieldInfo.flags).scriptName) << "\">\n";
 
 	// TODO - Generate inspector visibility
 	if(!fieldInfo.documentation.brief.empty())
@@ -5311,7 +5492,10 @@ std::string generateXMLMethodInfo(const MethodInfo& methodInfo, const std::strin
 	   isStaticStr = "true";
 
 	if(!ctor)
-		output << indent << "<method native=\"" << methodInfo.sourceName << "\" script=\"" << methodInfo.scriptName << "\" static=\"" << isStaticStr << "\">\n";
+	{
+		output << indent << "<method native=\"" << escapeXML(methodInfo.sourceName) << "\" script=\"" << 
+			escapeXML(methodInfo.scriptName) << "\" static=\"" << isStaticStr << "\">\n";
+	}
 	else
 		output << indent << "<ctor>\n";
 
@@ -5323,7 +5507,7 @@ std::string generateXMLMethodInfo(const MethodInfo& methodInfo, const std::strin
 
 	if(!ctor && !methodInfo.returnInfo.type.empty())
 	{
-		output << indent << "\t<returns type=\"" << getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags).scriptName << "\">\n";
+		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags).scriptName) << "\">\n";
 
 		if (!methodInfo.documentation.returns.empty())
 			output << indent << "\t\t<doc>" << generateXMLCommentText(methodInfo.documentation.returns) << "</doc>\n";
@@ -5358,8 +5542,10 @@ std::string generateXMLPropertyInfo(const PropertyInfo& propertyInfo, const std:
 	std::string staticStr = propertyInfo.isStatic ? "true" : "false";
 
 	std::stringstream output;
-	output << indent << "<property name=\"" << propertyInfo.name << "\" type=\"" << getTypeInfo(propertyInfo.type, propertyInfo.typeFlags).scriptName << 
-		"\" getter=\"" << propertyInfo.getter << "\" setter=\"" << propertyInfo.setter << "\" static=\"" << staticStr << "\">\n";
+	output << indent << "<property name=\"" << escapeXML(propertyInfo.name) << "\" type=\"" << 
+		escapeXML(getTypeInfo(propertyInfo.type, propertyInfo.typeFlags).scriptName) << 
+		"\" getter=\"" << escapeXML(propertyInfo.getter) << "\" setter=\"" << escapeXML(propertyInfo.setter) << 
+		"\" static=\"" << staticStr << "\">\n";
 
 	// TODO - Generate inspector visibility
 	if(!propertyInfo.documentation.brief.empty())
@@ -5375,7 +5561,7 @@ std::string generateXMLEventInfo(const MethodInfo& eventInfo, const std::string&
    std::string staticStr = isStatic ? "true" : "false";
 
 	std::stringstream output;
-	output << indent << "<event native=\"" << eventInfo.sourceName << "\" script=\"" << eventInfo.scriptName << 
+	output << indent << "<event native=\"" << escapeXML(eventInfo.sourceName) << "\" script=\"" << escapeXML(eventInfo.scriptName) << 
 		"\" static=\"" << staticStr << "\">\n";
 
 	// TODO - Generate inspector visibility
@@ -5385,74 +5571,77 @@ std::string generateXMLEventInfo(const MethodInfo& eventInfo, const std::string&
 	for(auto& param : eventInfo.paramInfos)
 		output << generateXMLParamInfo(param, eventInfo.documentation, indent + "\t");
 
-	output << indent << "\t<returns type=\"" << getTypeInfo(eventInfo.returnInfo.type, eventInfo.returnInfo.flags).scriptName << "\">\n";
+	if(!eventInfo.returnInfo.type.empty())
+	{
+		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(eventInfo.returnInfo.type, eventInfo.returnInfo.flags).scriptName) << "\">\n";
 
-	if (!eventInfo.documentation.returns.empty())
-		output << indent << "\t\t<doc>" << generateXMLCommentText(eventInfo.documentation.returns) << "</doc>\n";
+		if (!eventInfo.documentation.returns.empty())
+			output << indent << "\t\t<doc>" << generateXMLCommentText(eventInfo.documentation.returns) << "</doc>\n";
 
-	output << indent << "\t</returns>\n";
+		output << indent << "\t</returns>\n";
+	}
 
 	output << indent << "</event>\n";
 	return output.str();
 }
 
-std::string generateXMLEnum(EnumInfo& input)
+std::string generateXMLEnum(EnumInfo& input, const std::string& indent)
 {
 	std::stringstream output;
 
-	output << "<enum native=\"" << input.name << "\" script=\"" << input.scriptName << "\">\n";
+	output << indent << "<enum native=\"" << escapeXML(input.name) << "\" script=\"" << escapeXML(input.scriptName) << "\">\n";
 	if (!input.documentation.brief.empty())
-		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+		output << indent << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
 	
 	for (auto I = input.entries.begin(); I != input.entries.end(); ++I)
 	{
 		const EnumEntryInfo& entryInfo = I->second;
 
-	   output << "\t<enumentry native=\"" << entryInfo.name << "\" script=\"" << entryInfo.scriptName << "\">\n";
+	   output << indent << "\t<enumentry native=\"" << escapeXML(entryInfo.name) << "\" script=\"" << escapeXML(entryInfo.scriptName) << "\">\n";
 	   if (!entryInfo.documentation.brief.empty())
-		   output << "\t\t<doc>" << generateXMLCommentText(entryInfo.documentation.brief) << "</doc>\n";
-	   output << "\t</enumentry>\n";
+		   output << indent << "\t\t<doc>" << generateXMLCommentText(entryInfo.documentation.brief) << "</doc>\n";
+	   output << indent << "\t</enumentry>\n";
 	}
 	
-	output << "</enum>\n";
+	output << indent << "</enum>\n";
 	return output.str();
 }
 
-std::string generateXMLStruct(StructInfo& input)
+std::string generateXMLStruct(StructInfo& input, const std::string& indent)
 {
 	std::stringstream output;
 
 	UserTypeInfo& typeInfo = cppToCsTypeMap[input.name];
 
-	output << "<struct native=\"" << input.name << "\" script=\"" << typeInfo.scriptName << "\">\n";
+	output << indent << "<struct native=\"" << escapeXML(input.name) << "\" script=\"" << escapeXML(typeInfo.scriptName) << "\">\n";
 	if (!input.documentation.brief.empty())
-		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+		output << indent << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
 
 	for (auto& entry : input.ctors)
-		output << generateXMLMethodInfo(entry, "\t");
+		output << generateXMLMethodInfo(entry, indent + "\t");
 
 	for(auto& entry : input.fields)
-	  output << generateXMLFieldInfo(entry, "\t");
+	  output << generateXMLFieldInfo(entry, indent + "\t");
 	
-	output << "</struct>\n";
+	output << indent << "</struct>\n";
 	return output.str();
 }
 
-std::string generateXMLClass(ClassInfo& input, bool b3d)
+std::string generateXMLClass(ClassInfo& input, bool editor, const std::string& indent)
 {
 	std::stringstream output;
 
 	UserTypeInfo& typeInfo = cppToCsTypeMap[input.name];
 
-	output << "<class native=\"" << input.name << "\" script=\"" << typeInfo.scriptName << "\">\n";
+	output << indent << "<class native=\"" << escapeXML(input.name) << "\" script=\"" << escapeXML(typeInfo.scriptName) << "\">\n";
 	if (!input.documentation.brief.empty())
-		output << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
+		output << indent << "\t<doc>" << generateXMLCommentText(input.documentation.brief) << "</doc>\n";
 
 	for (auto& entry : input.ctorInfos)
 	{
 		bool interopOnly = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
-		if(isValidAPI(entry.api, b3d) && !interopOnly)
-			output << generateXMLMethodInfo(entry, "\t", true);
+		if(isValidAPI(entry.api, editor) && !interopOnly)
+			output << generateXMLMethodInfo(entry, indent + "\t", true);
 	}
 
 	for(auto& entry : input.methodInfos)
@@ -5461,14 +5650,14 @@ std::string generateXMLClass(ClassInfo& input, bool b3d)
 		bool isConstructor = (entry.flags & (int)MethodFlags::Constructor) != 0;
 		bool isProperty = entry.flags & ((int)MethodFlags::PropertyGetter | (int)MethodFlags::PropertySetter);
 
-		if(isValidAPI(entry.api, b3d) && !interopOnly && !isProperty)
-			output << generateXMLMethodInfo(entry, "\t", isConstructor);
+		if(isValidAPI(entry.api, editor) && !interopOnly && !isProperty)
+			output << generateXMLMethodInfo(entry, indent + "\t", isConstructor);
 	}
 
    for(auto& entry : input.propertyInfos)
    {
-		if(isValidAPI(entry.api, b3d))
-			output << generateXMLPropertyInfo(entry, "\t");
+		if(isValidAPI(entry.api, editor))
+			output << generateXMLPropertyInfo(entry, indent + "\t");
    }
 
    for(auto& entry : input.eventInfos)
@@ -5477,10 +5666,10 @@ std::string generateXMLClass(ClassInfo& input, bool b3d)
 	   bool isInternal = (entry.flags & (int)MethodFlags::InteropOnly) != 0;
 
 	  if(!isCallback && !isInternal)
-		  output << generateXMLEventInfo(entry, "\t");
+		  output << generateXMLEventInfo(entry, indent + "\t");
    }
 	
-	output << "</class>\n";
+	output << indent << "</class>\n";
 	return output.str();
 }
 
@@ -5496,7 +5685,7 @@ void cleanAndPrepareFolder(const StringRef& folder)
 	sys::fs::create_directories(folder);
 }
 
-std::ofstream createFile(const std::string& filename, FileType type, StringRef outputFolder)
+std::ofstream createFile(const std::string& filename, StringRef outputFolder)
 {
 	std::string relativePath = "/" + filename;
 	StringRef filenameRef(relativePath.data(), relativePath.size());
@@ -5510,7 +5699,7 @@ std::ofstream createFile(const std::string& filename, FileType type, StringRef o
 	return output;
 }
 
-void generateMappingXMLFile(bool b3d, const std::string& outputFolder)
+void generateMappingXMLFile(bool editor, const std::string& outputFolder)
 {
 	std::stringstream body;
 	for (auto& fileInfo : outputFileInfos)
@@ -5518,29 +5707,32 @@ void generateMappingXMLFile(bool b3d, const std::string& outputFolder)
 		auto& enumInfos = fileInfo.second.enumInfos;
 		for (auto& entry : enumInfos)
 		{
-			if (isValidAPI(entry.api, b3d))
-				body << generateXMLEnum(entry);
+			if (isValidAPI(entry.api, editor))
+				body << generateXMLEnum(entry, "\t");
 		}
 
 		auto& structInfos = fileInfo.second.structInfos;
 		for (auto& entry : structInfos)
 		{
-			if (isValidAPI(entry.api, b3d))
-				body << generateXMLStruct(entry);
+			if (isValidAPI(entry.api, editor))
+				body << generateXMLStruct(entry, "\t");
 		}
 
 
 		auto& classInfos = fileInfo.second.classInfos;
 		for (auto& entry : classInfos)
 		{
-			if (isValidAPI(entry.api, b3d))
-				body << generateXMLClass(entry, b3d);
+			if (isValidAPI(entry.api, editor))
+				body << generateXMLClass(entry, editor, "\t");
 		}
 	}
 
-	std::ofstream output = createFile("mapping.xml", FT_ENGINE_H, outputFolder);
+	std::ofstream output = createFile("info.xml", outputFolder);
+
 	output << "<?xml version='1.0' encoding='UTF-8' standalone='no'?>\n";
+	output << "<entries>\n";
 	output << body.str();
+	output << "</entries>\n";
 	output.close();
 }
 
@@ -5584,7 +5776,7 @@ void generateLookupFile(const std::string& tableName, ParsedType type, bool edit
 	}
 
 	std::string prefix = editor ? "Editor" : "";
-	std::ofstream output = createFile("Bs" + prefix + tableName + "Lookup.generated.h", editor ? FT_EDITOR_H : FT_ENGINE_H, cppOutputFolder);
+	std::ofstream output = createFile("Bs" + prefix + tableName + "Lookup.generated.h", cppOutputFolder);
 
 	// License/copyright header
 	output << generateFileHeader(editor);
@@ -5678,9 +5870,8 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 				body << std::endl;
 		}
 
-		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_H : FT_ENGINE_H;
 		StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
-		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.h", fileType, cppOutputFolder);
+		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.h", cppOutputFolder);
 
 		// License/copyright header
 		output << generateFileHeader(fileInfo.second.inEditor);
@@ -5765,9 +5956,8 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 				body << std::endl;
 		}
 
-		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CPP : FT_ENGINE_CPP;
 		StringRef cppOutputFolder = fileInfo.second.inEditor ? cppEditorOutputFolder : cppEngineOutputFolder;
-		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.cpp", fileType, cppOutputFolder);
+		std::ofstream output = createFile("BsScript" + fileInfo.first + ".generated.cpp", cppOutputFolder);
 
 		// License/copyright header
 		output << generateFileHeader(fileInfo.second.inEditor);
@@ -5828,9 +6018,8 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 				body << std::endl;
 		}
 
-		FileType fileType = fileInfo.second.inEditor ? FT_EDITOR_CS : FT_ENGINE_CS;
 		StringRef csOutputFolder = fileInfo.second.inEditor ? csEditorOutputFolder : csEngineOutputFolder;
-		std::ofstream output = createFile(fileInfo.first + ".generated.cs", fileType, csOutputFolder);
+		std::ofstream output = createFile(fileInfo.first + ".generated.cs", csOutputFolder);
 
 		// License/copyright header
 		output << generateFileHeader(fileInfo.second.inEditor);
@@ -5864,5 +6053,8 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 	generateLookupFile("BuiltinReflectableTypes", ParsedType::ReflectableClass, true, cppEngineOutputFolder, cppEditorOutputFolder);
 
 	// Generate XML lookup
-	//generateMappingXMLFile(genEditor, cppEngineOutputFolder);
+	generateMappingXMLFile(false, csEngineOutputFolder);
+
+	if(genEditor)
+		generateMappingXMLFile(true, csEditorOutputFolder);
 }
