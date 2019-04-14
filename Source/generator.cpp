@@ -140,7 +140,12 @@ std::string generateGetInternalLine(const std::string& sourceClassName, const st
 			if(isRRef)
 				output << "static_resource_cast<" << sourceClassName << ">(" << obj << "->getHandle())";
 			else
-				output << obj << "->getHandle()";
+			{
+				if(classType == ParsedType::Resource && sourceClassName == "Resource")
+					output << "static_resource_cast<" << sourceClassName << ">(" << obj << "->getGenericHandle())";
+				else
+					output << obj << "->getHandle()";
+			}
 		}
 		else
 		{
@@ -1078,12 +1083,20 @@ void handleDefaultParams(MethodInfo& methodInfo, std::vector<MethodInfo>& newMet
 {
 	int firstDefaultParam = -1;
 	int lastInvalidParam = -1;
-	for(int i = 0; i < methodInfo.paramInfos.size(); i++)
+	for (int i = 0; i < methodInfo.paramInfos.size(); i++)
 	{
 		const VarInfo& param = methodInfo.paramInfos[i];
 
 		if (!param.defaultValue.empty())
+		{
 			firstDefaultParam = i;
+			break;
+		}
+	}
+
+	for (int i = 0; i < methodInfo.paramInfos.size(); i++)
+	{
+		const VarInfo& param = methodInfo.paramInfos[i];
 
 		if (!param.defaultValueType.empty() && !isFlagsEnum(param.flags))
 			lastInvalidParam = i;
@@ -2011,7 +2024,8 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			return "";
 		}
 
-		if (paramTypeInfo.type != ParsedType::ReflectableClass && paramTypeInfo.type != ParsedType::Resource)
+		if (paramTypeInfo.type != ParsedType::ReflectableClass && paramTypeInfo.type != ParsedType::Class && 
+			paramTypeInfo.type != ParsedType::Resource)
 		{
 			outs() << "Error: Type not supported as an AsyncOp return value. \n";
 			return "";
@@ -2041,10 +2055,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << ";\n";
 		}
 
+        std::string monoType;
 		if(typeName != "Any")
 		{
 			std::string scriptType = getScriptInteropType(typeName,
 				paramTypeInfo.type == ParsedType::Resource && getPassAsResourceRef(flags));
+
+            monoType = scriptType + "::getMetaData()->scriptClass";
 
 			postCallActions << "\t\tauto convertCallback = [](const Any& returnVal)\n";
 			postCallActions << "\t\t{\n";
@@ -2053,13 +2070,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 			if (!isArrayOrVector(flags))
 			{
-				if (paramTypeInfo.type == ParsedType::ReflectableClass)
+				if (paramTypeInfo.type == ParsedType::ReflectableClass || paramTypeInfo.type == ParsedType::Class)
 					postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, "monoObj", scriptType, "nativeObj", false, "\t\t\t");
 				else // Resource
 				{
 					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, "scriptObj", "nativeObj", "\t\t\t");
 					postCallActions << "\t\t\tif(scriptObj != nullptr)" << std::endl;
-					postCallActions << "\t\t\\ttmonoObj = scriptObj->getManagedInstance();" << std::endl;
+					postCallActions << "\t\t\t\tmonoObj = scriptObj->getManagedInstance();" << std::endl;
 					postCallActions << "\t\t\telse" << std::endl;
 					postCallActions << "\t\t\t\tmonoObj = nullptr;" << std::endl;
 				}
@@ -2084,6 +2101,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				switch (paramTypeInfo.type)
 				{
 				case ParsedType::ReflectableClass:
+				case ParsedType::Class:
 				{
 					std::string elemName = "arrayElem" + name;
 
@@ -2145,9 +2163,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			postCallActions << "\t\tauto convertCallback = nullptr;\n";
 
 		if (returnValue)
-			postCallActions << "\t\t" << name << " = " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback);\n";
+			postCallActions << "\t\t" << name << " = " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback, " << monoType << ");\n";
 		else
-			postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback));\n";
+			postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << "ScriptAsyncOpBase::create(" << argName << ", convertCallback, " << monoType << "));\n";
 
 		return argName;
 	}
@@ -3137,6 +3155,8 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, name);
 			preCallActions << "\t\tif(" << scriptName << " != nullptr)\n";
 			preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getManagedInstance();" << std::endl;
+			preCallActions << "\t\telse\n";
+			preCallActions << "\t\t\t" << argName << " = nullptr;\n";
 		}
 		break;
 		}
@@ -4044,7 +4064,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		}
 	}
 
-	if (isClassType(typeInfo.type))
+	if (isClassType(typeInfo.type) && !isModule)
 	{
 		// getManagedInstance() method (needed for events)
 		if (!classInfo.eventInfos.empty())
@@ -4658,7 +4678,7 @@ std::string generateCSMethodDefaultParamAssignments(const MethodInfo& methodInfo
 		if (paramInfo.defaultValueType.empty() || isFlagsEnum(paramInfo.flags))
 			continue;
 
-		if (paramInfo.defaultValueType == "null")
+		if (paramInfo.defaultValueType == "null" || paramInfo.defaultValue == "null")
 		{
 			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
 			output << indent << paramTypeInfo.scriptName << " " << paramInfo.name << " = " << paramInfo.defaultValue << ";\n";

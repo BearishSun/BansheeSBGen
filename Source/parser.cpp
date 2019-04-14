@@ -1225,8 +1225,8 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 		}
 		else if(name == "bs::UUID::EMPTY")
 		{
-			evalValue = "UUID.Empty";
-			valType = "";
+			evalValue = "";
+			valType = "UUID";
 			return true;
 		}
 	}
