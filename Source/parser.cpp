@@ -856,7 +856,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 		if(*iter == ' ' || *iter == '\t')
 			continue;
 
-		if(*iter == '(')
+		if(*iter == '[')
 		{
 			if(isInScope)
 				outs() << "Error: Attribute parameter parsing error. Nested scopes not allowed.";
@@ -868,7 +868,7 @@ bool parseExportAttribute(AnnotateAttr* attr, StringRef sourceName, ParsedDeclIn
 			continue;
 		}
 
-		if(*iter == ')')
+		if(*iter == ']')
 		{
 			isInScope = false;
 			continue;

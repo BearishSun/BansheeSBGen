@@ -394,6 +394,7 @@ struct BS_SCRIPT_EXPORT(pl:true) LimitAngularRange
 		}
 
 		/** Lower angle of the limit. Must be less than #upper. */
+		BS_SCRIPT_EXPORT(range:[0,360])
 		Radian lower = Radian(0.0f);
 
 		/** Upper angle of the limit. Must be less than #lower. */
