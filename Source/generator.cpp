@@ -4150,6 +4150,9 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			else
 				typeName = paramTypeInfo.scriptName;
 
+            if(typeName == "float")
+                typeName = "single";
+
 			std::string csType = getCSVarType(typeName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
 
 			output << csType;
@@ -4546,19 +4549,16 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 	if(((style.flags & (int)StyleFlags::AsLayerMask) != 0) && isInt64(typeInfo))
 		output << "\t\t[LayerMask]\n";
 
-	if((isInteger(typeInfo) || isReal(typeInfo)))
-	{
-		if ((style.flags & (int)StyleFlags::Step) != 0)
-			output << "\t\t[Step(" << style.step << "f)]\n";
+	if ((style.flags & (int)StyleFlags::Step) != 0)
+		output << "\t\t[Step(" << style.step << "f)]\n";
 
-		if ((style.flags & (int)StyleFlags::Range) != 0)
-		{
-			std::string isSlider = ((style.flags & (int)StyleFlags::AsSlider) != 0) ? "true" : "false";
-			output << "\t\t[Range(" << style.rangeMin << "f, " << style.rangeMax << "f, " << isSlider << ")]\n";
-		}
-		else if((style.flags & (int)StyleFlags::AsSlider) != 0)
-			output << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
+	if ((style.flags & (int)StyleFlags::Range) != 0)
+	{
+		std::string isSlider = ((style.flags & (int)StyleFlags::AsSlider) != 0) ? "true" : "false";
+		output << "\t\t[Range(" << style.rangeMin << "f, " << style.rangeMax << "f, " << isSlider << ")]\n";
 	}
+	else if ((style.flags & (int)StyleFlags::AsSlider) != 0)
+		output << "\t\t[Range(float.MinValue, float.MaxValue, true)]\n";
 
 	if(((style.flags & (int)StyleFlags::Order) != 0))
 		output << "\t\t[Order(" << style.order << ")]\n";
