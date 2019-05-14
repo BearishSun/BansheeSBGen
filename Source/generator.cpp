@@ -4870,7 +4870,12 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		methods << "\t\t/// <summary>Returns a reference wrapper for this resource.</summary>\n";
 		methods << "\t\tpublic static implicit operator RRef<" << typeInfo.scriptName << ">(" << typeInfo.scriptName << " x)\n";
-		methods << "\t\t{ return Internal_GetRef(x.mCachedPtr); }\n\n";
+		methods << "\t\t{\n";
+        methods << "\t\t\tif(x != null)\n";
+	    methods << "\t\t\t\treturn Internal_GetRef(x.mCachedPtr);\n";
+	    methods << "\t\t\telse\n";
+	    methods << "\t\t\t\treturn null;\n"; 
+	    methods << "\t\t}\n\n";
 	}
 
 	// External constructors, methods and interop stubs
