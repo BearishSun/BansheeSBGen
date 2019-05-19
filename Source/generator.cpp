@@ -2055,13 +2055,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			preCallActions << ";\n";
 		}
 
-        std::string monoType;
+		std::string monoType;
 		if(typeName != "Any")
 		{
 			std::string scriptType = getScriptInteropType(typeName,
 				paramTypeInfo.type == ParsedType::Resource && getPassAsResourceRef(flags));
 
-            monoType = scriptType + "::getMetaData()->scriptClass";
+			monoType = scriptType + "::getMetaData()->scriptClass";
 
 			postCallActions << "\t\tauto convertCallback = [](const Any& returnVal)\n";
 			postCallActions << "\t\t{\n";
@@ -3970,6 +3970,22 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 	if (!classInfo.eventInfos.empty())
 		output << "\n";
 
+	// Event handles
+	for (auto& eventInfo : classInfo.eventInfos)
+	{
+		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
+		bool isCallback = (eventInfo.flags & (int)MethodFlags::Callback) != 0;
+		if(!isCallback && (isStatic || isModule))
+		{
+			output << generateCppApiCheckBegin(eventInfo.api);
+			output << "\tHEvent " << interopClassName << "::" << eventInfo.sourceName << "Conn;\n";
+			output << generateApiCheckEnd(eventInfo.api);
+		}
+	}
+
+	if (!classInfo.eventInfos.empty())
+		output << "\n";
+
 	// Constructor
 	if (!isModule)
 	{
@@ -4150,8 +4166,8 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			else
 				typeName = paramTypeInfo.scriptName;
 
-            if(typeName == "float")
-                typeName = "single";
+			if(typeName == "float")
+				typeName = "single";
 
 			std::string csType = getCSVarType(typeName, paramTypeInfo.type, paramInfo.flags, true, true, true, true);
 
@@ -4871,11 +4887,11 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		methods << "\t\t/// <summary>Returns a reference wrapper for this resource.</summary>\n";
 		methods << "\t\tpublic static implicit operator RRef<" << typeInfo.scriptName << ">(" << typeInfo.scriptName << " x)\n";
 		methods << "\t\t{\n";
-        methods << "\t\t\tif(x != null)\n";
-	    methods << "\t\t\t\treturn Internal_GetRef(x.mCachedPtr);\n";
-	    methods << "\t\t\telse\n";
-	    methods << "\t\t\t\treturn null;\n"; 
-	    methods << "\t\t}\n\n";
+		methods << "\t\t\tif(x != null)\n";
+		methods << "\t\t\t\treturn Internal_GetRef(x.mCachedPtr);\n";
+		methods << "\t\t\telse\n";
+		methods << "\t\t\t\treturn null;\n"; 
+		methods << "\t\t}\n\n";
 	}
 
 	// External constructors, methods and interop stubs
@@ -5121,7 +5137,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 		}
 		else
 		{
-			events << "partial void " << entry.scriptName << "(";
+			events << "partial void Callback_" << entry.scriptName << "(";
 
 			if (!entry.paramInfos.empty())
 				events << generateCSMethodParams(entry, false);
@@ -5133,12 +5149,18 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 
 		// Event interop
 		interops << generateCsApiCheckBegin(entry.api);
-		interops << "\t\tprivate void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
+
+		interops << "\t\tprivate ";
+
+		if (isStatic || isModule)
+			interops << "static ";
+
+		interops << "void Internal_" << entry.interopName << "(" << generateCSMethodParams(entry, true) << ")" << std::endl;
 		interops << "\t\t{" << std::endl;
 		if (!isCallback && !isInternal)
 			interops << "\t\t\t" << entry.scriptName << "?.Invoke(" << generateCSEventArgs(entry) << ");\n";
 		else
-			interops << "\t\t\t" << entry.scriptName << "(" << generateCSEventArgs(entry) << ");\n";
+			interops << "\t\t\tCallback_" << entry.scriptName << "(" << generateCSEventArgs(entry) << ");\n";
 		interops << "\t\t}" << std::endl;
 		interops << generateApiCheckEnd(entry.api);
 	}
