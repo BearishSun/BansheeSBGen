@@ -410,7 +410,7 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 
 		for (auto& paramInfo : info.paramInfos)
 		{
-			if (paramInfo.type != "bool")
+			if (paramInfo.typeName != "bool")
 				return true;
 		}
 
@@ -465,7 +465,7 @@ MethodInfo findUnusedCtorSignature(const ClassInfo& classInfo)
 	{
 		VarInfo paramInfo;
 		paramInfo.name = "__dummy" + std::to_string(i);
-		paramInfo.type = "bool";
+		paramInfo.typeName = "bool";
 		paramInfo.flags = (int)TypeFlags::Builtin;
 
 		output.paramInfos.push_back(paramInfo);
@@ -572,11 +572,11 @@ void gatherIncludes(const std::string& typeName, int flags, bool isEditor, Inclu
 void gatherIncludes(const MethodInfo& methodInfo, bool isEditor, IncludesInfo& output)
 {
 	bool returnAsParameter = false;
-	if (!methodInfo.returnInfo.type.empty())
-		gatherIncludes(methodInfo.returnInfo.type, methodInfo.returnInfo.flags, isEditor, output);
+	if (!methodInfo.returnInfo.typeName.empty())
+		gatherIncludes(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags, isEditor, output);
 
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
-		gatherIncludes(I->type, I->flags, isEditor, output);
+		gatherIncludes(I->typeName, I->flags, isEditor, output);
 
 	if((methodInfo.flags & (int)MethodFlags::External) != 0)
 	{
@@ -591,7 +591,7 @@ void gatherIncludes(const MethodInfo& methodInfo, bool isEditor, IncludesInfo& o
 
 void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& output)
 {
-	UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+	UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.typeName, fieldInfo.flags);
 
 	// These types never require additional includes
 	if (fieldTypeInfo.type == ParsedType::Builtin || fieldTypeInfo.type == ParsedType::String || 
@@ -603,7 +603,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 	{
 		bool complexStruct = isComplexStruct(fieldInfo.flags);
 
-		output.includes[fieldInfo.type] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0, false, isEditor);
+		output.includes[fieldInfo.typeName] = IncludeInfo(fieldInfo.typeName, fieldTypeInfo, IT_HEADER, complexStruct ? IT_HEADER : 0, false, isEditor);
 	}
 
 	if (fieldTypeInfo.type == ParsedType::Class || fieldTypeInfo.type == ParsedType::ReflectableClass ||
@@ -614,8 +614,8 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 
 		if (!fieldTypeInfo.destFile.empty() || isRRef)
 		{
-			std::string name = "__" + fieldInfo.type;
-			output.includes[name] = IncludeInfo(fieldInfo.type, fieldTypeInfo, IT_IMPL, IT_IMPL, false, isEditor);
+			std::string name = "__" + fieldInfo.typeName;
+			output.includes[name] = IncludeInfo(fieldInfo.typeName, fieldTypeInfo, IT_IMPL, IT_IMPL, false, isEditor);
 		}
 
 		if (fieldTypeInfo.type == ParsedType::Resource)
@@ -633,7 +633,7 @@ void gatherIncludes(const FieldInfo& fieldInfo, bool isEditor, IncludesInfo& out
 			if (isBase)
 			{
 				std::vector<std::string> derivedClasses;
-				getDerivedClasses(fieldInfo.type, derivedClasses);
+				getDerivedClasses(fieldInfo.typeName, derivedClasses);
 
 				for(auto& entry : derivedClasses)
 					output.includes[entry] = IncludeInfo(entry, getTypeInfo(entry, 0), IT_IMPL, IT_IMPL, false, isEditor);
@@ -1221,13 +1221,13 @@ void postProcessFileInfos()
 				{
 					if (((int)method.flags & (int)MethodFlags::Constructor) != 0)
 					{
-						if (method.returnInfo.type.size() == 0)
+						if (method.returnInfo.typeName.size() == 0)
 						{
 							outs() << "Error: Found an external constructor \"" << method.sourceName << "\" with no return value, skipping.\n";
 							continue;
 						}
 
-						if (method.returnInfo.type != entry.first)
+						if (method.returnInfo.typeName != entry.first)
 						{
 							outs() << "Error: Found an external constructor \"" << method.sourceName << "\" whose return value doesn't match the external class, skipping.\n";
 							continue;
@@ -1241,7 +1241,7 @@ void postProcessFileInfos()
 							continue;
 						}
 
-						if (method.paramInfos[0].type != entry.first)
+						if (method.paramInfos[0].typeName != entry.first)
 						{
 							outs() << "Error: Found an external method \"" << method.sourceName << "\" whose first parameter doesn't "
 								" accept the class its operating on. This is not supported, skipping. \n";
@@ -1347,13 +1347,13 @@ void postProcessFileInfos()
 				if (isGetter)
 				{
 					propertyInfo.getter = methodInfo.interopName;
-					propertyInfo.type = methodInfo.returnInfo.type;
+					propertyInfo.type = methodInfo.returnInfo.typeName;
 					propertyInfo.typeFlags = methodInfo.returnInfo.flags;
 				}
 				else // Setter
 				{
 					propertyInfo.setter = methodInfo.interopName;
-					propertyInfo.type = methodInfo.paramInfos[0].type;
+					propertyInfo.type = methodInfo.paramInfos[0].typeName;
 					propertyInfo.typeFlags = methodInfo.paramInfos[0].flags;
 				}
 
@@ -1421,17 +1421,17 @@ void postProcessFileInfos()
 		if (paramInfo.defaultValue.empty())
 			return;
 
-		UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		UserTypeInfo typeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 
 		if (typeInfo.type != ParsedType::Enum)
 			return;
 
 		int enumIdx = atoi(paramInfo.defaultValue.c_str());
-		EnumInfo* enumInfo = findEnumInfo(paramInfo.type);
+		EnumInfo* enumInfo = findEnumInfo(paramInfo.typeName);
 		if(enumInfo == nullptr)
 		{
 			outs() << "Error: Cannot map default value of \"" + paramInfo.name + 
-				"\" to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+				"\" to enum entry for enum type \"" + paramInfo.typeName + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -1440,7 +1440,7 @@ void postProcessFileInfos()
 		if(iterFind == enumInfo->entries.end())
 		{
 			outs() << "Error: Cannot map default value of \"" + paramInfo.name + 
-				"\" to enum entry for enum type \"" + paramInfo.type + "\". Ignoring.";
+				"\" to enum entry for enum type \"" + paramInfo.typeName + "\". Ignoring.";
 			paramInfo.defaultValue = "";
 			return;
 		}
@@ -1485,7 +1485,7 @@ void postProcessFileInfos()
 		{
 			for(auto& fieldInfo : structInfo.fields)
 			{
-				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+				UserTypeInfo typeInfo = getTypeInfo(fieldInfo.typeName, fieldInfo.flags);
 
 				if(isArrayOrVector(fieldInfo.flags) || !(typeInfo.type == ParsedType::Builtin || typeInfo.type == ParsedType::Enum))
 				{
@@ -1533,8 +1533,8 @@ void postProcessFileInfos()
 
 		auto markParam = [&markComplexType,&markBaseType](VarInfo& paramInfo)
 		{
-			markComplexType(paramInfo.type, paramInfo.flags);
-			markBaseType(paramInfo.type, paramInfo.flags);
+			markComplexType(paramInfo.typeName, paramInfo.flags);
+			markBaseType(paramInfo.typeName, paramInfo.flags);
 		};
 
 		for (auto& classInfo : fileInfo.second.classInfos)
@@ -1544,10 +1544,10 @@ void postProcessFileInfos()
 				for (auto& paramInfo : methodInfo.paramInfos)
 					markParam(paramInfo);
 
-				if (methodInfo.returnInfo.type.size() != 0)
+				if (methodInfo.returnInfo.typeName.size() != 0)
 				{
-					markComplexType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
-					markBaseType(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+					markComplexType(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
+					markBaseType(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 				}
 			}
 
@@ -1568,7 +1568,7 @@ void postProcessFileInfos()
 		{
 			for(auto& fieldInfo : structInfo.fields)
 			{
-				markComplexType(fieldInfo.type, fieldInfo.flags);
+				markComplexType(fieldInfo.typeName, fieldInfo.flags);
 				markParam(fieldInfo);
 			}
 		}
@@ -1780,11 +1780,11 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 	std::stringstream output;
 
 	bool returnAsParameter = false;
-	if (methodInfo.returnInfo.type.empty() || isCtor)
+	if (methodInfo.returnInfo.typeName.empty() || isCtor)
 		output << "void";
 	else
 	{
-		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 		if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 		{
 			output << "void";
@@ -1792,7 +1792,7 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 		}
 		else
 		{
-			output << getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
+			output << getInteropCppVarType(methodInfo.returnInfo.typeName, returnTypeInfo.type, methodInfo.returnInfo.flags);
 		}
 	}
 
@@ -1820,9 +1820,9 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 	{
-		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(I->typeName, I->flags);
 
-		output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name;
+		output << getInteropCppVarType(I->typeName, paramTypeInfo.type, I->flags) << " " << I->name;
 
 		if ((I + 1) != methodInfo.paramInfos.end() || returnAsParameter)
 			output << ", ";
@@ -1830,9 +1830,9 @@ std::string generateCppMethodSignature(const MethodInfo& methodInfo, const std::
 
 	if (returnAsParameter)
 	{
-		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 
-		output << getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags) <<
+		output << getInteropCppVarType(methodInfo.returnInfo.typeName, returnTypeInfo.type, methodInfo.returnInfo.flags) <<
 			" " << "__output";
 	}
 
@@ -1859,15 +1859,17 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 	int idx = 0;
 	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
 	{
-		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(I->typeName, I->flags);
 
 		if (!isSrcValue(I->flags) && !isOutput(I->flags))
 			output << "const ";
 
 		if (isVector(I->flags))
 			output << "std::vector<";
+		else if(isSmallVector(I->flags))
+			output << "SmallVector<";
 
-		output << getCppVarType(I->type, paramTypeInfo.type, I->flags, false);
+		output << getCppVarType(I->typeName, paramTypeInfo.type, I->flags, false);
 
 		if(!isSrcValue(I->flags))
 		{
@@ -1876,6 +1878,9 @@ std::string generateCppEventCallbackSignature(const MethodInfo& eventInfo, const
 			else if (isSrcReference(I->flags))
 				output << "&";
 		}
+
+		if(isSmallVector(I->flags))
+			output << ", " << I->arraySize << ">";
 
 		if (isVector(I->flags))
 			output << ">";
@@ -1907,12 +1912,12 @@ std::string generateCppEventThunk(const MethodInfo& eventInfo, bool isModule)
 
 	for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
 	{
-		UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(I->typeName, I->flags);
 
 		if (paramTypeInfo.type == ParsedType::Struct)
 			output << "MonoObject* " << I-> name << ", ";
 		else
-			output << getInteropCppVarType(I->type, paramTypeInfo.type, I->flags) << " " << I->name << ", ";
+			output << getInteropCppVarType(I->typeName, paramTypeInfo.type, I->flags) << " " << I->name << ", ";
 	}
 
 	output << "MonoException**);" << std::endl;
@@ -2011,14 +2016,14 @@ std::string generateNativeToScriptObjectLine(ParsedType type, int flags, const s
 	return output.str();
 }
 
-std::string generateMethodBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, unsigned arraySize,
+std::string generateMethodBodyBlockForParam(const std::string& name, const VarTypeInfo& varTypeInfo,
 	bool isLast, bool returnValue, std::stringstream& preCallActions, std::stringstream& postCallActions)
 {
-	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+	UserTypeInfo paramTypeInfo = getTypeInfo(varTypeInfo.typeName, varTypeInfo.flags);
 
-	if(getIsAsyncOp(flags))
+	if(getIsAsyncOp(varTypeInfo.flags))
 	{
-		if (!isOutput(flags) && !returnValue)
+		if (!isOutput(varTypeInfo.flags) && !returnValue)
 		{
 			outs() << "Error: AsyncOp type not supported as input parameter. \n";
 			return "";
@@ -2033,33 +2038,35 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 		std::string argType;
 		std::string argName;
-		if (!isArrayOrVector(flags))
+		if (!isArrayOrVector(varTypeInfo.flags))
 		{
 			argName = "tmp" + name;
-			argType = getCppVarType(typeName, paramTypeInfo.type);
+			argType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 
 			preCallActions << "\t\tTAsyncOp<" << argType << "> " << argName << ";\n";
 		}
 		else
 		{
-			if (isVector(flags))
-				argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
+			if (isVector(varTypeInfo.flags))
+				argType = "Vector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ">";
+			else if(isSmallVector(varTypeInfo.flags))
+				argType = "SmallVector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ", " + std::to_string(varTypeInfo.arraySize) + ">";
 			else
-				argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
+				argType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false);
 
 			argName = "vec" + name;
 
 			preCallActions << "\t\t" << argType << " " << argName;
-			if (isArray(flags))
-				preCallActions << "[" << arraySize << "]";
+			if (isArray(varTypeInfo.flags))
+				preCallActions << "[" << varTypeInfo.arraySize << "]";
 			preCallActions << ";\n";
 		}
 
 		std::string monoType;
-		if(typeName != "Any")
+		if(varTypeInfo.typeName != "Any")
 		{
-			std::string scriptType = getScriptInteropType(typeName,
-				paramTypeInfo.type == ParsedType::Resource && getPassAsResourceRef(flags));
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName,
+				paramTypeInfo.type == ParsedType::Resource && getPassAsResourceRef(varTypeInfo.flags));
 
 			monoType = scriptType + "::getMetaData()->scriptClass";
 
@@ -2068,13 +2075,13 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			postCallActions << "\t\t\t" << argType << " nativeObj = any_cast<" << argType << ">(returnVal);\n";
 			postCallActions << "\t\t\tMonoObject* monoObj;\n";
 
-			if (!isArrayOrVector(flags))
+			if (!isArrayOrVector(varTypeInfo.flags))
 			{
 				if (paramTypeInfo.type == ParsedType::ReflectableClass || paramTypeInfo.type == ParsedType::Class)
-					postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, "monoObj", scriptType, "nativeObj", false, "\t\t\t");
+					postCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, "monoObj", scriptType, "nativeObj", false, "\t\t\t");
 				else // Resource
 				{
-					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, "scriptObj", "nativeObj", "\t\t\t");
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, "scriptObj", "nativeObj", "\t\t\t");
 					postCallActions << "\t\t\tif(scriptObj != nullptr)" << std::endl;
 					postCallActions << "\t\t\t\tmonoObj = scriptObj->getManagedInstance();" << std::endl;
 					postCallActions << "\t\t\telse" << std::endl;
@@ -2087,10 +2094,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string arrayName = "scriptArray";
 
 				postCallActions << "\t\t\tint arraySize = ";
-				if (isVector(flags))
+				if (isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 					postCallActions << "(int)" << argName << ".size()";
 				else
-					postCallActions << arraySize;
+					postCallActions << varTypeInfo.arraySize;
 				postCallActions << ";\n";
 
 				postCallActions << "\t\t\tScriptArray " << arrayName;
@@ -2105,15 +2112,15 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				{
 					std::string elemName = "arrayElem" + name;
 
-					std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+					std::string elemPtrType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags);
 					std::string elemPtrName = "arrayElemPtr" + name;
 
 					postCallActions << "\t\t\t\t" << elemPtrType << " " << elemPtrName;
-					if (willBeDereferenced(flags))
+					if (willBeDereferenced(varTypeInfo.flags))
 					{
-						postCallActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+						postCallActions << " = bs_shared_ptr_new<" << varTypeInfo.typeName << ">();\n";
 
-						if (isSrcPointer(flags))
+						if (isSrcPointer(varTypeInfo.flags))
 						{
 							postCallActions << "\t\t\t\tif(nativeObj[i])\n";
 							postCallActions << "\t\t\t\t\t*" << elemPtrName << " = *";
@@ -2129,7 +2136,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 						postCallActions << " = nativeObj[i];\n";
 
 					postCallActions << "\t\t\t\tMonoObject* " << elemName << ";\n";
-					postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName,
+					postCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, elemName,
 						scriptType, elemPtrName, false, "\t\t\t\t");
 
 					postCallActions << "\t\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
@@ -2139,7 +2146,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				{
 					std::string scriptName = "scriptObj";
 
-					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "nativeObj[i]", "\t\t\t\t");
+					postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, "nativeObj[i]", "\t\t\t\t");
 					postCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 					postCallActions << "\t\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 					postCallActions << "\t\t\t\telse" << std::endl;
@@ -2170,7 +2177,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		return argName;
 	}
 
-	if (!isArrayOrVector(flags))
+	if (!isArrayOrVector(varTypeInfo.flags))
 	{
 		std::string argName;
 
@@ -2183,18 +2190,18 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				argName = "tmp" + name;
 
-				if(isFlagsEnum(flags))
-					preCallActions << "\t\tFlags<" << typeName << "> " << argName << ";" << std::endl;
+				if(isFlagsEnum(varTypeInfo.flags))
+					preCallActions << "\t\tFlags<" << varTypeInfo.typeName << "> " << argName << ";" << std::endl;
 				else
-					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
+					preCallActions << "\t\t" << varTypeInfo.typeName << " " << argName << ";" << std::endl;
 
 				if (paramTypeInfo.type == ParsedType::Struct)
 				{
-					if(isComplexStruct(flags))
+					if(isComplexStruct(varTypeInfo.flags))
 					{
-						std::string scriptType = getScriptInteropType(typeName);
+						std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
-						postCallActions << "\t\t" << getStructInteropType(typeName) << " interop" << name << ";\n";
+						postCallActions << "\t\t" << getStructInteropType(varTypeInfo.typeName) << " interop" << name << ";\n";
 						postCallActions << "\t\tinterop" << name << " = " << scriptType << "::toInterop(" << argName << ");\n";
 
 						postCallActions << "\t\tMonoUtil::valueCopy(" << name << ", ";
@@ -2204,45 +2211,45 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					else
 						postCallActions << "\t\t*" << name << " = " << argName << ";" << std::endl;
 				}
-				else if(isFlagsEnum(flags))
-					postCallActions << "\t\t" << name << " = (" << typeName << ")(uint32_t)" << argName << ";" << std::endl;
+				else if(isFlagsEnum(varTypeInfo.flags))
+					postCallActions << "\t\t" << name << " = (" << varTypeInfo.typeName << ")(uint32_t)" << argName << ";" << std::endl;
 				else
 					postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 			}
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 			{
-				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(flags))
+				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(varTypeInfo.flags))
 				{
 					argName = "tmp" + name;
-					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
+					preCallActions << "\t\t" << varTypeInfo.typeName << " " << argName << ";" << std::endl;
 
-					std::string scriptType = getScriptInteropType(typeName);
+					std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
-					postCallActions << "\t\t" << getStructInteropType(typeName) << " interop" << name << ";\n";
+					postCallActions << "\t\t" << getStructInteropType(varTypeInfo.typeName) << " interop" << name << ";\n";
 					postCallActions << "\t\tinterop" << name << " = " << scriptType << "::toInterop(" << argName << ");\n";
 
 					postCallActions << "\t\tMonoUtil::valueCopy(" << name << ", ";
 					postCallActions << "&interop" << name << ", ";
 					postCallActions << scriptType << "::getMetaData()->scriptClass->_getInternalClass());\n";
 				}
-				else if (isFlagsEnum(flags))
+				else if (isFlagsEnum(varTypeInfo.flags))
 				{
 					argName = "tmp" + name;
-					preCallActions << "\t\tFlags<" << typeName << "> " << argName << ";" << std::endl;
+					preCallActions << "\t\tFlags<" << varTypeInfo.typeName << "> " << argName << ";" << std::endl;
 
-					postCallActions << "\t\t*" << name << " = (" << typeName << ")(uint32_t)" << argName << ";" << std::endl;
+					postCallActions << "\t\t*" << name << " = (" << varTypeInfo.typeName << ")(uint32_t)" << argName << ";" << std::endl;
 				}
 				else
 					argName = name;
 			}
 			else
 			{
-				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(flags))
+				if(paramTypeInfo.type == ParsedType::Struct && isComplexStruct(varTypeInfo.flags))
 				{
 					argName = "tmp" + name;
-					preCallActions << "\t\t" << typeName << " " << argName << ";" << std::endl;
+					preCallActions << "\t\t" << varTypeInfo.typeName << " " << argName << ";" << std::endl;
 
-					std::string scriptType = getScriptInteropType(typeName);
+					std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 					preCallActions << "\t\t" << argName << " = " << scriptType << "::fromInterop(*" << name << ");" << std::endl;
 				}
 				else
@@ -2257,7 +2264,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = MonoUtil::stringToMono(" << argName << ");" << std::endl;
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ",  (MonoObject*)MonoUtil::stringToMono(" << argName << "));" << std::endl;
 			else
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
@@ -2270,7 +2277,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = MonoUtil::stringToMono(" << argName << ".toString());" << std::endl;
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ",  (MonoObject*)MonoUtil::stringToMono(" << argName << ".toString()));" << std::endl;
 			else
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToString(" << name << ");" << std::endl;
@@ -2283,7 +2290,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 			if (returnValue)
 				postCallActions << "\t\t" << name << " = MonoUtil::wstringToMono(" << argName << ");" << std::endl;
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", (MonoObject*)MonoUtil::wstringToMono(" << argName << "));" << std::endl;
 			else
 				preCallActions << "\t\t" << argName << " = MonoUtil::monoToWString(" << name << ");" << std::endl;
@@ -2298,7 +2305,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
 				postCallActions << "\t\t" << name << " = " << argName << ";" << std::endl;
 			}
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 			{
 				preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
 				postCallActions << "\t\tMonoUtil::referenceCopy(" << name << ", " << argName << ");" << std::endl;
@@ -2312,21 +2319,21 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		case ParsedType::GUIElement:
 		{
 			argName = "tmp" + name;
-			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 			preCallActions << "\t\t" << tmpType << " " << argName << ";\n";
-			if(returnValue || isOutput(flags))
+			if(returnValue || isOutput(varTypeInfo.flags))
 				outs() << "Error: GUIElement cannot be used as parameter outputs or return values. Ignoring. \n";
 			else
 			{
 				std::string scriptName = "script" + name;
 
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
-					paramTypeInfo.type, flags);
+					paramTypeInfo.type, varTypeInfo.flags);
 				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, flags) << ";" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(varTypeInfo.typeName, scriptName, 
+					paramTypeInfo.type, varTypeInfo.flags) << ";" << std::endl;
 			}
 		}
 			break;
@@ -2334,52 +2341,52 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		case ParsedType::ReflectableClass:
 		{
 			argName = "tmp" + name;
-			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 			preCallActions << "\t\t" << tmpType << " " << argName;
-			if ((returnValue || isOutput(flags)) && willBeDereferenced(flags))
-				preCallActions << " = bs_shared_ptr_new<" << typeName << ">()";
+			if ((returnValue || isOutput(varTypeInfo.flags)) && willBeDereferenced(varTypeInfo.flags))
+				preCallActions << " = bs_shared_ptr_new<" << varTypeInfo.typeName << ">()";
 
 			preCallActions << ";\n";
 
 			if (returnValue)
-				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, name, scriptType, argName);
-			else if (isOutput(flags))
-				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, name, scriptType, argName, true);
+				postCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, name, scriptType, argName);
+			else if (isOutput(varTypeInfo.flags))
+				postCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, name, scriptType, argName, true);
 			else
 			{
 				std::string scriptName = "script" + name;
 				
 				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, 
-					paramTypeInfo.type, flags);
+					paramTypeInfo.type, varTypeInfo.flags);
 				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, 
-					paramTypeInfo.type, flags) << ";" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(varTypeInfo.typeName, scriptName, 
+					paramTypeInfo.type, varTypeInfo.flags) << ";" << std::endl;
 			}
 		}
 			break;
 		default: // Some resource or game object type
 		{
 			argName = "tmp" + name;
-			std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+			std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 
 			preCallActions << "\t\t" << tmpType << " " << argName << ";" << std::endl;
 
 			std::string scriptName = "script" + name;
-			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 
 			if (returnValue)
 			{
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, argName);
 				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\t" << name << " = " << scriptName << "->getManagedInstance();" << std::endl;
 				postCallActions << "\t\telse" << std::endl;
 				postCallActions << "\t\t\t" << name << " = nullptr;" << std::endl;
 			}
-			else if (isOutput(flags))
+			else if (isOutput(varTypeInfo.flags))
 			{
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, argName);
 				postCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\tMonoUtil::referenceCopy(" << name << ", " << scriptName << "->getManagedInstance());" << std::endl;
 				postCallActions << "\t\telse" << std::endl;
@@ -2387,9 +2394,9 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			}
 			else
 			{
-				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, paramTypeInfo.type, flags);
+				preCallActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, name, paramTypeInfo.type, varTypeInfo.flags);
 				preCallActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
+				preCallActions << "\t\t\t" << argName << " = " << generateGetInternalLine(varTypeInfo.typeName, scriptName, paramTypeInfo.type, varTypeInfo.flags) << ";" << std::endl;
 			}
 		}
 		break;
@@ -2407,31 +2414,33 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 		case ParsedType::WString:
 		case ParsedType::Path:
 		case ParsedType::Enum:
-			entryType = typeName;
+			entryType = varTypeInfo.typeName;
 			break;
 		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			entryType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 			break;
 		}
 
 		std::string argType;
 		
-		if (isVector(flags))
-			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
+		if (isVector(varTypeInfo.flags))
+			argType = "Vector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ">";
+		else if(isSmallVector(varTypeInfo.flags))
+			argType = "SmallVector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ", " + std::to_string(varTypeInfo.arraySize) + ">";
 		else
-			argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
+			argType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false);
 
 		std::string argName = "vec" + name;
 
 		preCallActions << "\t\t" << argType << " " << argName;
-		if (isArray(flags))
-			preCallActions << "[" << arraySize << "]";
+		if (isArray(varTypeInfo.flags))
+			preCallActions << "[" << varTypeInfo.arraySize << "]";
 		preCallActions << ";\n";
 
-		if (!isOutput(flags) && !returnValue)
+		if (!isOutput(varTypeInfo.flags) && !returnValue)
 		{
 			std::string arrayName = "array" + name;
 
@@ -2440,7 +2449,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 			preCallActions << "\t\t\tScriptArray " << arrayName << "(" << name << ");" << std::endl;
 
-			if(isVector(flags))
+			if(isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 				preCallActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
 
 			preCallActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
@@ -2469,14 +2478,14 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 
 				preCallActions << "\t\t\t\t" << argName << "[i] = ";
 
-				if (isComplexStruct(flags))
+				if (isComplexStruct(varTypeInfo.flags))
 				{
 					preCallActions << entryType << "::fromInterop(";
-					preCallActions << arrayName << ".get<" << getStructInteropType(typeName) << ">(i)";
+					preCallActions << arrayName << ".get<" << getStructInteropType(varTypeInfo.typeName) << ">(i)";
 					preCallActions << ")";
 				}
 				else
-					preCallActions << arrayName << ".get<" << typeName << ">(i)";
+					preCallActions << arrayName << ".get<" << varTypeInfo.typeName << ">(i)";
 
 				preCallActions << ";\n";
 
@@ -2485,21 +2494,21 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 
-				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
+				preCallActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, varTypeInfo.flags);
 				preCallActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
 				preCallActions << "\t\t\t\t{\n";
 
-				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags);
 				std::string elemPtrName = "arrayElemPtr" + name;
 
 				preCallActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
-					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
+					generateGetInternalLine(varTypeInfo.typeName, scriptName, paramTypeInfo.type, varTypeInfo.flags) << ";\n";
 
 				if(paramTypeInfo.type == ParsedType::Class || paramTypeInfo.type == ParsedType::ReflectableClass)
 				{
-					if(isSrcPointer(flags))
+					if(isSrcPointer(varTypeInfo.flags))
 						preCallActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
-					else if((isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags))
+					else if((isSrcReference(varTypeInfo.flags) || isSrcValue(varTypeInfo.flags)) && !isSrcSPtr(varTypeInfo.flags))
 					{
 						preCallActions << "\t\t\t\t\tif(" << elemPtrName << ")\n";
 						preCallActions << "\t\t\t\t\t\t" << argName << "[i] = *" << elemPtrName << ";\n";
@@ -2527,10 +2536,10 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			std::string arrayName = "array" + name;
 
 			postCallActions << "\t\tint arraySize" << name << " = ";
-			if (isVector(flags))
+			if (isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 				postCallActions << "(int)" << argName << ".size()";
 			else
-				postCallActions << arraySize;
+				postCallActions << varTypeInfo.arraySize;
 			postCallActions << ";\n";
 
 			postCallActions << "\t\tScriptArray " << arrayName;
@@ -2551,7 +2560,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 				std::string enumType;
 				mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
-				if(isFlagsEnum(flags))
+				if(isFlagsEnum(varTypeInfo.flags))
 					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(uint32_t)" << argName << "[i]);" << std::endl;
 				else
 					postCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << argName << "[i]);" << std::endl;
@@ -2560,12 +2569,12 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			case ParsedType::Struct:
 				postCallActions << "\t\t\t" << arrayName << ".set(i, ";
 
-				if(isComplexStruct(flags))
+				if(isComplexStruct(varTypeInfo.flags))
 					postCallActions << entryType << "::toInterop(";
 
 				postCallActions << argName << "[i]";
 
-				if (isComplexStruct(flags))
+				if (isComplexStruct(varTypeInfo.flags))
 					postCallActions << ")";
 
 				postCallActions << ");\n";
@@ -2579,15 +2588,15 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string elemName = "arrayElem" + name;
 
-				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags);
 				std::string elemPtrName = "arrayElemPtr" + name;
 
 				postCallActions << "\t\t\t" << elemPtrType << " " << elemPtrName;
-				if(willBeDereferenced(flags))
+				if(willBeDereferenced(varTypeInfo.flags))
 				{
-					postCallActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+					postCallActions << " = bs_shared_ptr_new<" << varTypeInfo.typeName << ">();\n";
 
-					if (isSrcPointer(flags))
+					if (isSrcPointer(varTypeInfo.flags))
 					{
 						postCallActions << "\t\t\tif(" << argName << "[i])\n";
 						postCallActions << "\t\t\t\t*" << elemPtrName << " = *";
@@ -2603,7 +2612,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 					postCallActions << " = " << argName << "[i];\n";
 
 				postCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
-				postCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
+				postCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, elemName, 
 					entryType, elemPtrName, false, "\t\t\t");
 
 				postCallActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
@@ -2616,7 +2625,7 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 			{
 				std::string scriptName = "script" + name;
 
-				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName + "[i]", "\t\t\t");
+				postCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, argName + "[i]", "\t\t\t");
 				postCallActions << "\t\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				postCallActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 				postCallActions << "\t\t\telse" << std::endl;
@@ -2637,17 +2646,17 @@ std::string generateMethodBodyBlockForParam(const std::string& name, const std::
 	}
 }
 
-std::string generateFieldConvertBlock(const std::string& name, const std::string& typeName, int flags, unsigned arraySize, bool toInterop, std::stringstream& preActions)
+std::string generateFieldConvertBlock(const std::string& name, const VarTypeInfo& varTypeInfo, bool toInterop, std::stringstream& preActions)
 {
-	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+	UserTypeInfo paramTypeInfo = getTypeInfo(varTypeInfo.typeName, varTypeInfo.flags);
 
-	if (getIsAsyncOp(flags))
+	if (getIsAsyncOp(varTypeInfo.flags))
 	{
 		outs() << "Error: AsyncOp type not supported as a struct field. \n";
 		return "";
 	}
 
-	if (!isArrayOrVector(flags))
+	if (!isArrayOrVector(varTypeInfo.flags))
 	{
 		std::string arg;
 
@@ -2658,10 +2667,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			arg = "value." + name;
 			break;
 		case ParsedType::Struct:
-			if(isComplexStruct(flags))
+			if(isComplexStruct(varTypeInfo.flags))
 			{
-				std::string interopType = getStructInteropType(typeName);
-				std::string scriptType = getScriptInteropType(typeName);
+				std::string interopType = getStructInteropType(varTypeInfo.typeName);
+				std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 				arg = "tmp" + name;
 				if(toInterop)
@@ -2671,7 +2680,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				}
 				else
 				{
-					preActions << "\t\t" << typeName << " " << arg << ";" << std::endl;
+					preActions << "\t\t" << varTypeInfo.typeName << " " << arg << ";" << std::endl;
 					preActions << "\t\t" << arg << " = " << scriptType << "::fromInterop(value." << name << ");" << std::endl;
 				}
 			}
@@ -2737,21 +2746,21 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		case ParsedType::GUIElement:
 		{
 			arg = "tmp" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 			if(!toInterop)
 			{
-				if(isSrcPointer(flags))
+				if(isSrcPointer(varTypeInfo.flags))
 				{
-					std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+					std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 					preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 
 					std::string scriptName = "script" + name;
 					preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, 
-						paramTypeInfo.type, flags);
+						paramTypeInfo.type, varTypeInfo.flags);
 					preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
-					preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName,
-						paramTypeInfo.type, flags) << ";" << std::endl;
+					preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(varTypeInfo.typeName, scriptName,
+						paramTypeInfo.type, varTypeInfo.flags) << ";" << std::endl;
 				}
 				else
 					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
@@ -2762,53 +2771,53 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		case ParsedType::ReflectableClass:
 		{
 			arg = "tmp" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 			if(toInterop)
 			{
 				preActions << "\t\tMonoObject* " << arg << ";\n";
 
 				// Need to copy by value
-				if(isSrcValue(flags) || isSrcPointer(flags))
+				if(isSrcValue(varTypeInfo.flags) || isSrcPointer(varTypeInfo.flags))
 				{
-					std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+					std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 					preActions << "\t\t" << tmpType << " " << arg << "copy;\n";
 
 					// Note: Assuming a copy constructor exists
-					if (isSrcPointer(flags))
+					if (isSrcPointer(varTypeInfo.flags))
 					{
 						preActions << "\t\tif(value." << name << " != nullptr)\n";
-						preActions << "\t\t\t" << arg << "copy = bs_shared_ptr_new<" << typeName << ">(*value." << name << ");\n";
+						preActions << "\t\t\t" << arg << "copy = bs_shared_ptr_new<" << varTypeInfo.typeName << ">(*value." << name << ");\n";
 					}
 					else
-						preActions << "\t\t" << arg << "copy = bs_shared_ptr_new<" << typeName << ">(value." << name << ");\n";
+						preActions << "\t\t" << arg << "copy = bs_shared_ptr_new<" << varTypeInfo.typeName << ">(value." << name << ");\n";
 
-					preActions << generateClassNativeToScriptObjectLine(flags, typeName, arg, scriptType, arg + "copy");
+					preActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, arg, scriptType, arg + "copy");
 				}
-				else if(isSrcSPtr(flags))
-					preActions << generateClassNativeToScriptObjectLine(flags, typeName, arg, scriptType, "value." + name);
+				else if(isSrcSPtr(varTypeInfo.flags))
+					preActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, arg, scriptType, "value." + name);
 				else
 					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
 			}
 			else
 			{
-				std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+				std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, flags);
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, varTypeInfo.flags);
 				preActions << "\t\tif(" << scriptName << " != nullptr)" << std::endl;
 				preActions << "\t\t\t" << arg << " = " << scriptName << "->getInternal();" << std::endl;
 
 				// Cast to the source type from SPtr
-				if (isSrcValue(flags))
+				if (isSrcValue(varTypeInfo.flags))
 				{
 					preActions << "\t\tif(" << arg << " != nullptr)" << std::endl;
 					arg = "*" + arg;
 				}
-				else if (isSrcPointer(flags))
+				else if (isSrcPointer(varTypeInfo.flags))
 					arg = arg + ".get()";
-				else if(!isSrcSPtr(flags))
+				else if(!isSrcSPtr(varTypeInfo.flags))
 					outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
 			}
 		}
@@ -2816,19 +2825,19 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		default: // Some resource or game object type
 		{
 			arg = "tmp" + name;
-			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 			std::string scriptName = "script" + name;
 
 			if(toInterop)
 			{
 				std::string argName;
 				
-				if(!getIsComponentOrActor(flags))
+				if(!getIsComponentOrActor(varTypeInfo.flags))
 					argName = "value." + name;
 				else
 					argName = "value." + name + ".getComponent()";
 
-				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, argName);
+				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, argName);
 
 				preActions << "\t\tMonoObject* " << arg << ";\n";
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
@@ -2838,15 +2847,15 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			}
 			else
 			{
-				std::string tmpType = getCppVarType(typeName, paramTypeInfo.type);
+				std::string tmpType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type);
 				preActions << "\t\t" << tmpType << " " << arg << ";" << std::endl;
 				
-				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, flags);
+				preActions << generateManagedToScriptObjectLine("\t\t", scriptType, scriptName, "value." + name, paramTypeInfo.type, varTypeInfo.flags);
 				preActions << "\t\tif(" << scriptName << " != nullptr)\n";
-				preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";" << std::endl;
+				preActions << "\t\t\t" << arg << " = " << generateGetInternalLine(varTypeInfo.typeName, scriptName, paramTypeInfo.type, varTypeInfo.flags) << ";" << std::endl;
 			}
 
-			if(!isSrcGHandle(flags) && !isSrcRHandle(flags))
+			if(!isSrcGHandle(varTypeInfo.flags) && !isSrcRHandle(varTypeInfo.flags))
 				outs() << "Error: Invalid struct member type for \"" << name << "\"\n";
 		}
 		break;
@@ -2864,21 +2873,23 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		case ParsedType::WString:
 		case ParsedType::Path:
 		case ParsedType::Enum:
-			entryType = typeName;
+			entryType = varTypeInfo.typeName;
 			break;
 		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			entryType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 			break;
 		}
 
 		std::string argType;
-		if(isVector(flags))
-			argType = "Vector<" + getCppVarType(typeName, paramTypeInfo.type, flags, false) + ">";
+		if(isVector(varTypeInfo.flags))
+			argType = "Vector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ">";
+		else if(isSmallVector(varTypeInfo.flags))
+			argType = "SmallVector<" + getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false) + ", " + std::to_string(varTypeInfo.arraySize) + ">";
 		else
-			argType = getCppVarType(typeName, paramTypeInfo.type, flags, false);
+			argType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags, false);
 
 		std::string argName = "vec" + name;
 
@@ -2886,15 +2897,15 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		{
 			std::string arrayName = "array" + name;
 			preActions << "\t\t" << argType << " " << argName;
-			if (isArray(flags))
-				preActions << "[" << arraySize << "]";
+			if (isArray(varTypeInfo.flags))
+				preActions << "[" << varTypeInfo.arraySize << "]";
 			preActions << ";" << std::endl;
 
 			preActions << "\t\tif(value." << name << " != nullptr)\n";
 			preActions << "\t\t{\n";
 			preActions << "\t\t\tScriptArray " << arrayName << "(value." << name << ");" << std::endl;
 
-			if(isVector(flags))
+			if(isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 				preActions << "\t\t\t" << argName << ".resize(" << arrayName << ".size());" << std::endl;
 
 			preActions << "\t\t\tfor(int i = 0; i < (int)" << arrayName << ".size(); i++)" << std::endl;
@@ -2920,27 +2931,27 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 				break;
 			}
 			case ParsedType::Struct:
-				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << typeName << ">(i);" << std::endl;
+				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << varTypeInfo.typeName << ">(i);" << std::endl;
 				break;
 			default: // Some object type
 			{
 				std::string scriptName = "script" + name;
-				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, flags);
+				preActions << generateManagedToScriptObjectLine("\t\t\t\t", entryType, scriptName, arrayName + ".get<MonoObject*>(i)", paramTypeInfo.type, varTypeInfo.flags);
 				
 				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
 				preActions << "\t\t\t\t{\n";
 
-				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags);
 				std::string elemPtrName = "arrayElemPtr" + name;
 
 				preActions << "\t\t\t\t\t" << elemPtrType << " " << elemPtrName << " = " << 
-					generateGetInternalLine(typeName, scriptName, paramTypeInfo.type, flags) << ";\n";
+					generateGetInternalLine(varTypeInfo.typeName, scriptName, paramTypeInfo.type, varTypeInfo.flags) << ";\n";
 
 				if(paramTypeInfo.type == ParsedType::Class || paramTypeInfo.type == ParsedType::ReflectableClass)
 				{
-					if(isSrcPointer(flags))
+					if(isSrcPointer(varTypeInfo.flags))
 						preActions << "\t\t\t\t\t" << argName << "[i] = " << elemPtrName << ".get();\n";
-					else if((isSrcReference(flags) || isSrcValue(flags)) && !isSrcSPtr(flags))
+					else if((isSrcReference(varTypeInfo.flags) || isSrcValue(varTypeInfo.flags)) && !isSrcSPtr(varTypeInfo.flags))
 					{
 						preActions << "\t\t\t\t\tif(" << elemPtrName << ")\n";
 						preActions << "\t\t\t\t\t\t" << argName << "[i] = *" << elemPtrName << ";\n";
@@ -2962,10 +2973,10 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 		else
 		{
 			preActions << "\t\tint arraySize" << name << " = ";
-			if (isVector(flags))
+			if (isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 				preActions << "(int)value." << name << ".size()";
 			else
-				preActions << arraySize;
+				preActions << varTypeInfo.arraySize;
 			preActions << ";\n";
 
 			preActions << "\t\tMonoArray* " << argName << ";" << std::endl;
@@ -3003,15 +3014,15 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			{
 				std::string elemName = "arrayElem" + name;
 
-				std::string elemPtrType = getCppVarType(typeName, paramTypeInfo.type, flags);
+				std::string elemPtrType = getCppVarType(varTypeInfo.typeName, paramTypeInfo.type, varTypeInfo.flags);
 				std::string elemPtrName = "arrayElemPtr" + name;
 
 				preActions << "\t\t\t" << elemPtrType << " " << elemPtrName;
-				if(willBeDereferenced(flags))
+				if(willBeDereferenced(varTypeInfo.flags))
 				{
-					preActions << " = bs_shared_ptr_new<" << typeName << ">();\n";
+					preActions << " = bs_shared_ptr_new<" << varTypeInfo.typeName << ">();\n";
 
-					if (isSrcPointer(flags))
+					if (isSrcPointer(varTypeInfo.flags))
 					{
 						preActions << "\t\t\tif(value." << name << "[i])\n";
 						preActions << "\t\t\t\t*" << elemPtrName << " = *";
@@ -3027,7 +3038,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 					preActions << " = value." << name << "[i];\n";
 
 				preActions << "\t\t\tMonoObject* " << elemName << ";\n";
-				preActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName, 
+				preActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, elemName, 
 					entryType, elemPtrName, false, "\t\t\t");
 
 				preActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
@@ -3040,7 +3051,7 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 			{
 				std::string scriptName = "script" + name;
 
-				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, "value." + name + "[i]", "\t\t\t");
+				preActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, "value." + name + "[i]", "\t\t\t");
 				preActions << "\t\t\t\tif(" << scriptName << " != nullptr)\n";
 				preActions << "\t\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 				preActions << "\t\t\telse\n";
@@ -3057,17 +3068,17 @@ std::string generateFieldConvertBlock(const std::string& name, const std::string
 	}
 }
 
-std::string generateEventCallbackBodyBlockForParam(const std::string& name, const std::string& typeName, int flags, unsigned arraySize, std::stringstream& preCallActions)
+std::string generateEventCallbackBodyBlockForParam(const std::string& name, const VarTypeInfo& varTypeInfo, std::stringstream& preCallActions)
 {
-	UserTypeInfo paramTypeInfo = getTypeInfo(typeName, flags);
+	UserTypeInfo paramTypeInfo = getTypeInfo(varTypeInfo.typeName, varTypeInfo.flags);
 
-	if (getIsAsyncOp(flags))
+	if (getIsAsyncOp(varTypeInfo.flags))
 	{
 		outs() << "Error: AsyncOp type not supported as an event callback parameter. \n";
 		return "";
 	}
 
-	if (!isArrayOrVector(flags))
+	if (!isArrayOrVector(varTypeInfo.flags))
 	{
 		std::string argName;
 
@@ -3077,11 +3088,11 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			argName = name;
 			break;
 		case ParsedType::Enum:
-			if(isFlagsEnum(flags))
+			if(isFlagsEnum(varTypeInfo.flags))
 			{
 				argName = "tmp" + name;
-				preCallActions << "\t\t" << typeName << argName << ";" << std::endl;
-				preCallActions << "\t\t" << argName << " = (" << typeName << ")(uint32_t)" << name << ";" << std::endl;
+				preCallActions << "\t\t" << varTypeInfo.typeName << argName << ";" << std::endl;
+				preCallActions << "\t\t" << argName << " = (" << varTypeInfo.typeName << ")(uint32_t)" << name << ";" << std::endl;
 			}
 			else
 				argName = name;
@@ -3090,13 +3101,13 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			{
 				argName = "tmp" + name;
 
-				std::string scriptType = getScriptInteropType(typeName);
+				std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 				preCallActions << "\t\tMonoObject* " << argName << ";\n";
 
-				if(isComplexStruct(flags))
+				if(isComplexStruct(varTypeInfo.flags))
 				{
 					std::string interopName = "interop" + name;
-					std::string interopType = getStructInteropType(typeName);
+					std::string interopType = getStructInteropType(varTypeInfo.typeName);
 					
 					preCallActions << "\t\t" << interopType << " " << interopName << ";" << std::endl;
 					preCallActions << "\t\t" << interopName << " = " << scriptType << "::toInterop(" << name << ");" << std::endl;
@@ -3138,10 +3149,10 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		case ParsedType::ReflectableClass:
 		{
 			argName = "tmp" + name;
-			std::string scriptType = getScriptInteropType(typeName);
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName);
 
 			preCallActions << "\t\tMonoObject* " << argName << ";\n";
-			preCallActions << generateClassNativeToScriptObjectLine(flags, typeName, argName, scriptType, name);
+			preCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, argName, scriptType, name);
 		}
 			break;
 		default: // Some resource or game object type
@@ -3150,9 +3161,9 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			preCallActions << "\t\tMonoObject* " << argName << ";" << std::endl;
 
 			std::string scriptName = "script" + name;
-			std::string scriptType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			std::string scriptType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 
-			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, name);
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, name);
 			preCallActions << "\t\tif(" << scriptName << " != nullptr)\n";
 			preCallActions << "\t\t\t" << argName << " = " << scriptName << "->getManagedInstance();" << std::endl;
 			preCallActions << "\t\telse\n";
@@ -3173,13 +3184,13 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		case ParsedType::WString:
 		case ParsedType::Path:
 		case ParsedType::Enum:
-			entryType = typeName;
+			entryType = varTypeInfo.typeName;
 			break;
 		case ParsedType::MonoObject:
 			entryType = "MonoObject*";
 			break;
 		default: // Some object or struct type
-			entryType = getScriptInteropType(typeName, getPassAsResourceRef(flags));
+			entryType = getScriptInteropType(varTypeInfo.typeName, getPassAsResourceRef(varTypeInfo.flags));
 			break;
 		}
 
@@ -3187,10 +3198,10 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		preCallActions << "\t\tMonoArray* " << argName << ";" << std::endl;
 
 		preCallActions << "\t\tint arraySize" << name << " = ";
-		if (isVector(flags))
+		if (isVector(varTypeInfo.flags) || isSmallVector(varTypeInfo.flags))
 			preCallActions << "(int)value." << name << ".size()";
 		else
-			preCallActions << arraySize;
+			preCallActions << varTypeInfo.arraySize;
 		preCallActions << ";\n";
 
 		std::string arrayName = "array" + name;
@@ -3212,7 +3223,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 			std::string enumType;
 			mapBuiltinTypeToCppType(paramTypeInfo.underlyingType, enumType);
 
-			if(isFlagsEnum(flags))
+			if(isFlagsEnum(varTypeInfo.flags))
 				preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")(uint32_t)" << name << "[i]);" << std::endl;
 			else
 				preCallActions << "\t\t\t" << arrayName << ".set(i, (" << enumType << ")" << name << "[i]);" << std::endl;
@@ -3221,12 +3232,12 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		case ParsedType::Struct:
 			preCallActions << "\t\t\t" << arrayName << ".set(i, ";
 
-			if (isComplexStruct(flags))
+			if (isComplexStruct(varTypeInfo.flags))
 				preCallActions << entryType << "::toInterop(";
 
 			preCallActions << name << "[i]";
 
-			if (isComplexStruct(flags))
+			if (isComplexStruct(varTypeInfo.flags))
 				preCallActions << ")";
 
 			preCallActions << ");\n";
@@ -3239,7 +3250,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		{
 			std::string elemName = "arrayElem" + name;
 			preCallActions << "\t\t\tMonoObject* " << elemName << ";\n";
-			preCallActions << generateClassNativeToScriptObjectLine(flags, typeName, elemName,
+			preCallActions << generateClassNativeToScriptObjectLine(varTypeInfo.flags, varTypeInfo.typeName, elemName,
 				entryType, name + "[i]", false, "\t\t\t");
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << elemName << ");" << std::endl;
 		}
@@ -3248,7 +3259,7 @@ std::string generateEventCallbackBodyBlockForParam(const std::string& name, cons
 		{
 			std::string scriptName = "script" + name;
 
-			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, flags, scriptName, name + "[i]", "\t\t\t");
+			preCallActions << generateNativeToScriptObjectLine(paramTypeInfo.type, varTypeInfo.flags, scriptName, name + "[i]", "\t\t\t");
 			preCallActions << "\t\t\tif(" << scriptName << "[i] != nullptr)\n";
 			preCallActions << "\t\t\t" << arrayName << ".set(i, " << scriptName << "->getManagedInstance());" << std::endl;
 			preCallActions << "\t\t\telse\n";
@@ -3281,18 +3292,17 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 
 	bool returnAsParameter = false;
 	UserTypeInfo returnTypeInfo;
-	if (!methodInfo.returnInfo.type.empty() && !isCtor)
+	if (!methodInfo.returnInfo.typeName.empty() && !isCtor)
 	{
-		returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+		returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 		if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 			returnAsParameter = true;
 		else
 		{
-			std::string returnType = getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
+			std::string returnType = getInteropCppVarType(methodInfo.returnInfo.typeName, returnTypeInfo.type, methodInfo.returnInfo.flags);
 			postCallActions << "\t\t" << returnType << " __output;" << std::endl;
 
-			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-				methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+			std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo, true, true, preCallActions, postCallActions);
 
 			returnAssignment = argName + " = ";
 			returnStmt = "\t\treturn __output;";
@@ -3303,12 +3313,11 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 	{
 		bool isLast = (I + 1) == methodInfo.paramInfos.end();
 
-		std::string argName = generateMethodBodyBlockForParam(I->name, I->type, I->flags, I->arraySize, isLast, false,
-			preCallActions, postCallActions);
+		std::string argName = generateMethodBodyBlockForParam(I->name, *I, isLast, false, preCallActions, postCallActions);
 
 		if (!isArrayOrVector(I->flags))
 		{
-			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+			UserTypeInfo paramTypeInfo = getTypeInfo(I->typeName, I->flags);
 
 			methodArgs << getAsManagedToCppArgument(argName, paramTypeInfo.type, I->flags, methodInfo.sourceName);
 		}
@@ -3321,8 +3330,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 
 	if (returnAsParameter)
 	{
-		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo, true, true, preCallActions, postCallActions);
 
 		returnAssignment = argName + " = ";
 	}
@@ -3403,7 +3411,7 @@ std::string generateCppMethodBody(const ClassInfo& classInfo, const MethodInfo& 
 		}
 
 		std::string call;
-		if (!methodInfo.returnInfo.type.empty())
+		if (!methodInfo.returnInfo.typeName.empty())
 		{
 			// Dereference input if needed
 			if (isClassType(returnTypeInfo.type) && !isArrayOrVector(methodInfo.returnInfo.flags))
@@ -3450,16 +3458,15 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
 
 	bool returnAsParameter = false;
-	UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+	UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 	if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 		returnAsParameter = true;
 	else
 	{
-		std::string returnType = getInteropCppVarType(methodInfo.returnInfo.type, returnTypeInfo.type, methodInfo.returnInfo.flags);
+		std::string returnType = getInteropCppVarType(methodInfo.returnInfo.typeName, returnTypeInfo.type, methodInfo.returnInfo.flags);
 		postCallActions << "\t\t" << returnType << " __output;" << std::endl;
 
-		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo, true, true, preCallActions, postCallActions);
 
 		returnAssignment = argName + " = ";
 		returnStmt = "\t\treturn __output;";
@@ -3467,8 +3474,7 @@ std::string generateCppFieldGetterBody(const ClassInfo& classInfo, const FieldIn
 
 	if (returnAsParameter)
 	{
-		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo.type,
-			methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true, true, preCallActions, postCallActions);
+		std::string argName = generateMethodBodyBlockForParam("__output", methodInfo.returnInfo, true, true, preCallActions, postCallActions);
 
 		returnAssignment = argName + " = ";
 	}
@@ -3524,10 +3530,9 @@ std::string generateCppFieldSetterBody(const ClassInfo& classInfo, const FieldIn
 	bool isStatic = (methodInfo.flags & (int)MethodFlags::Static) != 0;
 
 	const VarInfo& paramInfo = methodInfo.paramInfos[0];
-	std::string argName = generateMethodBodyBlockForParam(paramInfo.name, paramInfo.type, paramInfo.flags, paramInfo.arraySize, false, false,
-		preCallActions, postCallActions);
+	std::string argName = generateMethodBodyBlockForParam(paramInfo.name, paramInfo, false, false, preCallActions, postCallActions);
 
-	UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+	UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 
 	if(!isArrayOrVector(paramInfo.flags))
 		argValue << getAsManagedToCppArgument(argName, paramTypeInfo.type, paramInfo.flags, methodInfo.sourceName);
@@ -3573,11 +3578,11 @@ std::string generateCppEventCallbackBody(const MethodInfo& eventInfo, bool isMod
 	{
 		bool isLast = (I + 1) == eventInfo.paramInfos.end();
 
-		std::string argName = generateEventCallbackBodyBlockForParam(I->name, I->type, I->flags, I->arraySize, preCallActions);
+		std::string argName = generateEventCallbackBodyBlockForParam(I->name, *I, preCallActions);
 
 		if (!isArrayOrVector(I->flags))
 		{
-			UserTypeInfo paramTypeInfo = getTypeInfo(I->type, I->flags);
+			UserTypeInfo paramTypeInfo = getTypeInfo(I->typeName, I->flags);
 
 			if(paramTypeInfo.type == ParsedType::Struct)
 				methodArgs << getAsCppToManagedArgument(argName, ParsedType::Class, I->flags, eventInfo.sourceName);
@@ -3971,6 +3976,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		output << "\n";
 
 	// Event handles
+	bool hasEventHandles = false;
 	for (auto& eventInfo : classInfo.eventInfos)
 	{
 		bool isStatic = (eventInfo.flags & (int)MethodFlags::Static) != 0;
@@ -3980,10 +3986,12 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 			output << generateCppApiCheckBegin(eventInfo.api);
 			output << "\tHEvent " << interopClassName << "::" << eventInfo.sourceName << "Conn;\n";
 			output << generateApiCheckEnd(eventInfo.api);
+
+			hasEventHandles = true;
 		}
 	}
 
-	if (!classInfo.eventInfos.empty())
+	if (hasEventHandles)
 		output << "\n";
 
 	// Constructor
@@ -4137,7 +4145,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for (auto I = eventInfo.paramInfos.begin(); I != eventInfo.paramInfos.end(); ++I)
 		{
 			const VarInfo& paramInfo = *I;
-			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 
 			std::string typeName;
 
@@ -4198,7 +4206,7 @@ std::string generateCppSourceOutput(const ClassInfo& classInfo, const UserTypeIn
 		for (int i = 0; i < numDummyParams; i++)
 		{
 			ctorParamsInit << "&dummy";
-			ctorSignature << unusedCtor.paramInfos[i].type;
+			ctorSignature << unusedCtor.paramInfos[i].typeName;
 
 			if ((i + 1) < numDummyParams)
 			{
@@ -4417,10 +4425,10 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 
 		for(auto& fieldInfo : structInfo.fields)
 		{
-			UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+			UserTypeInfo fieldTypeInfo = getTypeInfo(fieldInfo.typeName, fieldInfo.flags);
 
 			output << "\t\t";
-			output << getInteropCppVarType(fieldInfo.type, fieldTypeInfo.type, fieldInfo.flags, true);
+			output << getInteropCppVarType(fieldInfo.typeName, fieldTypeInfo.type, fieldInfo.flags, true);
 			output << " " << fieldInfo.name << ";\n";
 		}
 
@@ -4516,8 +4524,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 			// Arrays can be assigned, so copy them entry by entry
 			if(isArray(fieldInfo.flags))
 			{
-				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags, fieldInfo
-						.arraySize, false, output);
+				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo, false, output);
 
 				output << "\t\tauto tmp" << fieldInfo.name << " = " << argName << ";\n";
 				output << "\t\tfor(int i = 0; i < " << fieldInfo.arraySize << "; ++i)\n";
@@ -4525,8 +4532,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 			}
 			else
 			{
-				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags,
-						fieldInfo .arraySize, false, output);
+				std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo, false, output);
 
 				output << "\t\toutput." << fieldInfo.name << " = " << argName << ";\n";
 			}
@@ -4543,8 +4549,7 @@ std::string generateCppStructSource(const StructInfo& structInfo)
 		output << "\t\t" << structInfo.interopName << " output;\n";
 		for(auto& fieldInfo : structInfo.fields)
 		{
-			std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo.type, fieldInfo.flags,
-					fieldInfo.arraySize, true, output);
+			std::string argName = generateFieldConvertBlock(fieldInfo.name, fieldInfo, true, output);
 
 			output << "\t\toutput." << fieldInfo.name << " = " << argName << ";\n";
 		}
@@ -4646,7 +4651,7 @@ std::string generateCSMethodParams(const MethodInfo& methodInfo, bool forInterop
 		if (I != methodInfo.paramInfos.begin())
 			output << ", ";
 
-		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 		std::string qualifiedType = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, true, true, forInterop);
 
 		bool isLastParam = (I + 1) == methodInfo.paramInfos.end();
@@ -4668,7 +4673,7 @@ std::string generateCSMethodArgs(const MethodInfo& methodInfo, bool forInterop)
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 	{
 		const VarInfo& paramInfo = *I;
-		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 
 		if (isOutput(paramInfo.flags))
 			output << "out ";
@@ -4696,7 +4701,7 @@ std::string generateCSMethodDefaultParamAssignments(const MethodInfo& methodInfo
 
 		if (paramInfo.defaultValueType == "null" || paramInfo.defaultValue == "null")
 		{
-			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 			output << indent << paramTypeInfo.scriptName << " " << paramInfo.name << " = " << paramInfo.defaultValue << ";\n";
 		}
 		else
@@ -4717,7 +4722,7 @@ std::string generateCSEventSignature(const MethodInfo& methodInfo)
 	for (auto I = methodInfo.paramInfos.begin(); I != methodInfo.paramInfos.end(); ++I)
 	{
 		const VarInfo& paramInfo = *I;
-		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+		UserTypeInfo paramTypeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 		std::string type = getCSVarType(paramTypeInfo.scriptName, paramTypeInfo.type, paramInfo.flags, false, true, false);
 
 		output << type;
@@ -4752,11 +4757,11 @@ std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const
 	std::stringstream output;
 
 	bool returnAsParameter = false;
-	if (methodInfo.returnInfo.type.empty() || isCtor)
+	if (methodInfo.returnInfo.typeName.empty() || isCtor)
 		output << "void";
 	else
 	{
-		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 		if (!canBeReturned(returnTypeInfo.type, methodInfo.returnInfo.flags))
 		{
 			output << "void";
@@ -4793,7 +4798,7 @@ std::string generateCSInteropMethodSignature(const MethodInfo& methodInfo, const
 
 	if (returnAsParameter)
 	{
-		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags);
+		UserTypeInfo returnTypeInfo = getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags);
 		std::string qualifiedType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, methodInfo.returnInfo.flags, false, true, false);
 
 		if (methodInfo.paramInfos.size() > 0)
@@ -4946,11 +4951,11 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 			{
 				UserTypeInfo returnTypeInfo;
 				std::string returnType;
-				if (entry.returnInfo.type.empty())
+				if (entry.returnInfo.typeName.empty())
 					returnType = "void";
 				else
 				{
-					returnTypeInfo = getTypeInfo(entry.returnInfo.type, entry.returnInfo.flags);
+					returnTypeInfo = getTypeInfo(entry.returnInfo.typeName, entry.returnInfo.flags);
 					returnType = getCSVarType(returnTypeInfo.scriptName, returnTypeInfo.type, entry.returnInfo.flags, false, true, false);
 				}
 
@@ -4972,7 +4977,7 @@ std::string generateCSClass(ClassInfo& input, UserTypeInfo& typeInfo)
 				methods << generateCSMethodDefaultParamAssignments(entry, "\t\t\t");
 
 				bool returnByParam = false;
-				if (!entry.returnInfo.type.empty())
+				if (!entry.returnInfo.typeName.empty())
 				{
 					if (!canBeReturned(returnTypeInfo.type, entry.returnInfo.flags))
 					{
@@ -5280,7 +5285,7 @@ std::string generateCSStruct(StructInfo& input)
 		{
 			const VarInfo& paramInfo = *I;
 
-			UserTypeInfo typeInfo = getTypeInfo(paramInfo.type, paramInfo.flags);
+			UserTypeInfo typeInfo = getTypeInfo(paramInfo.typeName, paramInfo.flags);
 
 			if (!isValidStructType(typeInfo, paramInfo.flags))
 			{
@@ -5322,7 +5327,7 @@ std::string generateCSStruct(StructInfo& input)
 		{
 			const VarInfo& fieldInfo = *I;
 
-			UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+			UserTypeInfo typeInfo = getTypeInfo(fieldInfo.typeName, fieldInfo.flags);
 
 			if (!isValidStructType(typeInfo, fieldInfo.flags))
 			{
@@ -5344,7 +5349,7 @@ std::string generateCSStruct(StructInfo& input)
 				if (!fieldInfo.defaultValue.empty())
 					defaultValue = generateCSDefaultValueAssignment(fieldInfo);
 				else
-					defaultValue = getDefaultValue(fieldInfo.type, fieldInfo.flags, typeInfo);
+					defaultValue = getDefaultValue(fieldInfo.typeName, fieldInfo.flags, typeInfo);
 
 				output << "\t\t\t" << thisPtr << "." << fieldName << " = " << defaultValue << ";" << std::endl;
 			}
@@ -5407,7 +5412,7 @@ std::string generateCSStruct(StructInfo& input)
 	{
 		const FieldInfo& fieldInfo = *I;
 
-		UserTypeInfo typeInfo = getTypeInfo(fieldInfo.type, fieldInfo.flags);
+		UserTypeInfo typeInfo = getTypeInfo(fieldInfo.typeName, fieldInfo.flags);
 
 		if (!isValidStructType(typeInfo, fieldInfo.flags))
 		{
@@ -5504,7 +5509,7 @@ std::string generateXMLParamInfo(const VarInfo& varInfo, const CommentEntry& met
 {
 	std::stringstream output;
 	output << indent << "<param name=\"" << escapeXML(varInfo.name) << "\" type=\"" << 
-		escapeXML(getTypeInfo(varInfo.type, varInfo.flags).scriptName) << "\">\n";
+		escapeXML(getTypeInfo(varInfo.typeName, varInfo.flags).scriptName) << "\">\n";
 
 	auto iterFind = std::find_if(methodDoc.params.begin(), methodDoc.params.end(), 
 		[&varName = varInfo.name](const CommentParamEntry& entry) { return varName == entry.name; });
@@ -5519,7 +5524,7 @@ std::string generateXMLFieldInfo(const FieldInfo& fieldInfo, const std::string& 
 {
 	std::stringstream output;
 	output << indent << "<field name=\"" << escapeXML(fieldInfo.name) << "\" type=\"" << 
-		escapeXML(getTypeInfo(fieldInfo.type, fieldInfo.flags).scriptName) << "\">\n";
+		escapeXML(getTypeInfo(fieldInfo.typeName, fieldInfo.flags).scriptName) << "\">\n";
 
 	// TODO - Generate inspector visibility
 	if(!fieldInfo.documentation.brief.empty())
@@ -5552,9 +5557,9 @@ std::string generateXMLMethodInfo(const MethodInfo& methodInfo, const std::strin
 	for(auto& param : methodInfo.paramInfos)
 		output << generateXMLParamInfo(param, methodInfo.documentation, indent + "\t");
 
-	if(!ctor && !methodInfo.returnInfo.type.empty())
+	if(!ctor && !methodInfo.returnInfo.typeName.empty())
 	{
-		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(methodInfo.returnInfo.type, methodInfo.returnInfo.flags).scriptName) << "\">\n";
+		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(methodInfo.returnInfo.typeName, methodInfo.returnInfo.flags).scriptName) << "\">\n";
 
 		if (!methodInfo.documentation.returns.empty())
 			output << indent << "\t\t<doc>" << generateXMLCommentText(methodInfo.documentation.returns) << "</doc>\n";
@@ -5618,9 +5623,9 @@ std::string generateXMLEventInfo(const MethodInfo& eventInfo, const std::string&
 	for(auto& param : eventInfo.paramInfos)
 		output << generateXMLParamInfo(param, eventInfo.documentation, indent + "\t");
 
-	if(!eventInfo.returnInfo.type.empty())
+	if(!eventInfo.returnInfo.typeName.empty())
 	{
-		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(eventInfo.returnInfo.type, eventInfo.returnInfo.flags).scriptName) << "\">\n";
+		output << indent << "\t<returns type=\"" << escapeXML(getTypeInfo(eventInfo.returnInfo.typeName, eventInfo.returnInfo.flags).scriptName) << "\">\n";
 
 		if (!eventInfo.documentation.returns.empty())
 			output << indent << "\t\t<doc>" << generateXMLCommentText(eventInfo.documentation.returns) << "</doc>\n";

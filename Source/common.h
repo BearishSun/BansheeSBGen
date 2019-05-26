@@ -72,7 +72,8 @@ enum class TypeFlags
 	AsResourceRef = 1 << 17,
 	ComponentOrActor = 1 << 18,
 	Path = 1 << 19,
-	AsyncOp = 1 << 20
+	AsyncOp = 1 << 20,
+	SmallVector = 1 << 21
 };
 
 enum class MethodFlags
@@ -175,23 +176,23 @@ struct UserTypeInfo
 	BuiltinType::Kind underlyingType; // For enums
 };
 
-struct VarInfo
+struct VarTypeInfo
+{
+	std::string typeName;
+	unsigned arraySize;
+	int flags;
+};
+
+struct VarInfo : VarTypeInfo
 {
 	std::string name;
-	std::string type;
-	unsigned arraySize;
 
 	std::string defaultValue;
 	std::string defaultValueType;
-	int flags;
 };
 
-struct ReturnInfo
-{
-	std::string type;
-	unsigned arraySize;
-	int flags;
-};
+struct ReturnInfo : VarTypeInfo
+{ };
 
 struct CommentRef
 {
@@ -834,9 +835,14 @@ inline bool isVector(int flags)
 	return (flags & (int)TypeFlags::Vector) != 0;
 }
 
+inline bool isSmallVector(int flags)
+{
+	return (flags & (int)TypeFlags::SmallVector) != 0;
+}
+
 inline bool isArrayOrVector(int flags)
 {
-	return (flags & ((int)TypeFlags::Vector | (int)TypeFlags::Array)) != 0;
+	return (flags & ((int)TypeFlags::Vector | (int)TypeFlags::Array | (int)TypeFlags::SmallVector)) != 0;
 }
 
 inline bool isFlagsEnum(int flags)

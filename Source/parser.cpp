@@ -229,27 +229,27 @@ void addEntryToFile(FileInfo& fileInfo, T& entry, const std::string& file, std::
 		addEntry(fileInfo, entry);
 }
 
-bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typeFlags, unsigned& arraySize, bool returnValue)
+bool ScriptExportParser::parseType(QualType type, VarTypeInfo& outType, bool returnValue)
 {
-	typeFlags = 0;
-	arraySize = 0;
+	outType.flags = 0;
+	outType.arraySize = 0;
 
 	QualType realType;
 	if (type->isPointerType())
 	{
 		realType = type->getPointeeType();
-		typeFlags |= (int)TypeFlags::SrcPtr;
+		outType.flags |= (int)TypeFlags::SrcPtr;
 
 		if (!returnValue && !realType.isConstQualified())
-			typeFlags |= (int)TypeFlags::Output;
+			outType.flags |= (int)TypeFlags::Output;
 	}
 	else if (type->isReferenceType())
 	{
 		realType = type->getPointeeType();
-		typeFlags |= (int)TypeFlags::SrcRef;
+		outType.flags |= (int)TypeFlags::SrcRef;
 
 		if (!returnValue && !realType.isConstQualified())
-			typeFlags |= (int)TypeFlags::Output;
+			outType.flags |= (int)TypeFlags::Output;
 	}
 	else
 		realType = type;
@@ -272,10 +272,42 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 
 			std::string sourceTypeName = recordDecl->getName();
 
+			// Note: vector parsing code copied below
 			if (sourceTypeName == "vector" && recordDecl->isInStdNamespace())
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::Vector;
+				outType.flags |= (int)TypeFlags::Vector;
+			}
+			else if(sourceTypeName == "SmallVector")
+			{
+				realType = specType->getArg(0).getAsType();
+				outType.flags |= (int)TypeFlags::SmallVector;
+
+				uint32_t smallVectorSize = 0;
+				if(numArgs > 1)
+				{
+					std::string tmplArgExprValue, exprType;
+					if (evaluateExpression(specType->getArg(1).getAsExpr(), tmplArgExprValue, exprType))
+					{
+						try
+						{
+							smallVectorSize = std::stoi(tmplArgExprValue);
+						}
+						catch(const std::invalid_argument& ex)
+						{
+							outs() << "Error: Cannot convert SmallVector size template argument to a number, ignoring it.\n";
+						}
+						catch(const std::out_of_range& ex)
+						{
+							outs() << "Error: Cannot convert SmallVector size template argument to a number, ignoring it.\n";
+						}
+						
+					}
+					else
+						outs() << "Error: Template argument for SmallVector cannot be constantly evaluated, ignoring it.\n";
+				}
+
+				outType.arraySize = smallVectorSize;
 			}
 			else if(sourceTypeName == "ComponentOrActor")
 			{
@@ -300,12 +332,12 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 					return false;
 				}
 
-				typeFlags |= (int)TypeFlags::ComponentOrActor;
+				outType.flags |= (int)TypeFlags::ComponentOrActor;
 			}
 			else if(sourceTypeName == "TAsyncOp")
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::AsyncOp;
+				outType.flags |= (int)TypeFlags::AsyncOp;
 			}
 			else
 			{
@@ -325,9 +357,9 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 		if (arrayType)
 		{
 			realType = arrayType->getElementType();
-			arraySize = (unsigned)arrayType->getSize().getZExtValue();
 
-			typeFlags |= (int)TypeFlags::Array;
+			outType.arraySize = (unsigned)arrayType->getSize().getZExtValue();
+			outType.flags |= (int)TypeFlags::Array;
 		}
 	}
 
@@ -352,13 +384,44 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			if (sourceTypeName == "vector" && recordDecl->isInStdNamespace())
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::Vector;
+				outType.flags |= (int)TypeFlags::Vector;
 			}
-			
+			else if(sourceTypeName == "SmallVector")
+			{
+				realType = specType->getArg(0).getAsType();
+				outType.flags |= (int)TypeFlags::SmallVector;
+
+				uint32_t smallVectorSize = 0;
+				if(numArgs > 1)
+				{
+					std::string tmplArgExprValue, exprType;
+					if (evaluateExpression(specType->getArg(1).getAsExpr(), tmplArgExprValue, exprType))
+					{
+						try
+						{
+							smallVectorSize = std::stoi(tmplArgExprValue);
+						}
+						catch(const std::invalid_argument& ex)
+						{
+							outs() << "Error: Cannot convert SmallVector size template argument to a number, ignoring it.\n";
+						}
+						catch(const std::out_of_range& ex)
+						{
+							outs() << "Error: Cannot convert SmallVector size template argument to a number, ignoring it.\n";
+						}
+						
+					}
+					else
+						outs() << "Error: Template argument for SmallVector cannot be constantly evaluated, ignoring it.\n";
+				}
+
+				outType.arraySize = smallVectorSize;
+			}
+
 			if(sourceTypeName == "Flags")
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::FlagsEnum;
+				outType.flags |= (int)TypeFlags::FlagsEnum;
 
 				if(numArgs > 1)
 				{
@@ -390,20 +453,20 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 				if (builtinType->getKind() == BuiltinType::Kind::WChar_U ||
 					builtinType->getKind() == BuiltinType::Kind::WChar_S)
 				{
-					outType = "WString";
-					typeFlags |= (int)TypeFlags::WString;
+					outType.typeName = "WString";
+					outType.flags |= (int)TypeFlags::WString;
 				}
 				else
 				{
-					outType = "String";
-					typeFlags |= (int)TypeFlags::String;
+					outType.typeName = "String";
+					outType.flags |= (int)TypeFlags::String;
 				}
 
 				return true;
 			}
 			else if (sourceTypeName == "shared_ptr" && recordDecl->isInStdNamespace())
 			{
-				typeFlags |= (int)TypeFlags::SrcSPtr;
+				outType.flags |= (int)TypeFlags::SrcSPtr;
 
 				realType = specType->getArg(0).getAsType();
 				if (isGameObjectOrResource(realType))
@@ -419,13 +482,13 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 				// Note: Not supporting weak resource handles
 
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::SrcRHandle;
-				typeFlags |= (int)TypeFlags::AsResourceRef;
+				outType.flags |= (int)TypeFlags::SrcRHandle;
+				outType.flags |= (int)TypeFlags::AsResourceRef;
 			}
 			else if (sourceTypeName == "GameObjectHandle")
 			{
 				realType = specType->getArg(0).getAsType();
-				typeFlags |= (int)TypeFlags::SrcGHandle;
+				outType.flags |= (int)TypeFlags::SrcGHandle;
 			}
 		}
 	}
@@ -439,10 +502,10 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 	if (realType->isBuiltinType())
 	{
 		const BuiltinType* builtinType = realType->getAs<BuiltinType>();
-		if (!mapBuiltinTypeToCppType(builtinType->getKind(), outType))
+		if (!mapBuiltinTypeToCppType(builtinType->getKind(), outType.typeName))
 			return false;
 
-		typeFlags |= (int)TypeFlags::Builtin;
+		outType.flags |= (int)TypeFlags::Builtin;
 		return true;
 	}
 	else if (realType->isStructureOrClassType())
@@ -468,8 +531,8 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			// Check for a direct pointer to a managed object
 			if(sourceTypeName == "_MonoObject")
 			{
-				if (isSrcPointer(typeFlags))
-					typeFlags |= (int)TypeFlags::MonoObject;
+				if (isSrcPointer(outType.flags))
+					outType.flags |= (int)TypeFlags::MonoObject;
 				else
 				{
 					outs() << "Error: Found an object of type MonoObject but not passed by pointer. This is not supported. \n";
@@ -478,12 +541,12 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 			}
 			else if(sourceTypeName == "Path")
 			{
-				typeFlags |= (int)TypeFlags::Path;
+				outType.flags |= (int)TypeFlags::Path;
 			}
 		}
 
 		// Its a user-defined type
-		outType = sourceTypeName;
+		outType.typeName = sourceTypeName;
 		return true;
 	}
 	else if (realType->isEnumeralType())
@@ -492,7 +555,7 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 		const EnumDecl* enumDecl = enumType->getDecl();
 
 		std::string sourceTypeName = enumDecl->getName();
-		outType = sourceTypeName;
+		outType.typeName = sourceTypeName;
 		return true;
 	}
 	else
@@ -502,18 +565,11 @@ bool ScriptExportParser::parseType(QualType type, std::string& outType, int& typ
 	}
 }
 
-struct ParsedTypeInfo
-{
-	std::string name;
-	unsigned arraySize;
-	int flags;
-};
-
 struct FunctionTypeInfo
 {
 	// Only relevant for function types
-	std::vector<ParsedTypeInfo> paramTypes;
-	ParsedTypeInfo returnType;
+	std::vector<VarTypeInfo> paramTypes;
+	VarTypeInfo returnType;
 };
 
 bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& typeInfo, bool& isCallback)
@@ -556,12 +612,12 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 					for(unsigned int i = 0; i < numParams; i++)
 					{
 						QualType paramType = funcType->getParamType(i);
-						parseType(paramType, typeInfo.paramTypes[i].name, typeInfo.paramTypes[i].flags, typeInfo.paramTypes[i].arraySize, false);
+						parseType(paramType, typeInfo.paramTypes[i], false);
 					}
 
 					QualType returnType = funcType->getReturnType();
 					if (!returnType->isVoidType())
-						parseType(returnType, typeInfo.returnType.name, typeInfo.returnType.flags, typeInfo.returnType.arraySize, true);
+						parseType(returnType, typeInfo.returnType, true);
 					else
 						typeInfo.returnType.flags = 0;
 				}
@@ -1255,9 +1311,9 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 	// Constructor or cast of some type
 	QualType parentType = ctorExp->getType();
 
-	int dummy1;
-	unsigned dummy2;
-	parseType(parentType, valType, dummy1, dummy2);
+	VarTypeInfo varTypeInfo;
+	parseType(parentType, varTypeInfo);
+	valType = varTypeInfo.typeName;
 
 	for(int i = 0; i < ctorExp->getNumArgs(); i++)
 	{
@@ -1819,9 +1875,9 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 	parseJavadocComments(decl, eventInfo.documentation);
 	clearParamRefComments(eventInfo.documentation);
 
-	if (!eventSignature.returnType.name.empty())
+	if (!eventSignature.returnType.typeName.empty())
 	{
-		eventInfo.returnInfo.type = eventSignature.returnType.name;
+		eventInfo.returnInfo.typeName = eventSignature.returnType.typeName;
 		eventInfo.returnInfo.flags = eventSignature.returnType.flags;
 	}
 
@@ -1830,7 +1886,7 @@ bool ScriptExportParser::parseEvent(ValueDecl* decl, const std::string& classNam
 	{
 		VarInfo paramInfo;
 		paramInfo.flags = entry.flags;
-		paramInfo.type = entry.name;
+		paramInfo.typeName = entry.typeName;
 		paramInfo.name = "p" + std::to_string(idx);
 
 		eventInfo.paramInfos.push_back(paramInfo);
@@ -1977,12 +2033,10 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 		auto& tmplArg = tmplArgs[i];
 		if(tmplArg.getKind() == TemplateArgument::Type)
 		{
-			std::string tmplArgTypeName;
-			int dummy;
-			unsigned dummy2;
-			parseType(tmplArg.getAsType(), tmplArgTypeName, dummy, dummy2, false);
+			VarTypeInfo varTypeInfo;
+			parseType(tmplArg.getAsType(), varTypeInfo, false);
 
-			tmplArgsStream << tmplArgTypeName;
+			tmplArgsStream << varTypeInfo.typeName;
 
 			if(templParams != nullptr)
 				templParams->push_back({ "class" });
@@ -1998,13 +2052,11 @@ std::string ScriptExportParser::parseTemplArguments(const std::string& className
 			else
 				tmplArgsStream << tmplArgExprValue;
 
-			std::string tmplArgTypeName;
-			int dummy;
-			unsigned dummy2;
-			parseType(tmplArg.getAsExpr()->getType(), tmplArgTypeName, dummy, dummy2, false);
+			VarTypeInfo varTypeInfo;
+			parseType(tmplArg.getAsExpr()->getType(), varTypeInfo, false);
 
 			if(templParams != nullptr)
-				templParams->push_back({ tmplArgTypeName });
+				templParams->push_back({ varTypeInfo.typeName });
 		}
 		else
 		{
@@ -2118,7 +2170,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					std::string typeName;
 					unsigned arraySize;
-					if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+					if (!parseType(paramDecl->getType(), paramInfo))
 					{
 						outs() << "Error: Unable to detect type for constructor parameter \"" << paramDecl->getName().str()
 							<< "\". Skipping.\n";
@@ -2343,7 +2395,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 				}
 
 				std::string typeName;
-				if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
+				if (!parseType(fieldDecl->getType(), fieldInfo))
 				{
 					outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
 						<< srcClassName << "\". Skipping field.\n";
@@ -2492,7 +2544,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						VarInfo paramInfo;
 						paramInfo.name = paramDecl->getName();
 
-						if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+						if (!parseType(paramType, paramInfo))
 						{
 							outs() << "Error: Unable to parse parameter \"" << paramInfo.name << "\" type in \"" << srcClassName << "\"'s constructor.\n";
 							invalidParam = true;
@@ -2595,7 +2647,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					if (!returnType->isVoidType())
 					{
 						ReturnInfo returnInfo;
-						if (!parseType(returnType, returnInfo.type, returnInfo.flags, returnInfo.arraySize, true))
+						if (!parseType(returnType, returnInfo, true))
 						{
 							outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 							continue;
@@ -2625,7 +2677,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 							continue;
 						}
 
-						if (!parseType(returnType, methodInfo.returnInfo.type, methodInfo.returnInfo.flags, methodInfo.returnInfo.arraySize, true))
+						if (!parseType(returnType, methodInfo.returnInfo, true))
 						{
 							outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 							continue;
@@ -2655,7 +2707,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						VarInfo paramInfo;
 						paramInfo.name = paramDecl->getName();
 
-						if (!parseType(paramDecl->getType(), paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+						if (!parseType(paramDecl->getType(), paramInfo))
 						{
 							outs() << "Error: Unable to parse property type for method \"" << sourceMethodName << "\". Skipping property.\n";
 							continue;
@@ -2673,7 +2725,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					VarInfo paramInfo;
 					paramInfo.name = paramDecl->getName();
 
-					if (!parseType(paramType, paramInfo.type, paramInfo.flags, paramInfo.arraySize))
+					if (!parseType(paramType, paramInfo))
 					{
 						outs() << "Error: Unable to parse return type for method \"" << sourceMethodName << "\". Skipping method.\n";
 						invalidParam = true;
@@ -2747,7 +2799,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 						continue;
 
 					std::string typeName;
-					if (!parseType(fieldDecl->getType(), fieldInfo.type, fieldInfo.flags, fieldInfo.arraySize))
+					if (!parseType(fieldDecl->getType(), fieldInfo))
 					{
 						outs() << "Error: Unable to detect type for field \"" << fieldDecl->getName().str() << "\" in \""
 							<< srcClassName << "\". Skipping field.\n";
@@ -2775,7 +2827,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 
 					getterInfo.returnInfo.flags = fieldInfo.flags;
 					getterInfo.returnInfo.arraySize = fieldInfo.arraySize;
-					getterInfo.returnInfo.type = fieldInfo.type;
+					getterInfo.returnInfo.typeName = fieldInfo.typeName;
 					parseParamOrFieldAttribute(fieldDecl, true, getterInfo.returnInfo.flags);
 
 					if ((parsedFieldInfo.exportFlags & (int)ExportFlags::InteropOnly) != 0)
@@ -2784,7 +2836,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 					VarInfo paramInfo;
 					paramInfo.flags = fieldInfo.flags;
 					paramInfo.arraySize = fieldInfo.arraySize;
-					paramInfo.type = fieldInfo.type;
+					paramInfo.typeName = fieldInfo.typeName;
 					paramInfo.name = "value";
 
 					parseParamOrFieldAttribute(fieldDecl, true, paramInfo.flags);
