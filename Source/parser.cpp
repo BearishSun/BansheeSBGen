@@ -543,6 +543,10 @@ bool ScriptExportParser::parseType(QualType type, VarTypeInfo& outType, bool ret
 			{
 				outType.flags |= (int)TypeFlags::Path;
 			}
+			else if (sourceTypeName == "StringID")
+			{
+				outType.flags |= (int)TypeFlags::String;
+			}
 		}
 
 		// Its a user-defined type

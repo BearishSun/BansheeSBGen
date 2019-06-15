@@ -2931,7 +2931,18 @@ std::string generateFieldConvertBlock(const std::string& name, const VarTypeInfo
 				break;
 			}
 			case ParsedType::Struct:
-				preActions << "\t\t\t\t" << argName << "[i] = " << arrayName << ".get<" << varTypeInfo.typeName << ">(i);" << std::endl;
+				preActions << "\t\t\t\t" << argName << "[i] = ";
+
+				if (isComplexStruct(varTypeInfo.flags))
+				{
+					preActions << entryType << "::fromInterop(";
+					preActions << arrayName << ".get<" << getStructInteropType(varTypeInfo.typeName) << ">(i)";
+					preActions << ")";
+				}
+				else
+					preActions << arrayName << ".get<" << varTypeInfo.typeName << ">(i)";
+
+				preActions << ";\n";
 				break;
 			default: // Some object type
 			{
@@ -3004,7 +3015,17 @@ std::string generateFieldConvertBlock(const std::string& name, const VarTypeInfo
 				break;
 			}
 			case ParsedType::Struct:
-				preActions << "\t\t\t" << arrayName << ".set(i, " << "value." << name << "[i]);" << std::endl;
+				preActions << "\t\t\t" << arrayName << ".set(i, ";
+
+				if(isComplexStruct(varTypeInfo.flags))
+					preActions << entryType << "::toInterop(";
+
+				preActions << "value." << name << "[i]";
+
+				if (isComplexStruct(varTypeInfo.flags))
+					preActions << ")";
+
+				preActions << ");\n";
 				break;
 			case ParsedType::MonoObject:
 				preActions << "\t\t\t" << arrayName << ".set(i, value." << name << "[i]);" << std::endl;
