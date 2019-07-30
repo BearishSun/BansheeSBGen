@@ -4635,6 +4635,9 @@ std::string generateCSStyleAttributes(const Style& style, const UserTypeInfo& ty
 	if(((style.flags & (int)StyleFlags::LoadOnAssign) != 0))
 		output << "\t\t[LoadOnAssign]\n";
 
+	if(((style.flags & (int)StyleFlags::HDR) != 0))
+		output << "\t\t[HDR]\n";
+
 	return output.str();
 }
 

@@ -135,6 +135,7 @@ enum class StyleFlags
 	AsQuaternion = 1 << 11,
 	Inline = 1 << 12,
 	LoadOnAssign = 1 << 13,
+	HDR = 1 << 14,
 };
 
 enum class ApiFlags : uint8_t
