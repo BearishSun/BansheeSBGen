@@ -39,6 +39,8 @@ extern std::string sFrameworkCsNs;
 extern std::string sEditorCsNs;
 extern std::string sFrameworkExportMacro;
 extern std::string sEditorExportMacro;
+extern std::string sFrameworkCopyrightNotice;
+extern std::string sEditorCopyrightNotice;
 
 enum class ParsedType
 {

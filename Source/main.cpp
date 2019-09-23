@@ -14,6 +14,12 @@ std::string sFrameworkCsNs = "bs";
 std::string sEditorCsNs = "bs.Editor";
 std::string sFrameworkExportMacro = "BS_SCR_BE_EXPORT";
 std::string sEditorExportMacro = "BS_SCR_BED_EXPORT";
+std::string sFrameworkCopyrightNotice = 
+	"//********************************* bs::framework - Copyright 2018-2019 Marko Pintera ************************************//\n" \
+	"//*********** Licensed under the MIT license. See LICENSE.md for full terms. This notice is not to be removed. ***********//\n";
+std::string sEditorCopyrightNotice = 
+	"//********************************** Banshee Engine (www.banshee3d.com) **************************************************//\n" \
+	"//************** Copyright (c) 2016-2019 Marko Pintera (marko.pintera@gmail.com). All rights reserved. *******************//\n";
 
 std::unordered_map<std::string, UserTypeInfo> cppToCsTypeMap;
 std::unordered_map<std::string, FileInfo> outputFileInfos;
@@ -84,6 +90,16 @@ static cl::opt<std::string> CppEditorExportMacroOption(
 	cl::desc("Specify DLL export macro to use for generated C++ editor types.\n"),
 	cl::cat(OptCategory));
 
+static cl::opt<std::string> CppFrameworkCopyrightNoticeOption(
+	"framework-copyright-notice",
+	cl::desc("Specify copyright notice to add to the header of all generated framework files.\n"),
+	cl::cat(OptCategory));
+
+static cl::opt<std::string> CppEditorCopyrightNoticeOption(
+	"editor-copyright-notice",
+	cl::desc("Specify copyright notice to add to the header of all generated editor files.\n"),
+	cl::cat(OptCategory));
+
 class ScriptExportConsumer : public ASTConsumer 
 {
 public:
@@ -136,6 +152,12 @@ int main(int argc, const char** argv)
 	
 	if (!CppEditorExportMacroOption.getValue().empty())
 		sEditorExportMacro = std::string(CppEditorExportMacroOption.getValue().c_str());
+
+	if (!CppFrameworkCopyrightNoticeOption.empty())
+		sFrameworkCopyrightNotice = std::string(CppFrameworkCopyrightNoticeOption.getValue().c_str());
+	
+	if (!CppEditorCopyrightNoticeOption.empty())
+		sEditorCopyrightNotice = std::string(CppEditorCopyrightNoticeOption.getValue().c_str());
 	
 	// Note: I could auto-generate C++ wrappers for these types
 	SmallVector<std::string, 4> frameworkNs = { sFrameworkCppNs };

@@ -1733,16 +1733,10 @@ void postProcessFileInfos()
 std::string generateFileHeader(bool isBanshee)
 {
 	std::stringstream output;
-	if(isBanshee)
-	{
-		output << "//********************************** Banshee Engine (www.banshee3d.com) **************************************************//\n";
-		output << "//************** Copyright (c) 2016-2019 Marko Pintera (marko.pintera@gmail.com). All rights reserved. *******************//\n";
-	}
+	if (isBanshee)
+		output << sEditorCopyrightNotice;
 	else
-	{
-		output << "//********************************* bs::framework - Copyright 2018-2019 Marko Pintera ************************************//\n";
-		output << "//*********** Licensed under the MIT license. See LICENSE.md for full terms. This notice is not to be removed. ***********//\n";
-	}	
+		output << sFrameworkCopyrightNotice;
 
 	return output.str();
 }
