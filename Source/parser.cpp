@@ -11,27 +11,30 @@ ParsedType getObjectType(const CXXRecordDecl* decl)
 		const CXXRecordDecl* curDecl = todo.top();
 		todo.pop();
 
-		auto iter = curDecl->bases_begin();
-		while (iter != curDecl->bases_end())
+		if (curDecl->hasDefinition())
 		{
-			const CXXBaseSpecifier* baseSpec = iter;
-			CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
+			auto iter = curDecl->bases_begin();
+			while (iter != curDecl->bases_end())
+			{
+				const CXXBaseSpecifier* baseSpec = iter;
+				CXXRecordDecl* baseDecl = baseSpec->getType()->getAsCXXRecordDecl();
 
-			std::string className = baseDecl->getName();
+				std::string className = baseDecl->getName();
 
-			if (className == BUILTIN_COMPONENT_TYPE)
-				return ParsedType::Component;
-			else if (className == BUILTIN_RESOURCE_TYPE)
-				return ParsedType::Resource;
-			else if (className == BUILTIN_SCENEOBJECT_TYPE)
-				return ParsedType::SceneObject;
-			else if (className == BUILTIN_GUIELEMENT_TYPE)
-				return ParsedType::GUIElement;
-			else if (className == BUILTIN_REFLECTABLE_TYPE)
-				return ParsedType::ReflectableClass;
+				if (className == BUILTIN_COMPONENT_TYPE)
+					return ParsedType::Component;
+				else if (className == BUILTIN_RESOURCE_TYPE)
+					return ParsedType::Resource;
+				else if (className == BUILTIN_SCENEOBJECT_TYPE)
+					return ParsedType::SceneObject;
+				else if (className == BUILTIN_GUIELEMENT_TYPE)
+					return ParsedType::GUIElement;
+				else if (className == BUILTIN_REFLECTABLE_TYPE)
+					return ParsedType::ReflectableClass;
 
-			todo.push(baseDecl);
-			iter++;
+				todo.push(baseDecl);
+				iter++;
+			}
 		}
 	}
 
@@ -187,8 +190,8 @@ std::string getFullName(NamedDecl* decl)
 	return ss.str();
 }
 
-void registerUserTypeInfo(const std::string& className, ApiFlags api, const std::string declFile, const std::string& exportName, 
-	const std::string& exportFile, ParsedType type)
+void registerUserTypeInfo(const SmallVector<std::string, 4>& classNs, const std::string& className, ApiFlags api, 
+	const std::string declFile, const std::string& exportName, const std::string& exportFile, ParsedType type)
 {
 	std::string destFile = "BsScript" + exportFile + ".generated.h";
 	std::string destFileEditor = destFile;
@@ -197,7 +200,7 @@ void registerUserTypeInfo(const std::string& className, ApiFlags api, const std:
 	if (hasAPIBED(api) && hasAPIBSF(api))
 		destFileEditor = "BsScript" + exportFile + ".editor.generated.h";
 
-	cppToCsTypeMap[className] = UserTypeInfo(exportName, type, declFile, destFile, destFileEditor);
+	cppToCsTypeMap[className] = UserTypeInfo(classNs, exportName, type, declFile, destFile, destFileEditor);
 }
 
 template<class T>
@@ -1981,7 +1984,7 @@ bool ScriptExportParser::VisitEnumDecl(EnumDecl* decl)
 	std::string destFile = "BsScript" + parsedEnumInfo.exportFile + ".generated.h";
 	std::string destFileEditor = "BsScript" + parsedEnumInfo.exportFile + ".editor.generated.h";
 
-	registerUserTypeInfo(sourceClassName, enumEntry.api, declFile, parsedEnumInfo.exportName, 
+	registerUserTypeInfo(enumEntry.ns, sourceClassName, enumEntry.api, declFile, parsedEnumInfo.exportName, 
 		parsedEnumInfo.exportFile, ParsedType::Enum);
 	cppToCsTypeMap[sourceClassName].underlyingType = builtinType->getKind();
 
@@ -2457,7 +2460,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 			structInfo.ctors.push_back(SimpleConstructorInfo());
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		registerUserTypeInfo(srcClassName, structInfo.api, declFile, parsedClassInfo.exportName,
+		registerUserTypeInfo(structInfo.ns, srcClassName, structInfo.api, declFile, parsedClassInfo.exportName,
 			parsedClassInfo.exportFile, ParsedType::Struct);
 
 		addEntryToFile<StructInfo>(fileInfo, structInfo, parsedClassInfo.exportFile,
@@ -2504,7 +2507,7 @@ bool ScriptExportParser::VisitCXXRecordDecl(CXXRecordDecl* decl)
 		ParsedType classType = getObjectType(decl);
 
 		std::string declFile = astContext->getSourceManager().getFilename(decl->getSourceRange().getBegin());
-		registerUserTypeInfo(srcClassName, classInfo.api, declFile, parsedClassInfo.exportName,
+		registerUserTypeInfo(classInfo.ns, srcClassName, classInfo.api, declFile, parsedClassInfo.exportName,
 			parsedClassInfo.exportFile, classType);
 
 		std::stack<const CXXRecordDecl*> todo;

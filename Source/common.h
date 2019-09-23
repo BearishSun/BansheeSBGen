@@ -33,6 +33,13 @@ extern const char* BUILTIN_MODULE_TYPE;
 extern const char* BUILTIN_GUIELEMENT_TYPE;
 extern const char* BUILTIN_REFLECTABLE_TYPE;
 
+extern std::string sFrameworkCppNs;
+extern std::string sEditorCppNs;
+extern std::string sFrameworkCsNs;
+extern std::string sEditorCsNs;
+extern std::string sFrameworkExportMacro;
+extern std::string sEditorExportMacro;
+
 enum class ParsedType
 {
 	Component,
@@ -160,15 +167,16 @@ struct UserTypeInfo
 {
 	UserTypeInfo() {}
 
-	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile)
-		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFile)
+	UserTypeInfo(SmallVector<std::string, 4> ns, const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile)
+		:ns(std::move(ns)), scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFile)
 	{ }
 
-	UserTypeInfo(const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile,
+	UserTypeInfo(SmallVector<std::string, 4> ns, const std::string& scriptName, ParsedType type, const std::string& declFile, const std::string& destFile,
 		const std::string& destFileEditor)
-		:scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFileEditor)
+		:ns(std::move(ns)), scriptName(scriptName), type(type), declFile(declFile), destFile(destFile), destFileEditor(destFileEditor)
 	{ }
 
+	SmallVector<std::string, 4> ns;
 	std::string scriptName;
 	std::string declFile;
 	std::string destFile;
@@ -344,13 +352,14 @@ struct EnumInfo
 
 struct ForwardDeclInfo
 {
+	SmallVector<std::string, 4> ns;
 	std::string name;
 	bool isStruct;
 	SmallVector<TemplateParamInfo, 0> templParams;
 
 	bool operator==(const ForwardDeclInfo& rhs) const
 	{
-		return name == rhs.name;
+		return name == rhs.name && ns == rhs.ns;
 	}
 };
 
@@ -360,7 +369,12 @@ struct std::hash<ForwardDeclInfo>
 	std::size_t operator()(const ForwardDeclInfo& value) const
 	{
 		std::hash<std::string> hasher;
-		return hasher(value.name);
+		size_t hash = hasher(value.name);
+
+		for (auto& entry : value.ns)
+			hash = hash_combine(hash, hasher(entry));
+		
+		return hash;
 	}
 };
 

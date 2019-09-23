@@ -553,7 +553,7 @@ void gatherIncludes(const std::string& typeName, int flags, bool isEditor, Inclu
 	}
 
 	if (typeInfo.type == ParsedType::Struct && isComplexStruct(flags))
-		output.fwdDecls[typeName] = { getStructInteropType(typeName), true };
+		output.fwdDecls[typeName] = { typeInfo.ns, getStructInteropType(typeName), true };
 
 	if (typeInfo.type == ParsedType::Resource)
 	{
@@ -1601,7 +1601,7 @@ void postProcessFileInfos()
 			{
 				UserTypeInfo& typeInfo = cppToCsTypeMap[classInfo.name];
 
-				fileInfo.second.forwardDeclarations.insert({ classInfo.cleanName, isStruct(classInfo.flags), classInfo.templParams });
+				fileInfo.second.forwardDeclarations.insert({ classInfo.ns, classInfo.cleanName, isStruct(classInfo.flags), classInfo.templParams });
 
 				if (typeInfo.type == ParsedType::Resource)
 					fileInfo.second.referencedHeaderIncludes.push_back("Wrappers/BsScriptResource.h");
@@ -1670,8 +1670,8 @@ void postProcessFileInfos()
 				{
 					std::string include = entry.second.typeInfo.declFile;
 
-					if((originFlags & IT_FWD) != 0)
-						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, entry.second.isStruct });
+					if ((originFlags & IT_FWD) != 0)
+						fileInfo.second.forwardDeclarations.insert({ entry.second.typeInfo.ns, entry.second.typeName, entry.second.isStruct });
 
 					if((originFlags & IT_IMPL) != 0)
 						fileInfo.second.referencedSourceIncludes.push_back(include);
@@ -1687,8 +1687,11 @@ void postProcessFileInfos()
 					else
 						include = entry.second.typeInfo.destFile;
 
-					if((interopFlags & IT_FWD) != 0)
-						fileInfo.second.forwardDeclarations.insert({ entry.second.typeName, false });
+					if ((interopFlags & IT_FWD) != 0)
+					{
+						if(entry.second.isEditor)
+							fileInfo.second.forwardDeclarations.insert({ entry.second.typeInfo.ns, entry.second.typeName, false });
+					}
 
 					if(!include.empty())
 					{
@@ -3660,9 +3663,9 @@ std::string generateCppHeaderOutput(const ClassInfo& classInfo, const UserTypeIn
 
 	std::string exportAttr;
 	if (!inEditor)
-		exportAttr = "BS_SCR_BE_EXPORT";
+		exportAttr = sFrameworkExportMacro;
 	else
-		exportAttr = "BS_SCR_BED_EXPORT";
+		exportAttr = sEditorExportMacro;
 
 	std::string wrappedDataType = getCppVarType(classInfo.name, typeInfo.type);
 	std::string interopBaseClassName;
@@ -4460,9 +4463,9 @@ std::string generateCppStructHeader(const StructInfo& structInfo)
 
 	bool inEditor = hasAPIBED (structInfo.api);
 	if (!inEditor)
-		output << "BS_SCR_BE_EXPORT ";
+		output << sFrameworkExportMacro << " ";
 	else
-		output << "BS_SCR_BED_EXPORT ";
+		output << sEditorExportMacro << " ";
 
 	std::string interopClassName = getScriptInteropType(structInfo.name);
 	output << interopClassName << " : public " << "ScriptObject<" << interopClassName << ">";
@@ -5866,7 +5869,7 @@ void generateLookupFile(const std::string& tableName, ParsedType type, bool edit
 
 	output << std::endl;
 
-	output << "namespace bs" << std::endl;
+	output << "namespace " << (editor ? sEditorCppNs : sFrameworkCppNs) << std::endl;
 	output << "{" << std::endl;
 	output << "\tLOOKUP_BEGIN(" << prefix << tableName << ")" << std::endl;
 
@@ -5961,17 +5964,17 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 
 		output << std::endl;
 
-		output << "namespace bs" << std::endl;
-		output << "{" << std::endl;
-
 		// Output forward declarations
 		for (auto& decl : fileInfo.second.forwardDeclarations)
 		{
+			for (auto& nsEntry : decl.ns)
+				output << "namespace " << nsEntry << " { ";
+			
 			if (decl.templParams.size() > 0)
 			{
-				output << "\ttemplate<";
+				output << "template<";
 
-				for(int i = 0; i < (int)decl.templParams.size(); ++i)
+				for (int i = 0; i < (int)decl.templParams.size(); ++i)
 				{
 					if (i != 0)
 						output << ", ";
@@ -5981,18 +5984,20 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 
 				output << "> ";
 			}
-			else
-				output << "\t";
 
-			if(decl.isStruct)
-				output << "struct " << decl.name << ";" << std::endl;
+			if (decl.isStruct)
+				output << "struct " << decl.name << ";";
 			else
-				output << "class " << decl.name << ";" << std::endl;
+				output << "class " << decl.name << ";";
+
+			for (auto& nsEntry : decl.ns)
+				output << " }";
+			
+			output << "\n";
 		}
 
-		if (!fileInfo.second.forwardDeclarations.empty())
-			output << std::endl;
-
+		output << "namespace " << (fileInfo.second.inEditor ? sEditorCppNs : sFrameworkCppNs) << std::endl;
+		output << "{" << std::endl;
 		output << body.str();
 		output << "}" << std::endl;
 
@@ -6044,7 +6049,7 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 
 		output << std::endl;
 
-		output << "namespace bs" << std::endl;
+		output << "namespace " << (fileInfo.second.inEditor ? sEditorCppNs : sFrameworkCppNs) << std::endl;
 		output << "{" << std::endl;
 		output << body.str();
 		output << "}" << std::endl;
@@ -6105,14 +6110,14 @@ void generateAll(StringRef cppEngineOutputFolder, StringRef cppEditorOutputFolde
 		output << "using System.Runtime.InteropServices;" << std::endl;
 
 		if (fileInfo.second.inEditor)
-			output << "using bs;" << std::endl;
+			output << "using " << sFrameworkCsNs << ";" << std::endl;
 
 		output << std::endl;
 
 		if (!fileInfo.second.inEditor)
-			output << "namespace bs\n";
+			output << "namespace " << sFrameworkCsNs << "\n";
 		else
-			output << "namespace bs.Editor\n";
+			output << "namespace " << sEditorCsNs << "\n";
 
 		output << "{" << std::endl;
 		output << body.str();
