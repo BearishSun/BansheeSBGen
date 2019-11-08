@@ -1385,6 +1385,7 @@ void postProcessFileInfos()
 					else
 					{
 						existingInfo.setter = propertyInfo.setter;
+						existingInfo.style = propertyInfo.style; // Always prefer style flags from the setter
 
 						if (!propertyInfo.documentation.brief.empty())
 							existingInfo.documentation = propertyInfo.documentation;
