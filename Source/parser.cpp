@@ -598,7 +598,7 @@ bool ScriptExportParser::parseEventSignature(QualType type, FunctionTypeInfo& ty
 			std::string nsName = getNamespace(recordDecl);
 
 			bool isEvent = false;
-			if (sourceTypeName == "Event" && nsName == "bs")
+			if (sourceTypeName == "Event" && nsName == sFrameworkCppNs)
 				isEvent = true;
 			else if(sourceTypeName == "function" && recordDecl->isInStdNamespace())
 			{
@@ -1284,13 +1284,13 @@ bool ScriptExportParser::evaluateExpression(Expr* expr, std::string& evalValue, 
 		ValueDecl* decl = declRefExpr->getDecl();
 		std::string name = getFullName(decl);
 
-		if(name == "bs::StringUtil::BLANK" || name == "bs::StringUtil::WBLANK")
+		if(name == (sFrameworkCppNs + "::StringUtil::BLANK") || name == (sFrameworkCppNs + "::StringUtil::WBLANK"))
 		{
 			evalValue = "\"\"";
 			valType = "";
 			return true;
 		}
-		else if(name == "bs::UUID::EMPTY")
+		else if(name == (sFrameworkCppNs + "::UUID::EMPTY"))
 		{
 			evalValue = "";
 			valType = "UUID";
